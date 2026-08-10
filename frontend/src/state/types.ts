@@ -331,6 +331,9 @@ export interface SquadState {
   creationTime: number | null;
   playerCount: number | null;
   leaderStateAddr: string | null;
+  /** Squad is closed to new members. Absent on recordings made before the
+   *  agent learned to read it, so treat undefined as "unknown", not "open". */
+  isLocked?: boolean | null;
   creatorName: string | null;
   creatorOnlineId: string | null;
 }

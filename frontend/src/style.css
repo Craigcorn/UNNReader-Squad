@@ -1253,9 +1253,15 @@ html, body, #root {
   flex-shrink: 0;
 }
 .sb-squad-row .sb-sqname {
-  display: inline-flex; align-items: center; min-width: 0;
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   color: var(--ink);
+}
+.sb-squad-row .sb-sqname-t {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sb-squad-row .sb-lock {
+  width: 11px; height: 11px; flex-shrink: 0;
+  color: var(--bad);
 }
 /* The three squad totals sit under OBJ / TW / CS, not in columns of their
    own — that is the whole point of sharing one grid. */

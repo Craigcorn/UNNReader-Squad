@@ -2010,6 +2010,12 @@ def read_squad_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
     if "PlayerStates" in o:
         hdr = read_tarray_header(pm, sqs_addr + o["PlayerStates"])
         out["playerCount"] = hdr.count if hdr else None
+    if "bIsLocked" in o:
+        # A locked squad refuses new members, and the scoreboard says so with a
+        # padlock. Resolved by NAME through the class layout like every other
+        # squad field, so a Squad build that renames or drops it simply stops
+        # reporting the flag instead of reading whatever now sits at the offset.
+        out["isLocked"] = bool(_safe(lambda: pm.read_u8(sqs_addr + o["bIsLocked"])))
     if "LeaderState" in o:
         lp = _safe(lambda: pm.read_u64(sqs_addr + o["LeaderState"]))
         out["leaderStateAddr"] = f"{lp:#x}" if lp else None

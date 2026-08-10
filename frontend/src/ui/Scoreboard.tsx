@@ -215,6 +215,10 @@ function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, sel
             (Object.keys(acc) as (keyof SbStats)[]).forEach((k) => { acc[k] += s[k]; });
             return acc;
           }, { rev:0, heal:0, wnd:0, k:0, d:0, vk:0, obj:0, tw:0, cs:0, sc:0, tk:0 });
+          // Undefined means the recording predates the agent reading it —
+          // that is "unknown", not "open", so nothing is drawn.
+          const locked = squads.find(
+            (q) => q.teamId === team && num(q.id) === sid)?.isLocked === true;
           const sqName = isUnassigned
             ? `Unassigned (${sqPlayers.length})`
             : (sqPlayers.find((p) => p.squadName)?.squadName ?? `Squad ${sid}`);
@@ -226,10 +230,18 @@ function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, sel
                 <span className="sb-sqid" style={{ color: tc, borderColor: tc }}>
                   {isUnassigned ? "—" : sid}
                 </span>
-                {/* The reference shows a padlock on locked squads. The agent
-                    does not read that flag — SquadState carries no lock — so
-                    drawing one here would be decoration, not information. */}
-                <span className="sb-sqname">{sqName}</span>
+                <span className="sb-sqname">
+                  <span className="sb-sqname-t">{sqName}</span>
+                  {locked && (
+                    <svg className="sb-lock" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" strokeWidth="2.4"
+                         role="img" aria-label="locked squad">
+                      <title>Locked — closed to new members</title>
+                      <rect x="5" y="11" width="14" height="9" rx="2" />
+                      <path d="M8 11V8a4 4 0 018 0v3" />
+                    </svg>
+                  )}
+                </span>
                 <span className="sb-sqscore">{fmt(sqAgg.obj)}</span>
                 <span className="sb-sqscore">{fmt(sqAgg.tw)}</span>
                 <span className="sb-sqscore">{fmt(sqAgg.cs)}</span>
