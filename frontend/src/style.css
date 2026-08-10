@@ -1148,48 +1148,93 @@ html, body, #root {
   overflow: hidden;
 }
 .sb-banner {
-  display: flex; align-items: center;
+  display: grid; grid-template-columns: auto 1fr; gap: 10px;
+  align-items: center;
   padding: 10px 14px;
   border-left: 4px solid var(--neutral);
   background: rgba(31,38,48,0.3);
 }
+.sb-banner .sb-flag {
+  width: 96px; height: 38px; object-fit: cover;
+  background: rgba(0,0,0,0.3);
+  border-radius: var(--radius-sm);
+}
+.sb-banner .sb-flag-none { display: block; }
 .sb-banner .sb-faction {
-  font-size: 16px; font-weight: 700; letter-spacing: 0.04em;
+  font-size: 14px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .sb-banner .sb-meta {
-  font-size: 11px; color: var(--ink-mute); margin-top: 2px;
-}
-.sb-banner .sb-meta b { color: var(--ink); margin-right: 2px; }
-.sb-agg-row {
-  display: grid;
-  grid-template-columns: repeat(9, 1fr);
-  gap: 1px;
-  background: var(--surface-2);
-  padding: 6px 0;
-  border-bottom: 1px solid var(--glass-brd);
-  font-size: 10px;
-  text-align: center;
+  font-size: 10px; color: var(--ink-mute); margin-top: 3px;
   font-variant-numeric: tabular-nums;
 }
-.sb-agg-cell {
-  display: flex; flex-direction: column; align-items: center;
-  background: rgba(13,17,23,0.6);
-  padding: 2px 0;
+.sb-banner .sb-meta b { color: var(--ink); font-weight: 700; }
+
+/* ONE grid for the header, the squad rows and the player rows.
+   These used to be three different track lists — the header had no name
+   column at all — so no column in the header sat above the numbers it
+   labelled. Nine uniform 48px columns hold a four-digit squad total with
+   tabular figures. */
+.sb-stat-row,
+.sb-squad-row,
+.sb-row {
+  display: grid;
+  grid-template-columns: 32px 1fr repeat(9, 48px);
+  align-items: center;
+  gap: 0;
 }
-.sb-agg-cell .sb-agg-k { color: var(--ink-mute); font-size: 9px; letter-spacing: 0.06em; }
-.sb-agg-cell .sb-agg-v { color: var(--ink); font-weight: 600; font-size: 12px; }
+.sb-stat-row {
+  /* Reserve the body's scrollbar gutter here, and hold it open down there
+     with scrollbar-gutter, or the 1fr name column absorbs the difference and
+     every number in the header sits ~17px right of the one below it. */
+  padding: 4px 27px 4px 10px;
+  background: rgba(8,10,14,0.6);
+  border-bottom: 1px solid var(--glass-brd);
+  flex-shrink: 0;
+}
+.sb-stat-row .sb-stat-cell:first-child { grid-column-start: 3; }
+.sb-stat-cell {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 4px 2px;
+  background: rgba(24,28,36,0.6);
+  /* Right border only, so neighbours share one line and the header columns
+     stay exactly as wide as the body's. */
+  border-right: 1px solid rgba(90,96,112,0.4);
+  box-sizing: border-box;
+  font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.sb-stat-row > .sb-stat-cell:first-child {
+  border-left: 1px solid rgba(90,96,112,0.4);
+}
+.sb-stat-cell .sb-ico {
+  width: 26px; height: 26px; margin-bottom: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-mute);
+  box-sizing: border-box;
+}
+.sb-stat-cell .sb-ico svg { width: 16px; height: 16px; }
+/* The in-game chip: black fill, coloured border. */
+.sb-stat-cell .sb-ico.badge-medic,
+.sb-stat-cell .sb-ico.badge-objective,
+.sb-stat-cell .sb-ico.badge-combat {
+  background: #000; border-radius: 3px;
+}
+.sb-stat-cell .sb-ico.badge-medic     { border: 2px solid #1f9b3a; color: #4fd06e; }
+.sb-stat-cell .sb-ico.badge-objective { border: 2px solid #c9a410; color: #ecc94b; }
+.sb-stat-cell .sb-ico.badge-combat    { border: 2px solid #7c1c2d; color: #e06a7c; }
+
 .sb-body {
   overflow-y: auto;
+  scrollbar-gutter: stable;
   flex: 1;
   padding: 0;
 }
 .sb-empty { padding: 16px; color: var(--ink-mute); font-style: italic; }
 .sb-squad { border-bottom: 1px solid var(--border); }
 .sb-squad-row {
-  display: grid;
-  grid-template-columns: 22px 28px 1fr 50px 50px 50px;
-  gap: 6px;
-  align-items: center;
   padding: 6px 10px;
   background: rgba(31,38,48,0.25);
   cursor: pointer;
@@ -1201,30 +1246,30 @@ html, body, #root {
 .sb-squad-row .sb-chev { color: var(--ink-mute); text-align: center; }
 .sb-squad-row .sb-sqid {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 20px;
+  width: 22px; height: 20px; margin-right: 8px;
   border: 1.5px solid var(--glass-brd);
   border-radius: var(--radius-sm);
-  font-weight: 700;
-  font-size: 11px;
+  font-weight: 700; font-size: 11px;
+  flex-shrink: 0;
 }
 .sb-squad-row .sb-sqname {
+  display: inline-flex; align-items: center; min-width: 0;
   color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* The three squad totals sit under OBJ / TW / CS, not in columns of their
+   own — that is the whole point of sharing one grid. */
 .sb-squad-row .sb-sqscore {
-  text-align: right;
+  grid-column: span 1;
+  text-align: center;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: 11px; font-weight: 700;
 }
+.sb-squad-row .sb-sqscore:first-of-type { grid-column-start: 9; }
 .sb-players { background: rgba(13,17,23,0.4); }
 
-/* Player row: 36 badge + name(stretch) + 9 stat cells */
 .sb-row {
-  display: grid;
-  grid-template-columns: 36px 1fr repeat(9, 36px);
-  gap: 4px;
-  align-items: center;
   padding: 3px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
@@ -1241,7 +1286,7 @@ html, body, #root {
 .sb-row .sb-badge.is-ftl { color: var(--warn); }
 .sb-row .sb-pname {
   display: inline-flex; align-items: center; gap: 6px;
-  overflow: hidden;
+  min-width: 0; overflow: hidden;
 }
 .sb-row .sb-pname > span {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1252,7 +1297,7 @@ html, body, #root {
   flex-shrink: 0;
 }
 .sb-row .sb-cell {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   font-size: 11px;

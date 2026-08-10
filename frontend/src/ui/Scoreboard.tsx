@@ -8,7 +8,7 @@
 
 import { useMemo } from "react";
 import { teamColor } from "../canvas/draw";
-import { roleIconUrl } from "../canvas/icons";
+import { factionFlagUrl, roleIconUrl } from "../canvas/icons";
 import { useViewerStore } from "../state/viewerStore";
 import type { Player, SquadState, TeamState } from "../state/types";
 import { playerKey } from "./PlayerPanel";
@@ -62,8 +62,50 @@ interface ColumnProps {
   selectPlayer: (key: string) => void;
 }
 
-const COL_TITLES = ["REV", "HEAL", "INCAPS", "K", "D", "VK", "OBJ", "TW", "CS"];
-const COL_KEYS: (keyof SbStats)[] = ["rev","heal","wnd","k","d","vk","obj","tw","cs"];
+// The nine columns, in the game's own order. `badge` reproduces the in-game
+// chip: black fill, coloured border — green for the medical pair, gold for
+// objective, dark red for combat. Drawn rather than shipped as art because the
+// reference's icon files did not survive; the shapes are the game's.
+interface Col {
+  key: keyof SbStats;
+  title: string;
+  badge?: "medic" | "objective" | "combat";
+  path: string;               // 24x24 viewBox
+}
+
+const COLS: Col[] = [
+  { key: "rev",  title: "Revives", badge: "medic",
+    path: "M12 4v16M4 12h16" },
+  { key: "heal", title: "Heal points", badge: "medic",
+    path: "M9 3h6v6h6v6h-6v6H9v-6H3V9h6z" },
+  { key: "wnd",  title: "Incapacitations (enemies you downed)",
+    path: "M12 3a9 9 0 100 18 9 9 0 000-18zm0 4v10M7 12h10" },
+  { key: "k",    title: "Kills",
+    path: "M12 3a9 9 0 100 18 9 9 0 000-18zm0 5a4 4 0 110 8 4 4 0 010-8z" },
+  { key: "d",    title: "Deaths",
+    path: "M12 3a7 7 0 00-4 12.7V19h8v-3.3A7 7 0 0012 3zM9.5 10.5h.01M14.5 10.5h.01" },
+  { key: "vk",   title: "Vehicle kills",
+    path: "M3 15h18l-2-5H5l-2 5zm2 0v3h3v-3m8 0v3h3v-3" },
+  { key: "obj",  title: "Objective score", badge: "objective",
+    path: "M6 3v18M6 4h12l-3 4 3 4H6" },
+  { key: "tw",   title: "Teamwork score",
+    path: "M9 8a3 3 0 100-6 3 3 0 000 6zm9 0a3 3 0 100-6 3 3 0 000 6zM3 20v-2a4 4 0 014-4h4a4 4 0 014 4v2m2-6h1a4 4 0 014 4v2" },
+  { key: "cs",   title: "Combat score", badge: "combat",
+    path: "M4 20l7-7M14 4l6 6-3 3-6-6zM4 14l6 6" },
+];
+const COL_KEYS: (keyof SbStats)[] = COLS.map((c) => c.key);
+
+function StatIcon({ col }: { col: Col }) {
+  return (
+    <span className={"sb-ico" + (col.badge ? " badge-" + col.badge : "")}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+           aria-hidden="true">
+        <path d={col.path} />
+      </svg>
+    </span>
+  );
+}
 
 function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, selectPlayer }: ColumnProps) {
   const tc = teamColor(team);
@@ -111,27 +153,35 @@ function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, sel
     return ids;
   }, [grouped]);
 
-  const factionCode = teamState?.factionId ?? `TEAM ${team}`;
+  // "USA_S_CombinedArms" is a setup id, not a name. The banner shows the code
+  // the game shows — the leading token — with the flag beside it.
+  const rawFaction = teamState?.factionId ?? "";
+  const shortFaction = (rawFaction.split("_")[0] || "").toUpperCase()
+    || `TEAM ${team}`;
+  const flagUrl = factionFlagUrl(rawFaction);
   const tickets = teamState?.tickets ?? null;
   const playerCount = teamState?.playerCount ?? players.length;
 
   return (
     <div className="sb-col">
       <div className="sb-banner" style={{ borderLeftColor: tc }}>
+        {flagUrl
+          ? <img className="sb-flag" src={flagUrl} alt="" />
+          : <span className="sb-flag sb-flag-none" />}
         <div className="sb-banner-text">
-          <div className="sb-faction" style={{ color: tc }}>{factionCode}</div>
+          <div className="sb-faction" style={{ color: tc }}>{shortFaction}</div>
           <div className="sb-meta">
-            <b>Tickets</b> {tickets ?? "—"}
+            Tickets: <b>{tickets ?? "—"}</b>
             {" · "}
-            <b>Players</b> {playerCount}
+            Players: <b>{playerCount}</b>
           </div>
         </div>
       </div>
-      <div className="sb-agg-row">
-        {COL_KEYS.map((k, i) => (
-          <div key={k} className="sb-agg-cell" title={COL_TITLES[i]}>
-            <span className="sb-agg-k">{COL_TITLES[i]}</span>
-            <span className="sb-agg-v">{fmt(aggregate[k])}</span>
+      <div className="sb-stat-row">
+        {COLS.map((c) => (
+          <div key={c.key} className="sb-stat-cell" title={c.title}>
+            <StatIcon col={c} />
+            <span>{fmt(aggregate[c.key])}</span>
           </div>
         ))}
       </div>
@@ -176,6 +226,9 @@ function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, sel
                 <span className="sb-sqid" style={{ color: tc, borderColor: tc }}>
                   {isUnassigned ? "—" : sid}
                 </span>
+                {/* The reference shows a padlock on locked squads. The agent
+                    does not read that flag — SquadState carries no lock — so
+                    drawing one here would be decoration, not information. */}
                 <span className="sb-sqname">{sqName}</span>
                 <span className="sb-sqscore">{fmt(sqAgg.obj)}</span>
                 <span className="sb-sqscore">{fmt(sqAgg.tw)}</span>
