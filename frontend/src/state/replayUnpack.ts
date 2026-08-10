@@ -28,6 +28,24 @@ const KEYED = new Set(["players", "vehicles"]);
 
 type Obj = Record<string, unknown>;
 
+/** Copy an object's own keys without ever letting one of them change what the
+ *  result inherits from. `JSON.parse` makes `__proto__` an ordinary own
+ *  property, but `{...o}` and `o[k] = v` do NOT: they re-point the prototype
+ *  instead of storing a field. Python keeps it as a field, so without this the
+ *  two decoders disagree — and the server verifies with the Python one, which
+ *  makes the difference invisible to every check we have. */
+function put(target: Obj, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value, writable: true, enumerable: true, configurable: true,
+  });
+}
+
+function copy(o: Obj): Obj {
+  const out: Obj = {};
+  for (const [k, v] of Object.entries(o)) put(out, k, v);
+  return out;
+}
+
 export class ReplayUnpacker {
   private prev: Obj = {};
   private ents = new Map<string, Map<number, Obj>>();
@@ -66,7 +84,7 @@ export class ReplayUnpacker {
       return null;
     }
 
-    const frame: Obj = { ...this.prev };
+    const frame: Obj = copy(this.prev);
     const removed = obj["-"];
     if (Array.isArray(removed)) {
       for (const k of removed) delete frame[k as string];
@@ -77,7 +95,7 @@ export class ReplayUnpacker {
           && !Array.isArray(val)) {
         frame[key] = this.entities(key, val as Obj);
       } else {
-        frame[key] = val;
+        put(frame, key, val);
       }
     }
     this.prev = frame;
@@ -94,7 +112,7 @@ export class ReplayUnpacker {
         if (!base) {
           const fresh: Obj = {};
           for (const [k, v] of Object.entries(payload)) {
-            if (k !== "-") fresh[k] = v;
+            if (k !== "-") put(fresh, k, v);
           }
           table.set(idx, fresh);
           continue;
@@ -102,13 +120,13 @@ export class ReplayUnpacker {
         // A shallow copy: every field the frame did not mention keeps pointing
         // at the very same object it did before. That sharing is the whole
         // memory saving.
-        const merged: Obj = { ...base };
+        const merged: Obj = copy(base);
         const gone = payload["-"];
         if (Array.isArray(gone)) {
           for (const k of gone) delete merged[k as string];
         }
         for (const [k, v] of Object.entries(payload)) {
-          if (k !== "-") merged[k] = v;
+          if (k !== "-") put(merged, k, v);
         }
         table.set(idx, merged);
       }

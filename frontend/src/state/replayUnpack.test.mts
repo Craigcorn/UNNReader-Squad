@@ -116,5 +116,23 @@ ok(isPackedHeader({ v: 2 }) && !isPackedHeader({ tick: 1 })
    && !isPackedHeader({ v: 2, tick: 1 }) && !isPackedHeader(null),
    "the header is recognised and nothing else is");
 
+
+// --- a key that is not a field in JavaScript --------------------------------
+{
+  // `JSON.parse` makes `__proto__` an ordinary own property, but `{...o}` and
+  // `o[k] = v` re-point the prototype instead of storing it. Python keeps it as
+  // a field, and the server verifies with the PYTHON decoder — so a difference
+  // here is invisible to every check that exists.
+  const out = feed([
+    { v: 2 },
+    { players: { o: [0], u: [[0, JSON.parse('{"eosId":"a","__proto__":{"x":1}}')]] } },
+  ]);
+  const p = out[0].players[0];
+  ok(Object.prototype.hasOwnProperty.call(p, "__proto__"),
+     "__proto__ is kept as a field, the way Python keeps it");
+  ok(Object.getPrototypeOf(p) === Object.prototype,
+     "and it does not become the object's prototype");
+}
+
 console.log(`replayUnpack: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

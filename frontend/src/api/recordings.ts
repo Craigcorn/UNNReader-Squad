@@ -56,12 +56,16 @@ export async function fetchRecordingFrames(
       return;
     }
     if (packed === null) packed = isPackedHeader(parsed);
-    if (packed) {
-      const frame = unpacker.push(parsed as unknown as Record<string, unknown>);
-      if (frame) out.push(frame as unknown as Snapshot);
-      return;
-    }
-    const snap = recon.push(parsed);
+    // Two layers, and they compose: the unpacker undoes the WIRE format, the
+    // reconstructor undoes two-tier recording. Pushing an unpacked frame
+    // straight out skipped the second one, so a `"t":"pos"` line — present in
+    // most recent recordings — reached the viewer as if it were a snapshot.
+    const frame = packed
+      ? (unpacker.push(parsed as unknown as Record<string, unknown>) as
+          RecordingLine | null)
+      : parsed;
+    if (!frame) return;
+    const snap = recon.push(frame);
     if (snap) out.push(snap);
   };
 
