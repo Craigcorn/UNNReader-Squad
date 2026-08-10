@@ -567,13 +567,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
     log_tailer = None
     try:
         from .squad.logtail import LogTailer, find_squad_log
-        squad_log = getattr(args, "squad_log", None) or find_squad_log()
+        squad_log = (getattr(args, "squad_log", None)
+                     or find_squad_log(pid))
         if squad_log:
             log_tailer = LogTailer(squad_log)
             log_tailer.start()
             print(f"  kill-feed from log -> {squad_log}", file=sys.stderr)
         else:
-            print("  no Squad log found; kill-feed uses memory events",
+            # Loudly, because this one degrades silently: without the log
+            # the kill feed falls back to memory sampling, which catches only
+            # a fraction of kills, and the stats look plausible while being
+            # wrong.
+            print("  WARNING: no Squad log found — the kill feed will be "
+                  "INCOMPLETE. Set `squad_log_glob` in sqreader.config.json "
+                  "to <server root>/SquadGame/Saved/Logs/SquadGame.log",
                   file=sys.stderr)
     except Exception as e:
         print(f"  log tailer disabled: {e}", file=sys.stderr)

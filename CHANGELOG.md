@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.2] - 2026-08-10
+
+### Fixed
+- Servers not installed through LinuxGSM lost most of their kill feed without
+  being told. The agent looked for the game's log in one fixed place - the
+  layout LinuxGSM happens to use - so a server installed anywhere else found
+  nothing, quietly fell back to sampling kills from memory, and produced
+  statistics that looked reasonable and undercounted. It now asks the running
+  game where its own log is, which is correct wherever the server was
+  installed, and says so plainly when it still cannot find one.
+
 ## [1.4.1] - 2026-08-10
 
 ### Fixed

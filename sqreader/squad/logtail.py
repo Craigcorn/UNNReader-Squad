@@ -106,14 +106,48 @@ def resolve_event_names(events: list[dict], players: list[dict]) -> list[dict]:
     return events
 
 
-def find_squad_log() -> Optional[str]:
-    """Best-effort auto-detect of the active server's SquadGame.log: the
-    most-recently-written one under any user's serverfiles that we can read.
-    Lets `serve` pick it up with no config when the reader runs as root."""
+def log_from_pid(pid: int) -> Optional[str]:
+    """The running server's own log, derived from the binary it is executing.
+
+    Squad always lays itself out as
+    ``<root>/SquadGame/Binaries/Linux/SquadGameServer`` and always writes
+    ``<root>/SquadGame/Saved/Logs/SquadGame.log``, so the process points at its
+    own log no matter where somebody installed it. That matters because the
+    fallback glob below only looks under ``/home/*/serverfiles`` — LinuxGSM's
+    layout — and a Docker image, an /opt install or a user outside /home would
+    find nothing and lose the kill feed without ever saying why.
+    """
+    import os
+    try:
+        exe = os.path.realpath(f"/proc/{pid}/exe")
+    except OSError:
+        return None
+    root = exe
+    for _ in range(4):                       # .../SquadGame/Binaries/Linux/exe
+        root = os.path.dirname(root)
+    if not root or root == os.sep:
+        return None
+    cand = os.path.join(root, "SquadGame", "Saved", "Logs", "SquadGame.log")
+    return cand if os.access(cand, os.R_OK) else None
+
+
+def find_squad_log(pid: Optional[int] = None) -> Optional[str]:
+    """Locate the active server's SquadGame.log.
+
+    Order matters: the PROCESS is asked first, because it is the only source
+    that is right regardless of how the server was installed. The glob is kept
+    as a fallback for the case where the exe path is unreadable, and an
+    operator's explicit `squad_log_glob` still wins over both by pointing the
+    glob wherever they say.
+    """
     import glob
     import os
 
     from ..config import get as _config_get
+    if pid is not None:
+        found = log_from_pid(pid)
+        if found:
+            return found
     cands = [c for c in glob.glob(_config_get("squad_log_glob"))
              if os.access(c, os.R_OK)]
     if not cands:
