@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-08-10
+
+### Fixed
+- An agent that could not read the game gave up instead of asking for help. If
+  the Squad server was not running yet, or a game update moved the things the
+  reader looks for, it stopped before it had said anything to anyone - and then
+  did the same on every restart, quietly, forever. That is the one fault that
+  arrives on every server at the same moment, and it disabled the only channel
+  that could have delivered a fix.
+- It now keeps trying, and keeps reporting itself while it does. A server in
+  that state is visible as down, with the reason, and can still receive a
+  corrected set of memory offsets or a new version - so recovering from a Squad
+  update does not involve logging into anyone's machine.
+
 ## [1.4.0] - 2026-08-10
 
 ### Changed

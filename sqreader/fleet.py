@@ -44,6 +44,35 @@ def bump_restarts(state_dir: str | Path) -> int:
     return n
 
 
+def gather_offline(*, reason: str, build_sha: str | None, restarts: int,
+                   uptime_sec: float, channel: str) -> dict[str, Any]:
+    """Telemetry for an agent that could NOT attach to the game.
+
+    This exists because the check-in used to live behind the attach: a reader
+    that could not open the process died before saying so, systemd restarted
+    it, and it died again — silently, forever, with nothing reaching central.
+    That is the exact shape of a Squad patch breaking the fleet, and it took out
+    the one channel that could have fixed it.
+
+    `health="down"` is deliberately a fourth value beside ok/drift/unknown. An
+    agent that cannot see the game is not the same as one whose offsets have
+    drifted, and treating them alike would hide a bricked box among the noisy
+    ones.
+    """
+    return {
+        "schema": SCHEMA_CHECKIN,
+        "agent_version": __version__,
+        "platform": platform.system(),
+        "squad_build": build_sha,
+        "engine": None,
+        "health": "down",
+        "drift": [reason[:200]],
+        "restarts": int(restarts),
+        "uptime_sec": int(uptime_sec),
+        "channel": channel,
+    }
+
+
 def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
            restarts: int, uptime_sec: float, channel: str) -> dict[str, Any]:
     """Assemble the check-in telemetry over the reader's own open handles.

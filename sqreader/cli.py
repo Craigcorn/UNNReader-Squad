@@ -164,6 +164,120 @@ def _open_pipeline(pid: int | None, *, with_metadata: bool):
     return pid, pm, arr, alloc, paths, metadata
 
 
+#: How long a reader that cannot attach waits between attempts. It starts
+#: short (the usual cause is "Squad has not finished booting") and backs off to
+#: the check-in cadence, so a genuinely broken box is quiet but still audible.
+_DEGRADED_MIN_SEC = 15.0
+_DEGRADED_MAX_SEC = 300.0
+
+
+def _open_pipeline_or_wait(args: argparse.Namespace, *, state_dir,
+                           channel: str, started: float):
+    """Attach to the game, and if that is impossible, STAY ALIVE trying.
+
+    The reader used to die here. `_open_pipeline` raises when Squad is not
+    running yet, and it raises when a Squad patch moves what we read — and it
+    ran before anything that talks to central. So the failure that most needs a
+    remote fix was exactly the one that severed the connection carrying it:
+    every agent in the fleet crash-looping in silence, and the only remedy left
+    being "log into your server and paste this", which is not a remedy you can
+    ask of people you invited to just use a website.
+
+    Now a failed attach keeps the box reachable. Each attempt reports itself as
+    `health=down` with the reason, then asks for work:
+
+      * a signed OFFSET PACK is applied in-process, and the next attempt uses
+        it — which is precisely how a Squad patch is meant to be survived;
+      * a signed RELEASE is staged, and the process exits so systemd's
+        ExecStartPre installs it. There is no match to interrupt, so unlike the
+        running case this does not have to wait for anything.
+
+    Returns the open pipeline once it succeeds.
+    """
+    from . import fleet, ingest_client, updater
+    delay = _DEGRADED_MIN_SEC
+    attempt = 0
+    while True:
+        try:
+            return _open_pipeline(args.pid, with_metadata=not args.no_metadata)
+        except SystemExit as e:                 # "no SquadGameServer running"
+            reason = str(e) or "no Squad server process"
+        except Exception as e:                  # unreadable memory, moved offsets
+            reason = f"{type(e).__name__}: {e}"
+        attempt += 1
+        print(f"[degraded] cannot read the game ({reason}); attempt {attempt}, "
+              f"retrying in {delay:.0f}s", file=sys.stderr)
+
+        creds = ingest_client.current_creds()
+        if creds and state_dir is not None:
+            backlog = ingest_client.default_backlog_dir(state_dir)
+            try:
+                ingest_client.checkin(
+                    creds,
+                    fleet.gather_offline(reason=reason, build_sha=None,
+                                         restarts=attempt,
+                                         uptime_sec=time.time() - started,
+                                         channel=channel),
+                    seq=ingest_client._next_seq(backlog))
+            except Exception as e:
+                print(f"[degraded] check-in failed: {e!r}", file=sys.stderr)
+            if config.get("offset_autoheal"):
+                _degraded_try_offsets(
+                    creds, state_dir, channel,
+                    seq=ingest_client._next_seq(backlog))
+            if config.get("update_enabled") and updater.running_binary(
+                    compiled=_is_compiled()) is not None:
+                try:
+                    got = updater.fetch_and_accept(
+                        creds, channel, seq=ingest_client._next_seq(backlog),
+                        min_applied=updater.staged_version(state_dir))
+                    if got:
+                        data = updater.download_verified(
+                            creds, got["artifact"], got["sha256"])
+                        if data is not None:
+                            updater.stage(state_dir, got["version"],
+                                          got["artifact"], data,
+                                          sha256=got["sha256"])
+                            print(f"[degraded] staged v{got['version']} — "
+                                  f"restarting to apply it", file=sys.stderr)
+                            raise SystemExit(0)
+                except SystemExit:
+                    raise
+                except Exception as e:
+                    print(f"[degraded] update check failed: {e!r}",
+                          file=sys.stderr)
+        time.sleep(delay)
+        delay = min(delay * 2, _DEGRADED_MAX_SEC)
+
+
+def _degraded_try_offsets(creds: dict, state_dir, channel: str,
+                          *, seq: int) -> None:
+    """Apply a signed offset pack without a live process.
+
+    The normal self-heal path confirms itself with `doctor`, which needs open
+    handles. Here there are none — so the confirmation is the next attach
+    attempt: apply, and either the reader comes up (the pack worked) or it does
+    not (the next round fetches whatever central offers after that).
+    """
+    try:
+        from . import offset_client as _oc
+        from .squad.snapshot import apply_offset_overrides
+        build = _oc.load_active(state_dir) or {}
+        sha = str(build.get("squad_build") or "")
+        if not sha:
+            return                       # no known build to ask a pack for
+        got = _oc.fetch_and_accept(creds, sha, channel,
+                                   _oc.active_version(state_dir, sha), seq=seq)
+        if not got:
+            return
+        apply_offset_overrides(got["offsets"])
+        _oc.save_active(state_dir, sha, int(got["version"]), got["offsets"])
+        print(f"[degraded] applied offset pack v{got['version']}; "
+              f"retrying the attach", file=sys.stderr)
+    except Exception as e:
+        print(f"[degraded] offset pack failed: {e!r}", file=sys.stderr)
+
+
 def _scanner_suspect(snap: dict) -> bool:
     """Cache-poisoning signature: a populated InProgress match reading almost no
     alive-with-position soldiers. Squad remaps class subobjects mid-match and our
@@ -432,8 +546,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr)
 
-    pid, pm, arr, alloc, paths, meta = _open_pipeline(
-        args.pid, with_metadata=not args.no_metadata)
+    # Where the fleet/update state lives. Resolved BEFORE the attach, because
+    # the attach is now allowed to fail and the box still has to be reachable.
+    _early_state_dir = (Path(args.stats_db).expanduser().parent
+                        if getattr(args, "stats_db", None) else None)
+    _serve_started = time.time()
+    pid, pm, arr, alloc, paths, meta = _open_pipeline_or_wait(
+        args, state_dir=_early_state_dir,
+        channel=str(config.get("update_channel") or "stable"),
+        started=_serve_started)
     caches = SnapshotCaches()
     damage_tracker = DamageTracker()
 
