@@ -62,47 +62,35 @@ interface ColumnProps {
   selectPlayer: (key: string) => void;
 }
 
-// The nine columns, in the game's own order. `badge` reproduces the in-game
-// chip: black fill, coloured border — green for the medical pair, gold for
-// objective, dark red for combat. Drawn rather than shipped as art because the
-// reference's icon files did not survive; the shapes are the game's.
+// The nine columns, in the game's own order, with the game's own art. These
+// are Squad's scoreboard textures (plus a tank silhouette and the attack
+// marker for the two the set does not cover) — the reference project's copy of
+// them did not survive, and a hand-drawn substitute looked exactly like what
+// it was. `badge` reproduces the in-game chip: black fill, coloured border.
 interface Col {
   key: keyof SbStats;
   title: string;
   badge?: "medic" | "objective" | "combat";
-  path: string;               // 24x24 viewBox
+  icon: string;
 }
 
 const COLS: Col[] = [
-  { key: "rev",  title: "Revives", badge: "medic",
-    path: "M12 4v16M4 12h16" },
-  { key: "heal", title: "Heal points", badge: "medic",
-    path: "M9 3h6v6h6v6h-6v6H9v-6H3V9h6z" },
-  { key: "wnd",  title: "Incapacitations (enemies you downed)",
-    path: "M12 3a9 9 0 100 18 9 9 0 000-18zm0 4v10M7 12h10" },
-  { key: "k",    title: "Kills",
-    path: "M12 3a9 9 0 100 18 9 9 0 000-18zm0 5a4 4 0 110 8 4 4 0 010-8z" },
-  { key: "d",    title: "Deaths",
-    path: "M12 3a7 7 0 00-4 12.7V19h8v-3.3A7 7 0 0012 3zM9.5 10.5h.01M14.5 10.5h.01" },
-  { key: "vk",   title: "Vehicle kills",
-    path: "M3 15h18l-2-5H5l-2 5zm2 0v3h3v-3m8 0v3h3v-3" },
-  { key: "obj",  title: "Objective score", badge: "objective",
-    path: "M6 3v18M6 4h12l-3 4 3 4H6" },
-  { key: "tw",   title: "Teamwork score",
-    path: "M9 8a3 3 0 100-6 3 3 0 000 6zm9 0a3 3 0 100-6 3 3 0 000 6zM3 20v-2a4 4 0 014-4h4a4 4 0 014 4v2m2-6h1a4 4 0 014 4v2" },
-  { key: "cs",   title: "Combat score", badge: "combat",
-    path: "M4 20l7-7M14 4l6 6-3 3-6-6zM4 14l6 6" },
+  { key: "rev",  title: "Revives",                              badge: "medic",     icon: "rev" },
+  { key: "heal", title: "Heal points",                          badge: "medic",     icon: "heal" },
+  { key: "wnd",  title: "Incapacitations — enemies you downed",                     icon: "incaps" },
+  { key: "k",    title: "Kills",                                                    icon: "kills" },
+  { key: "d",    title: "Deaths",                                                   icon: "deaths" },
+  { key: "vk",   title: "Vehicle kills",                                            icon: "vehicle" },
+  { key: "obj",  title: "Objective score",                      badge: "objective", icon: "objective" },
+  { key: "tw",   title: "Teamwork score",                                           icon: "teamwork" },
+  { key: "cs",   title: "Combat score",                         badge: "combat",    icon: "combat" },
 ];
 const COL_KEYS: (keyof SbStats)[] = COLS.map((c) => c.key);
 
 function StatIcon({ col }: { col: Col }) {
   return (
     <span className={"sb-ico" + (col.badge ? " badge-" + col.badge : "")}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-           aria-hidden="true">
-        <path d={col.path} />
-      </svg>
+      <img src={`./icons/scoreboard/${col.icon}.png`} alt="" />
     </span>
   );
 }
@@ -227,10 +215,15 @@ function TeamColumn({ team, teamState, players, squads, closed, toggleSquad, sel
               <div className={"sb-squad-row" + (isUnassigned ? " sb-unassigned" : "")}
                    onClick={!isUnassigned ? () => toggleSquad(team, sid) : undefined}>
                 <span className="sb-chev">{isUnassigned ? "!" : (isOpen ? "▾" : "▸")}</span>
-                <span className="sb-sqid" style={{ color: tc, borderColor: tc }}>
-                  {isUnassigned ? "—" : sid}
-                </span>
+                {/* Badge and name share ONE grid cell. As separate children the
+                    badge took the whole 1fr name column and pushed the name
+                    into a 48px stat column, which is why names sat jammed
+                    against the numbers and the totals were three columns left
+                    of the headings they belong under. */}
                 <span className="sb-sqname">
+                  <span className="sb-sqid" style={{ color: tc, borderColor: tc }}>
+                    {isUnassigned ? "—" : sid}
+                  </span>
                   <span className="sb-sqname-t">{sqName}</span>
                   {locked && (
                     <svg className="sb-lock" viewBox="0 0 24 24" fill="none"

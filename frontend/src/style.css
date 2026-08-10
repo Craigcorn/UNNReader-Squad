@@ -1210,21 +1210,29 @@ html, body, #root {
   border-left: 1px solid rgba(90,96,112,0.4);
 }
 .sb-stat-cell .sb-ico {
-  width: 26px; height: 26px; margin-bottom: 2px;
+  width: 26px; height: 26px; margin-bottom: 3px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--ink-mute);
   box-sizing: border-box;
 }
-.sb-stat-cell .sb-ico svg { width: 16px; height: 16px; }
+.sb-stat-cell .sb-ico img {
+  width: 100%; height: 100%; object-fit: contain;
+  /* The textures are near-black with an alpha cut-out, which disappears on a
+     dark panel. Flatten to white and let the chip border carry the colour,
+     the way the game does. */
+  filter: brightness(0) invert(0.88);
+}
 /* The in-game chip: black fill, coloured border. */
 .sb-stat-cell .sb-ico.badge-medic,
 .sb-stat-cell .sb-ico.badge-objective,
 .sb-stat-cell .sb-ico.badge-combat {
   background: #000; border-radius: 3px;
 }
-.sb-stat-cell .sb-ico.badge-medic     { border: 2px solid #1f9b3a; color: #4fd06e; }
-.sb-stat-cell .sb-ico.badge-objective { border: 2px solid #c9a410; color: #ecc94b; }
-.sb-stat-cell .sb-ico.badge-combat    { border: 2px solid #7c1c2d; color: #e06a7c; }
+.sb-stat-cell .sb-ico.badge-medic     { border: 2px solid #1f9b3a; }
+.sb-stat-cell .sb-ico.badge-objective { border: 2px solid #c9a410; }
+.sb-stat-cell .sb-ico.badge-combat    { border: 2px solid #7c1c2d; }
+.sb-stat-cell .sb-ico.badge-medic img,
+.sb-stat-cell .sb-ico.badge-objective img,
+.sb-stat-cell .sb-ico.badge-combat img { padding: 2px; }
 
 .sb-body {
   overflow-y: auto;
@@ -1246,7 +1254,7 @@ html, body, #root {
 .sb-squad-row .sb-chev { color: var(--ink-mute); text-align: center; }
 .sb-squad-row .sb-sqid {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 20px; margin-right: 8px;
+  width: 22px; height: 20px;
   border: 1.5px solid var(--glass-brd);
   border-radius: var(--radius-sm);
   font-weight: 700; font-size: 11px;
@@ -1272,7 +1280,10 @@ html, body, #root {
   font-variant-numeric: tabular-nums;
   font-size: 11px; font-weight: 700;
 }
-.sb-squad-row .sb-sqscore:first-of-type { grid-column-start: 9; }
+/* The three squad totals sit in the LAST three columns, under OBJ / TW / CS.
+   Column 1 is the chevron and column 2 is the badge+name, so the scores start
+   at 9 of the eleven tracks. */
+.sb-squad-row .sb-sqscore:nth-last-of-type(3) { grid-column-start: 9; }
 .sb-players { background: rgba(13,17,23,0.4); }
 
 .sb-row {
