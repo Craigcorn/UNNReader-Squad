@@ -2,6 +2,11 @@
 
 import type { RecordingMeta, Snapshot } from "../state/types";
 import { ReplayReconstructor, type RecordingLine } from "../state/replayReconstruct";
+import {
+  isPackedHeader,
+  REPLAY_FORMAT_VERSION,
+  ReplayUnpacker,
+} from "../state/replayUnpack";
 
 export async function listRecordings(): Promise<RecordingMeta[]> {
   const r = await fetch("./api/recordings", { cache: "no-store" });
@@ -26,13 +31,21 @@ export async function fetchRecordingFrames(
   id: string,
   onProgress?: (framesLoaded: number) => void,
 ): Promise<Snapshot[]> {
-  const r = await fetch(`./api/recording/${encodeURIComponent(id)}`);
+  // Ask for the compact format. A server that does not know it ignores the
+  // parameter and sends the original, so this is safe to request always.
+  const r = await fetch(
+    `./api/recording/${encodeURIComponent(id)}?v=${REPLAY_FORMAT_VERSION}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const out: Snapshot[] = [];
   // Two-tier recordings interleave full frames with compact "t":"pos" position
   // frames; the reconstructor folds them into one increasing Snapshot[]. A
   // full-only .sqrx (no "t") passes straight through unchanged.
   const recon = new ReplayReconstructor();
+  // The compact format announces itself on its first line. Until then this
+  // reads exactly as it always did, so an older server — or a recording whose
+  // compact form has not been built yet — is not a special case anywhere.
+  const unpacker = new ReplayUnpacker();
+  let packed: boolean | null = null;
   const pushLine = (line: string) => {
     if (!line) return;
     let parsed: RecordingLine;
@@ -40,6 +53,12 @@ export async function fetchRecordingFrames(
       parsed = JSON.parse(line) as RecordingLine;
     } catch {
       // Bad line; skip — partial-write tail is rare but possible.
+      return;
+    }
+    if (packed === null) packed = isPackedHeader(parsed);
+    if (packed) {
+      const frame = unpacker.push(parsed as unknown as Record<string, unknown>);
+      if (frame) out.push(frame as unknown as Snapshot);
       return;
     }
     const snap = recon.push(parsed);
