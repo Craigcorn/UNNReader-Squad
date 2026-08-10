@@ -1,0 +1,75 @@
+# Secrets / local config
+.ssh_config.json
+.env
+.env.*
+*.pem
+# Per-machine runtime config (copy sqreader.config.example.json). Machine paths.
+sqreader.config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist-ssr/
+node_modules/
+# NOTE: frontend/dist/ IS committed (prebuilt SPA) so the tool runs without a
+# Node toolchain. Rebuild with `npm run build` after changing the web UI.
+
+# Editor / OS
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build artefacts / caches
+build/
+/dist/
+*.log
+
+# Recording captures (large, runtime-generated)
+captures/
+results/
+
+# Offline capzone fetch cache (raw SquadCalc responses + 404 list).
+# The committed artefact is data/static/capzones.json, not this cache.
+scripts/.capzone_cache/
+recordings/
+
+# Server-side scratch
+/tmp/sqr_*.log
+
+# persistent player-stats sqlite db
+stats/
+
+# Remote-update: signing keys (NEVER commit) + runtime state
+*.pem
+signing_key.pem
+.env.agent
+sqreader.config.json
+push_queue/
+offsets.active.json
+pending_release.json
+staged/
+.sqr_restarts
+
+# Build entitlements (decides what a released binary is bound to)
+packaging/entitlements.env
+dist/
+build/
+# ...but NOT the prebuilt SPA (see the note above). `dist/` above matches
+# frontend/dist/assets/ too, so a rebuilt bundle was silently left out of the
+# commit while dist/index.html - which is tracked - kept pointing at the new
+# filenames. The result installs as a blank page. Re-include it explicitly.
+!frontend/dist/
+!frontend/dist/**

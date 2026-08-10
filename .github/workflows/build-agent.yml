@@ -1,0 +1,71 @@
+# Compile the agent binary in CI.
+#
+# The runner is only a host for Docker here: the actual build still goes
+# through packaging/Dockerfile.build + packaging/build.sh, exactly as it would
+# on a workstation. That is deliberate — a second, CI-only build recipe would
+# drift from the local one, and the drift would surface as an artifact that
+# works in CI and dies on an operator's box.
+#
+# Trigger manually (Actions -> Build agent -> Run workflow) or by pushing a
+# v* tag. Nothing runs on ordinary pushes; compiling on every commit would burn
+# private-repo minutes for no benefit.
+name: Build agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      locked:
+        description: "Bind the binary to the central URL (unset for a staging build)"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write        # publish the binary as a release asset
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write build entitlements
+        env:
+          # Not a credential — it is compiled into the artifact and visible in
+          # it. Kept as a variable so staging builds can point elsewhere
+          # without editing the workflow.
+          CENTRAL_URL: ${{ vars.CENTRAL_URL || 'https://squadreader.com' }}
+        run: |
+          locked=1
+          if [ "${{ github.event.inputs.locked }}" = "false" ]; then locked=0; fi
+          printf 'CENTRAL_URL=%s\nLOCKED=%s\n' "$CENTRAL_URL" "$locked" \
+            > packaging/entitlements.env
+          echo "central=$CENTRAL_URL locked=$locked"
+
+      - name: Build (Docker, old-glibc base)
+        run: ./packaging/build.sh
+
+      # build.sh already runs `version` and `selftest` inside the artifact and
+      # fails the build if either does not pass, so reaching this step means
+      # the binary genuinely executes.
+      - name: Show result
+        run: ls -lh dist/ && cat dist/SHA256SUMS
+
+      # Publish to a rolling prerelease instead of an Actions artifact:
+      # artifact storage is capped at 500 MB on the free tier (and shared
+      # across every repo on the account), which a 33 MB binary keeps tripping.
+      # Release assets live in separate storage, give a stable download URL,
+      # and match how the binary is distributed anyway. The tag is recreated
+      # each run so nothing accumulates. This build is UNSIGNED — signing is a
+      # separate step before central will actually serve it.
+      - name: Publish binary to the ci-build prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ci-build --yes --cleanup-tag 2>/dev/null || true
+          gh release create ci-build dist/sqreader-* dist/SHA256SUMS \
+            --prerelease \
+            --title "CI build (unsigned)" \
+            --notes "Latest agent binary from CI. Unsigned — for testing and for feeding into the signing step, not for direct distribution."
