@@ -16,6 +16,7 @@ fabricated positions — omission, never a guess.
 """
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass
 from typing import Any
@@ -97,12 +98,28 @@ def _soldier_addr(pm: ProcessMemory, ps_addr: int,
 
 
 def _sane_pos(pos: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A position we are willing to write, or None.
+
+    The magnitude test alone does not catch a torn read: `abs(nan) > 5e6` is
+    False by IEEE rules, so a NaN passed this gate untouched and landed in the
+    file as a literal `NaN` — position frames do not go through the
+    `clean_nonfinite` pass that full frames get. The marker reader beside this
+    one has always tested `px != px` for exactly this reason.
+
+    `z` is checked too. It was read from the same three-double struct and never
+    examined at all, so a torn read could put an infinity in it while x and y
+    looked perfectly reasonable.
+    """
     if not pos:
         return None
-    x, y = pos.get("x"), pos.get("y")
-    if (x is None or y is None
-            or abs(x) > _MAX_COORD_CM or abs(y) > _MAX_COORD_CM):
+    x, y, z = pos.get("x"), pos.get("y"), pos.get("z")
+    if x is None or y is None:
         return None
+    for v in (x, y, z):
+        if v is None:                       # z is allowed to be absent
+            continue
+        if not math.isfinite(v) or abs(v) > _MAX_COORD_CM:
+            return None
     return pos
 
 

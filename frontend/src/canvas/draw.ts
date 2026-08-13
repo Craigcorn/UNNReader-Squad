@@ -13,6 +13,7 @@ import { arrowEnd, markerShape } from "./markerGeometry";
 import { drawProjectilesAndImpacts } from "./projectiles";
 import { coord, viewWindow, worldToScreen } from "./worldToScreen";
 import { visibleCaps } from "./capVisibility";
+import { fallbackMap } from "./mapFallback";
 
 export function teamColor(t: number | null | undefined): string {
   if (t === 1) return "#d84a54";
@@ -38,7 +39,12 @@ interface CanvasSize { width: number; height: number; cssWidth: number; cssHeigh
 
 function drawMapTexture(ctx: CanvasRenderingContext2D, snap: Snapshot,
                         view: ViewState, cs: CanvasSize): boolean {
-  const layer = snap.gameState?.layer ?? null;
+  // A recording whose scrim layer was named after its community carries no
+  // `layer` block at all, so there is nothing to draw the map from and the
+  // canvas fell back to a bare grid — 43 of 963 matches in the archive. The
+  // map NAME is always there, so it can stand in.
+  const layer = snap.gameState?.layer
+    ?? fallbackMap(snap.gameState?.mapName) ?? null;
   const tl = layer ? coord(layer.topLeft) : null;
   const br = layer ? coord(layer.bottomRight) : null;
   if (!layer?.texture || !tl || !br) return false;
