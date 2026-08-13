@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.3] - 2026-08-13
+
+### Fixed
+- Direction and Frontline markers were drawn as a spotted infantryman. They are
+  not points: a squad leader drags them across the map, and the game records how
+  far and in which direction - two numbers this reader had recorded as unused
+  padding. With no geometry to draw, the viewer fell back to the generic
+  infantry glyph, so an order spanning half the map appeared as one soldier
+  standing where the drag began, indistinguishable from a spotted enemy. Both
+  are now read and drawn as the strokes they are, and a point of interest is a
+  diamond rather than a third thing wearing the same soldier icon.
+- Recordings made before this carry no such geometry and never will. Those
+  markers are drawn as a plain point rather than an arrow aimed at a guess.
+- A locked squad is now recorded and shown as locked on the scoreboard.
+
 ## [1.4.2] - 2026-08-10
 
 ### Fixed
