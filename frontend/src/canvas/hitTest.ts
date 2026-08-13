@@ -3,6 +3,7 @@
 import type { CaptureZone, Deployable, Marker, Player, Projectile,
   RallyPoint, Snapshot, Vec3, Vehicle, VehicleSpawner } from "../state/types";
 import { visibleCaps } from "./capVisibility";
+import { isAdminCam } from "./draw";
 
 export type HitType =
   | "player" | "vehicle" | "deployable" | "spawner"
@@ -38,6 +39,9 @@ export function hitTest(snap: Snapshot | null, wx: number, wy: number,
   for (const p of snap.players ?? []) {
     // Skip mounted soldiers — the vehicle they're inside should win the hover.
     if (!p.soldier || p.soldier.stale || p.soldier.attached) continue;
+    // The admin free-cam is not drawn, so it must not be clickable either —
+    // an invisible hover target is worse than a visible one.
+    if (isAdminCam(p.soldier)) continue;
     consider({ type: "player", e: p }, p.soldier.position, r2);
   }
   for (const pr of snap.projectiles ?? []) consider({ type: "projectile", e: pr }, pr.position, r2);

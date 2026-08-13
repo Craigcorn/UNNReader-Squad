@@ -1463,10 +1463,10 @@ function drawDownedMarker(ctx: CanvasRenderingContext2D,
 }
 
 // Admin in the developer free-cam (pawn class BP_DeveloperAdminCam_C).
-// Rendered as a normal pin but in a distinct violet so it just reads as
-// "not a normal player" — no loud effects.
-const ADMIN_CAM_COLOR = "#a877f0";
-function isAdminCam(s: { classShort: string | null }): boolean {
+// Kept OFF the map: the camera is not a player, nobody in the match can see
+// it, and it wanders wherever whoever is spectating happens to look. It used
+// to be drawn as a violet pin, which made a moving contact out of an admin.
+export function isAdminCam(s: { classShort: string | null }): boolean {
   return (s.classShort ?? "").includes("DeveloperAdminCam");
 }
 
@@ -1513,9 +1513,12 @@ function drawPlayers(ctx: CanvasRenderingContext2D, snap: Snapshot,
   for (const p of players) {
     const s = p.soldier;
     if (!s?.position || s.stale) continue;
-    const admin = isAdminCam(s);
+    // An admin in the free-cam is not in the match. Drawing the camera put a
+    // pin on the map that no player could see in-game and that moves wherever
+    // whoever is spectating happens to look.
+    if (isAdminCam(s)) continue;
     // Mounted soldiers are represented by the vehicle icon they're in.
-    if (s.attached && !admin) continue;
+    if (s.attached) continue;
     const [x, y] = worldToScreen(view, cs, s.position.x, s.position.y);
     // One uniform badge size for every soldier — stance is no longer
     // expressed via marker shrink. Keeps the map visually consistent and
@@ -1524,7 +1527,7 @@ function drawPlayers(ctx: CanvasRenderingContext2D, snap: Snapshot,
     const url = roleIconUrl(p);
     const roleImg = url ? icon(url) : null;
     const ready = !!(roleImg && roleImg.complete && roleImg.naturalWidth > 0);
-    const col = admin ? ADMIN_CAM_COLOR : teamColor(p.teamId);
+    const col = teamColor(p.teamId);
     const downed = isDowned(s);
     const squad = inFollowSquad(p);
     // Follow spotlight: while a squad is followed, non-members fade back so the
@@ -1554,8 +1557,8 @@ function drawPlayers(ctx: CanvasRenderingContext2D, snap: Snapshot,
   for (const p of players) {
     const s = p.soldier;
     if (!s?.position || s.stale) continue;
-    if (s.attached && !isAdminCam(s)) continue;
-    if (p.squadId == null) continue;             // unsquadded / admin cam
+    if (s.attached || isAdminCam(s)) continue;
+    if (p.squadId == null) continue;             // unsquadded
     const sl = isSquadLeader(p);
     if (!((sl && showSLNumbers) || showAllNumbers)) continue;
     const [x, y] = worldToScreen(view, cs, s.position.x, s.position.y);
