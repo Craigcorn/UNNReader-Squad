@@ -84,6 +84,20 @@ export class ReplayUnpacker {
       return null;
     }
 
+    // A two-tier recording interleaves 4 Hz position-only lines between full
+    // snapshots, and the encoder wraps them as `{"p": frame}` so they are not
+    // diffed against anything. `prev` is deliberately NOT updated: the next
+    // full frame must still diff against the last FULL frame, which is what
+    // the encoder assumed when it built it.
+    //
+    // Without this branch the line fell through to the diff path below and a
+    // position update came back as a copy of the previous full frame carrying
+    // a stray `p` key — so every 4 Hz update was discarded and the junk key
+    // then rode along on every frame after it.
+    if ("p" in obj && Object.keys(obj).length === 1) {
+      return obj["p"] as Obj;
+    }
+
     const frame: Obj = copy(this.prev);
     const removed = obj["-"];
     if (Array.isArray(removed)) {

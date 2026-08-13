@@ -117,6 +117,30 @@ ok(isPackedHeader({ v: 2 }) && !isPackedHeader({ tick: 1 })
    "the header is recognised and nothing else is");
 
 
+// --- the other kind of line -------------------------------------------------
+{
+  // Two-tier recordings interleave 4 Hz position-only lines between full
+  // snapshots, and the encoder wraps them as `{"p": frame}` precisely so they
+  // are NOT diffed. This decoder had no branch for them at all: the line fell
+  // through to the diff path, so a position update came back as a COPY OF THE
+  // PREVIOUS FULL FRAME with a stray `p` key — every 4 Hz update silently
+  // discarded, and a quarter of the download spent on frames that were then
+  // thrown away. The Python decoder always handled this; nothing compared the
+  // two, which is exactly why it survived.
+  const out = feed([
+    { v: 2 },
+    { tick: 1, t: "full", players: { o: [0], u: [[0, { eosId: "a", playerId: 1 }]] } },
+    { p: { t: "pos", tick: 2, players: [{ id: "a", x: 5, y: 6 }] } },
+    { tick: 3 },
+  ]);
+  eqJson(out[1], { t: "pos", tick: 2, players: [{ id: "a", x: 5, y: 6 }] },
+         "a position line comes back as itself, not as the last full frame");
+  ok(!("p" in out[2]), "and it does not leak into the frames after it");
+  eqJson(out[2].tick, 3, "the next full frame still diffs against the last FULL one");
+  eqJson(out[2].players, [{ eosId: "a", playerId: 1 }],
+         "a position line is not a diff baseline");
+}
+
 // --- a key that is not a field in JavaScript --------------------------------
 {
   // `JSON.parse` makes `__proto__` an ordinary own property, but `{...o}` and
