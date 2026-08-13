@@ -1040,45 +1040,92 @@ function drawMarkerDiamond(ctx: CanvasRenderingContext2D,
 }
 
 
-/** A shaft with a filled head — the SL's pencil stroke, not a highlighter. */
-function drawArrowShaft(ctx: CanvasRenderingContext2D,
-                        ax: number, ay: number, bx: number, by: number,
-                        col: string, dpr: number) {
+/** The squad label a marker is tagged with: the number alone for an SL
+ *  marker, `<n>B` for Bravo and `<n>C` for Charlie. */
+function squadLabel(m: Marker): string | null {
+  const sq = m.squad;
+  if (sq == null || sq <= 0) return null;
+  return m.fireTeamId === 1 ? `${sq}B`
+       : m.fireTeamId === 2 ? `${sq}C`
+       : `${sq}`;
+}
+
+
+/** A Direction call: one tapered arrow, with the squad that placed it named
+ *  in a disc at the point the drag began.
+ *
+ *  Drawn as a single filled polygon rather than a hairline with a triangle
+ *  stuck on the end — at map scale the two-piece version read as a stray
+ *  scratch. The number rides in the disc instead of sitting under the start
+ *  point, where it used to float unattached to anything and collide with
+ *  whatever else was nearby. */
+function drawDirectionArrow(ctx: CanvasRenderingContext2D,
+                            ax: number, ay: number, bx: number, by: number,
+                            col: string, dpr: number, label: string | null) {
   const dx = bx - ax, dy = by - ay;
   const len = Math.hypot(dx, dy);
-  if (len < 4) return;
-  const head = Math.max(6 * dpr, Math.min(14 * dpr, len * 0.12));
-  const halfW = head * 0.35;
+  const disc = 9.5 * dpr;
+  if (len < disc + 6 * dpr) return;              // too short to read as an arrow
   const a = Math.atan2(dy, dx);
-  // The shaft stops short so the filled head sits at the tip instead of
-  // being overdrawn by the line.
-  const sx = bx - Math.cos(a) * head * 0.6;
-  const sy = by - Math.sin(a) * head * 0.6;
+  const cos = Math.cos(a), sin = Math.sin(a);
+  // Start past the disc so the circle reads as a solid cap, not a blob the
+  // shaft is buried in.
+  const x0 = ax + cos * disc, y0 = ay + sin * disc;
+  const shaft = len - disc;
+  const head = Math.max(9 * dpr, Math.min(18 * dpr, shaft * 0.22));
+  const wA = 3.0 * dpr;                          // half-width at the base
+  const wB = 1.9 * dpr;                          // half-width where the head starts
+  const hw = 7.2 * dpr;                          // half-width of the head
 
+  // Local frame: +X along the arrow, so the outline is written once and read
+  // in the order it is drawn.
   ctx.save();
-  ctx.lineCap = "round";
+  ctx.translate(x0, y0);
+  ctx.rotate(a);
   ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(sx, sy);
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";      // halo for light terrain
-  ctx.lineWidth = 3 * dpr;
-  ctx.stroke();
-  ctx.strokeStyle = col;
-  ctx.lineWidth = 1.5 * dpr;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(bx, by);
-  ctx.lineTo(bx - Math.cos(a) * head + Math.sin(a) * halfW,
-             by - Math.sin(a) * head - Math.cos(a) * halfW);
-  ctx.lineTo(bx - Math.cos(a) * head - Math.sin(a) * halfW,
-             by - Math.sin(a) * head + Math.cos(a) * halfW);
+  ctx.moveTo(0, -wA);
+  ctx.lineTo(shaft - head, -wB);
+  ctx.lineTo(shaft - head, -hw);
+  ctx.lineTo(shaft, 0);
+  ctx.lineTo(shaft - head, hw);
+  ctx.lineTo(shaft - head, wB);
+  ctx.lineTo(0, wA);
   ctx.closePath();
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 4 * dpr;
+  ctx.shadowOffsetY = dpr;
   ctx.fillStyle = col;
   ctx.fill();
-  ctx.lineWidth = Math.max(1, 0.8 * dpr);
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 1.1 * dpr;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,0.7)";
   ctx.stroke();
+  ctx.restore();
+
+  // The disc, upright — it carries text, so it must not turn with the arrow.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(ax, ay, disc, 0, Math.PI * 2);
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowBlur = 4 * dpr;
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = 1.6 * dpr;
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.stroke();
+  if (label) {
+    const fontPx = Math.max(10, Math.round(11 * dpr));
+    ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = Math.max(2, fontPx * 0.22);
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(label, ax, ay);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(label, ax, ay);
+  }
   ctx.restore();
 }
 
@@ -1119,10 +1166,8 @@ function drawFrontlineSeries(ctx: CanvasRenderingContext2D,
 function drawMarkerLabelFor(ctx: CanvasRenderingContext2D, m: Marker,
                             x: number, y: number, size: number,
                             cs: CanvasSize) {
-  const sq = m.squad;
-  if (sq == null || sq <= 0) return;
-  const ft = m.fireTeamId;
-  const label = ft === 1 ? `${sq}B` : ft === 2 ? `${sq}C` : `${sq}`;
+  const label = squadLabel(m);
+  if (label == null) return;
   const fontPx = Math.max(10, Math.round(11 * cs.dpr));
   ctx.save();
   ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
@@ -1164,10 +1209,12 @@ function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
           : col;
         if (shape === "frontline") {
           drawFrontlineSeries(ctx, x, y, bx, by, shaftCol, cs.dpr);
+          drawMarkerLabelFor(ctx, m, x, y, size, cs);
         } else {
-          drawArrowShaft(ctx, x, y, bx, by, shaftCol, cs.dpr);
+          // The squad rides in the disc at the start, so no label underneath.
+          drawDirectionArrow(ctx, x, y, bx, by, shaftCol, cs.dpr,
+                             squadLabel(m));
         }
-        drawMarkerLabelFor(ctx, m, x, y, size, cs);
         continue;
       }
     }
