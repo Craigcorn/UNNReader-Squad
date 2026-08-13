@@ -15,7 +15,8 @@
     "test:tickets": "esbuild src/state/ticketTimeline.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/tickets-test.mjs --log-level=warning && node node_modules/.cache/tickets-test.mjs",
     "test:recon": "esbuild src/state/replayReconstruct.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/recon-test.mjs --log-level=warning && node node_modules/.cache/recon-test.mjs",
     "test:unpack": "esbuild src/state/replayUnpack.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/unpack-test.mjs --log-level=warning && node node_modules/.cache/unpack-test.mjs",
-    "test:markers": "esbuild src/canvas/markerGeometry.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/markers-test.mjs --log-level=warning && node node_modules/.cache/markers-test.mjs"
+    "test:markers": "esbuild src/canvas/markerGeometry.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/markers-test.mjs --log-level=warning && node node_modules/.cache/markers-test.mjs",
+    "test:crosslang": "esbuild src/state/crosslang.test.mts --bundle --platform=node --format=esm --outfile=node_modules/.cache/crosslang-test.mjs --log-level=warning && node node_modules/.cache/crosslang-test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
