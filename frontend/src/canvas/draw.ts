@@ -1072,10 +1072,13 @@ function drawDirectionArrow(ctx: CanvasRenderingContext2D,
   // shaft is buried in.
   const x0 = ax + cos * disc, y0 = ay + sin * disc;
   const shaft = len - disc;
-  const head = Math.max(9 * dpr, Math.min(18 * dpr, shaft * 0.22));
-  const wA = 3.0 * dpr;                          // half-width at the base
-  const wB = 1.9 * dpr;                          // half-width where the head starts
-  const hw = 7.2 * dpr;                          // half-width of the head
+  const head = Math.max(7 * dpr, Math.min(13 * dpr, shaft * 0.17));
+  // Deliberately fine: at map scale a Direction call is one squad's intent,
+  // not a feature of the terrain, and a heavy arrow buried everything it
+  // crossed. Thin enough to read as a pencil stroke over the map.
+  const wA = 1.8 * dpr;                          // half-width at the base
+  const wB = 1.0 * dpr;                          // half-width where the head starts
+  const hw = 4.8 * dpr;                          // half-width of the head
 
   // Local frame: +X along the arrow, so the outline is written once and read
   // in the order it is drawn.
@@ -1097,7 +1100,7 @@ function drawDirectionArrow(ctx: CanvasRenderingContext2D,
   ctx.fillStyle = col;
   ctx.fill();
   ctx.shadowColor = "transparent";
-  ctx.lineWidth = 1.1 * dpr;
+  ctx.lineWidth = 0.9 * dpr;
   ctx.lineJoin = "round";
   ctx.strokeStyle = "rgba(0,0,0,0.7)";
   ctx.stroke();
