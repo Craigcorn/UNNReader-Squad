@@ -266,6 +266,10 @@ export interface Marker {
   fireTeamId: number | null;
   ownerPlayerStateAddr: string | null;
   position: Vec3 | null;
+  // World-space heading in degrees, for markers that HAVE one — a Direction
+  // marker is an arrow and this is where it points. Absent on recordings made
+  // before the agent read it; the viewer must not invent a bearing for those.
+  yaw?: number | null;
   // v10 squad-state data markers carry an iconClass (e.g.
   // BP_WaypointMapMarker_Move_C / _Attack_C / _Defend_C / _Build_C /
   // _Observe_C / their _FT_C variants). Used to discriminate the

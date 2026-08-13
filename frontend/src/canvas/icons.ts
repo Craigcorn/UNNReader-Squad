@@ -438,6 +438,19 @@ export function roleIconUrl(p: { roleId: string | null }): string | null {
   return null;
 }
 
+/** Markers the game draws as a plain shape rather than as art.
+ *
+ *  A POI is a diamond in Squad. We have no diamond in the icon set, and
+ *  substituting the nearest picture is how a point of interest came to look
+ *  like a spotted infantryman — so it is drawn instead. */
+export function markerShape(m: Marker): "diamond" | "arrow" | null {
+  const t = (m.type ?? "").toLowerCase();
+  if (t.includes("poi")) return "diamond";
+  if (t.includes("director") || t.includes("frontline")) return "arrow";
+  return null;
+}
+
+
 export function markerIconUrl(m: Marker): string | null {
   // Squad v10 marker `type` comes from the SQMapMarkerDataAsset
   // instance name attached to each marker entry — e.g.
@@ -509,15 +522,16 @@ export function markerIconUrl(m: Marker): string | null {
   }
 
   // ---- POI markers -------------------------------------------------
-  if (t.includes("poi"))
-    return "./icons/markers/map_genericinfantry.png";
+  // Drawn as a diamond, not an icon — see markerShape(). It used to borrow the
+  // generic infantry glyph, so a point of interest looked exactly like a
+  // spotted soldier.
 
-  // ---- Director / arrow markers (rendered as point fallback) ------
-  // These should ideally render as arrows (we'd need arrowLength +
-  // arrowHeading on the marker payload). For now show a generic
-  // infantry glyph at the start point so they don't disappear.
-  if (t.includes("director") || t.includes("frontline"))
-    return "./icons/markers/map_genericinfantry.png";
+  // ---- Director / frontline ----------------------------------------
+  // Arrows, drawn from the marker's own heading — see markerShape(). They used
+  // to show the generic infantry glyph "so they don't disappear", which made a
+  // Direction call look identical to a spotted soldier. SQMapMarker has no
+  // heading property (all 91 checked), so the bearing comes from the actor's
+  // own transform, the same one the position comes from.
 
   return null;
 }

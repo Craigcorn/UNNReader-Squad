@@ -1878,6 +1878,11 @@ def read_marker(pm: ProcessMemory, alloc: FNameEntryAllocator,
             pm, root + paths.scene_component_to_world_translation_off)
         if v is not None:
             out["position"] = {"x": v.x, "y": v.y, "z": v.z}
+        # A Direction marker is an ARROW, and its heading is the actor's own
+        # rotation — the same transform the position comes from, so there is
+        # no new offset to find. Without it the viewer had nothing to point
+        # with and drew every director as a spotted infantryman.
+        out["yaw"] = _world_yaw(pm, root, paths)
     return out
 
 

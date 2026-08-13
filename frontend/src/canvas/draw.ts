@@ -5,7 +5,8 @@
 import type { CapGeometry, Deployable, Player, Snapshot, Vehicle, ViewState } from "../state/types";
 import {
   drawIcon, drawIconCentered, deployableIconUrl, icon, iconBbox, mapTexture,
-  markerIconUrl, roleIconUrl, tintedIcon, colorizedIcon, vehicleIconUrl,
+  markerIconUrl, markerShape, roleIconUrl, tintedIcon, colorizedIcon,
+  vehicleIconUrl,
   vehicleTurretIconUrl, factionFlagUrl,
 } from "./icons";
 import { drawProjectilesAndImpacts } from "./projectiles";
@@ -1014,18 +1015,81 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
   }
 }
 
+/** A marker the game draws as geometry rather than as art.
+ *
+ *  `yaw` is the world heading in degrees for an arrow. When it is null the
+ *  bearing was never recorded — every replay made before the agent read it —
+ *  and the arrow is drawn hollow and pointing north rather than filled at a
+ *  direction we would be making up. A confident arrow pointing the wrong way
+ *  is worse than a visibly unsure one. */
+function drawMarkerShape(ctx: CanvasRenderingContext2D,
+                         shape: "diamond" | "arrow",
+                         x: number, y: number, size: number,
+                         col: string, yaw: number | null | undefined) {
+  ctx.save();
+  ctx.translate(x, y);
+  const known = yaw != null && Number.isFinite(yaw);
+  if (shape === "arrow") {
+    // UE yaw 0° is +X (east), and worldToScreen keeps a positive yaw a
+    // positive screen rotation — so the path is authored pointing +X and
+    // rotated straight by the heading. Unknown bearing points up instead.
+    ctx.rotate(known ? (yaw! * Math.PI) / 180 : -Math.PI / 2);
+  }
+  const r = size * (shape === "arrow" ? 0.62 : 0.42);
+  ctx.beginPath();
+  if (shape === "arrow") {
+    ctx.moveTo(r, 0);
+    ctx.lineTo(-r * 0.62, -r * 0.68);
+    ctx.lineTo(-r * 0.26, 0);
+    ctx.lineTo(-r * 0.62, r * 0.68);
+  } else {
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r, 0);
+  }
+  ctx.closePath();
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = size * 0.22;
+  if (shape === "arrow" && !known) {
+    // Hollow: the marker is real, the direction is not known.
+    ctx.lineWidth = Math.max(1.4, size * 0.09);
+    ctx.strokeStyle = col;
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = col;
+  ctx.fill();
+  // Dark rim so the shape holds over bright map tiles.
+  ctx.shadowColor = "transparent";
+  ctx.lineWidth = Math.max(1.2, size * 0.07);
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.stroke();
+  ctx.restore();
+}
+
+
 function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
                      view: ViewState, cs: CanvasSize) {
   for (const m of snap.markers ?? []) {
     if (!m.position) continue;
     const [x, y] = worldToScreen(view, cs, m.position.x, m.position.y);
-    const url = markerIconUrl(m);
     const size = 22 * cs.dpr;
     const col = teamColor(m.team);
+    const url = markerIconUrl(m);
+    // Two markers are SHAPES, not pictures: a POI is a plain diamond and a
+    // Direction call is an arrow. Neither exists in the icon set, so both used
+    // to borrow the generic infantry glyph — which is why a point of interest
+    // and a direction call both looked like a spotted soldier.
+    const shape = markerShape(m);
     // Colourise (NOT flat-fill) — preserves the icon's inner light/
     // dark structure while shifting its hue to the team colour.
-    const img = url ? icon(url) : null;
-    if (img && img.complete && img.naturalWidth > 0) {
+    const img = !shape && url ? icon(url) : null;
+    if (shape) {
+      drawMarkerShape(ctx, shape, x, y, size, col,
+                      shape === "arrow" ? m.yaw : null);
+    } else if (img && img.complete && img.naturalWidth > 0) {
       const bbox = iconBbox(img);
       const colored = colorizedIcon(img, col);
       if (colored && bbox) {
