@@ -5,10 +5,11 @@
 import type { CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState } from "../state/types";
 import {
   drawIcon, drawIconCentered, deployableIconUrl, icon, iconBbox, mapTexture,
-  markerIconUrl, markerShape, roleIconUrl, tintedIcon, colorizedIcon,
+  markerIconUrl, roleIconUrl, tintedIcon, colorizedIcon,
   vehicleIconUrl,
   vehicleTurretIconUrl, factionFlagUrl,
 } from "./icons";
+import { arrowEnd, markerShape } from "./markerGeometry";
 import { drawProjectilesAndImpacts } from "./projectiles";
 import { coord, viewWindow, worldToScreen } from "./worldToScreen";
 import { visibleCaps } from "./capVisibility";
@@ -1039,22 +1040,6 @@ function drawMarkerDiamond(ctx: CanvasRenderingContext2D,
 }
 
 
-/** Where a dragged marker ends, in WORLD coordinates.
- *
- *  A Direction marker is not a point with a bearing — it is a stroke the SL
- *  pulls across the map, and the struct records its length and heading. The
- *  endpoint is computed in world space and projected like any other position,
- *  so the arrow stays anchored to the terrain at every zoom level. */
-function arrowEnd(m: Marker): { x: number; y: number } | null {
-  const len = m.arrowLength ?? 0;
-  const hdg = m.arrowHeading;
-  if (!(len > 1) || hdg == null || !m.position) return null;
-  const rad = (hdg * Math.PI) / 180;
-  return { x: m.position.x + Math.cos(rad) * len,
-           y: m.position.y + Math.sin(rad) * len };
-}
-
-
 /** A shaft with a filled head — the SL's pencil stroke, not a highlighter. */
 function drawArrowShaft(ctx: CanvasRenderingContext2D,
                         ax: number, ay: number, bx: number, by: number,
@@ -1191,6 +1176,23 @@ function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
     const img = !shape && url ? icon(url) : null;
     if (shape === "diamond") {
       drawMarkerDiamond(ctx, x, y, size, col);
+    } else if (shape === "point") {
+      // A dragged marker whose shaft was never recorded. Drawn as a plain
+      // team-coloured point: it was really there, we just cannot say which
+      // way it pointed.
+      const r = size * 0.26;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.shadowColor = "rgba(0,0,0,0.55)";
+      ctx.shadowBlur = size * 0.22;
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = Math.max(1.2, size * 0.07);
+      ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.stroke();
+      ctx.restore();
     } else if (img && img.complete && img.naturalWidth > 0) {
       const bbox = iconBbox(img);
       const colored = colorizedIcon(img, col);
