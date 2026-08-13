@@ -2,7 +2,7 @@
 // and emits pixels. No React, no store access. The map texture and
 // icon helpers do their own caching; everything else is per-frame.
 
-import type { CapGeometry, Deployable, Player, Snapshot, Vehicle, ViewState } from "../state/types";
+import type { CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState } from "../state/types";
 import {
   drawIcon, drawIconCentered, deployableIconUrl, icon, iconBbox, mapTexture,
   markerIconUrl, markerShape, roleIconUrl, tintedIcon, colorizedIcon,
@@ -1015,50 +1015,19 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
   }
 }
 
-/** A marker the game draws as geometry rather than as art.
- *
- *  `yaw` is the world heading in degrees for an arrow. When it is null the
- *  bearing was never recorded — every replay made before the agent read it —
- *  and the arrow is drawn hollow and pointing north rather than filled at a
- *  direction we would be making up. A confident arrow pointing the wrong way
- *  is worse than a visibly unsure one. */
-function drawMarkerShape(ctx: CanvasRenderingContext2D,
-                         shape: "diamond" | "arrow",
-                         x: number, y: number, size: number,
-                         col: string, yaw: number | null | undefined) {
+/** A POI: the game draws it as a plain diamond and the icon set has none. */
+function drawMarkerDiamond(ctx: CanvasRenderingContext2D,
+                           x: number, y: number, size: number, col: string) {
+  const r = size * 0.42;
   ctx.save();
-  ctx.translate(x, y);
-  const known = yaw != null && Number.isFinite(yaw);
-  if (shape === "arrow") {
-    // UE yaw 0° is +X (east), and worldToScreen keeps a positive yaw a
-    // positive screen rotation — so the path is authored pointing +X and
-    // rotated straight by the heading. Unknown bearing points up instead.
-    ctx.rotate(known ? (yaw! * Math.PI) / 180 : -Math.PI / 2);
-  }
-  const r = size * (shape === "arrow" ? 0.62 : 0.42);
   ctx.beginPath();
-  if (shape === "arrow") {
-    ctx.moveTo(r, 0);
-    ctx.lineTo(-r * 0.62, -r * 0.68);
-    ctx.lineTo(-r * 0.26, 0);
-    ctx.lineTo(-r * 0.62, r * 0.68);
-  } else {
-    ctx.moveTo(0, -r);
-    ctx.lineTo(r, 0);
-    ctx.lineTo(0, r);
-    ctx.lineTo(-r, 0);
-  }
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r, y);
   ctx.closePath();
   ctx.shadowColor = "rgba(0,0,0,0.55)";
   ctx.shadowBlur = size * 0.22;
-  if (shape === "arrow" && !known) {
-    // Hollow: the marker is real, the direction is not known.
-    ctx.lineWidth = Math.max(1.4, size * 0.09);
-    ctx.strokeStyle = col;
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
   ctx.fillStyle = col;
   ctx.fill();
   // Dark rim so the shape holds over bright map tiles.
@@ -1066,6 +1035,121 @@ function drawMarkerShape(ctx: CanvasRenderingContext2D,
   ctx.lineWidth = Math.max(1.2, size * 0.07);
   ctx.strokeStyle = "rgba(0,0,0,0.75)";
   ctx.stroke();
+  ctx.restore();
+}
+
+
+/** Where a dragged marker ends, in WORLD coordinates.
+ *
+ *  A Direction marker is not a point with a bearing — it is a stroke the SL
+ *  pulls across the map, and the struct records its length and heading. The
+ *  endpoint is computed in world space and projected like any other position,
+ *  so the arrow stays anchored to the terrain at every zoom level. */
+function arrowEnd(m: Marker): { x: number; y: number } | null {
+  const len = m.arrowLength ?? 0;
+  const hdg = m.arrowHeading;
+  if (!(len > 1) || hdg == null || !m.position) return null;
+  const rad = (hdg * Math.PI) / 180;
+  return { x: m.position.x + Math.cos(rad) * len,
+           y: m.position.y + Math.sin(rad) * len };
+}
+
+
+/** A shaft with a filled head — the SL's pencil stroke, not a highlighter. */
+function drawArrowShaft(ctx: CanvasRenderingContext2D,
+                        ax: number, ay: number, bx: number, by: number,
+                        col: string, dpr: number) {
+  const dx = bx - ax, dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 4) return;
+  const head = Math.max(6 * dpr, Math.min(14 * dpr, len * 0.12));
+  const halfW = head * 0.35;
+  const a = Math.atan2(dy, dx);
+  // The shaft stops short so the filled head sits at the tip instead of
+  // being overdrawn by the line.
+  const sx = bx - Math.cos(a) * head * 0.6;
+  const sy = by - Math.sin(a) * head * 0.6;
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(sx, sy);
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";      // halo for light terrain
+  ctx.lineWidth = 3 * dpr;
+  ctx.stroke();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bx, by);
+  ctx.lineTo(bx - Math.cos(a) * head + Math.sin(a) * halfW,
+             by - Math.sin(a) * head - Math.cos(a) * halfW);
+  ctx.lineTo(bx - Math.cos(a) * head - Math.sin(a) * halfW,
+             by - Math.sin(a) * head + Math.cos(a) * halfW);
+  ctx.closePath();
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, 0.8 * dpr);
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.stroke();
+  ctx.restore();
+}
+
+
+/** A frontline is the same drag geometry drawn as a picket fence: Squad
+ *  repeats a glyph along the shaft rather than pointing one arrow at the end. */
+function drawFrontlineSeries(ctx: CanvasRenderingContext2D,
+                             ax: number, ay: number, bx: number, by: number,
+                             col: string, dpr: number) {
+  const dx = bx - ax, dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 8) return;
+  const img = icon("./icons/markers/frontline.png");
+  if (!img || !img.complete || img.naturalWidth === 0) return;
+  const tinted = colorizedIcon(img, col) ?? img;
+  const step = Math.max(8 * dpr, 12 * dpr);
+  const n = Math.max(1, Math.floor(len / step));
+  const ux = dx / len, uy = dy / len;
+  const half = step / 2;
+  const a = Math.atan2(dy, dx);
+  ctx.save();
+  for (let i = 0; i < n; i++) {
+    const d = i * step + half;
+    ctx.save();
+    ctx.translate(ax + ux * d, ay + uy * d);
+    ctx.rotate(a);
+    ctx.drawImage(tinted, -half, -half, step, step);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+
+// Squad attribution label below the marker — squad number alone for SL
+// markers, `<n>B` for Bravo FTL markers, `<n>C` for Charlie. Skipped when
+// there's no squad info (POI without owner, etc.). Shared so a dragged marker
+// is attributed at the point the drag STARTED, where the placer was standing.
+function drawMarkerLabelFor(ctx: CanvasRenderingContext2D, m: Marker,
+                            x: number, y: number, size: number,
+                            cs: CanvasSize) {
+  const sq = m.squad;
+  if (sq == null || sq <= 0) return;
+  const ft = m.fireTeamId;
+  const label = ft === 1 ? `${sq}B` : ft === 2 ? `${sq}C` : `${sq}`;
+  const fontPx = Math.max(10, Math.round(11 * cs.dpr));
+  ctx.save();
+  ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const ly = y + size * 0.55 + 2 * cs.dpr;
+  // Dark outline so the digits read on every map tile colour.
+  ctx.lineWidth = Math.max(2, fontPx * 0.25);
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.strokeText(label, x, ly);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, x, ly);
   ctx.restore();
 }
 
@@ -1078,17 +1162,35 @@ function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
     const size = 22 * cs.dpr;
     const col = teamColor(m.team);
     const url = markerIconUrl(m);
-    // Two markers are SHAPES, not pictures: a POI is a plain diamond and a
-    // Direction call is an arrow. Neither exists in the icon set, so both used
-    // to borrow the generic infantry glyph — which is why a point of interest
-    // and a direction call both looked like a spotted soldier.
+    // Some markers are GEOMETRY, not pictures. A POI is a diamond; a Direction
+    // call and a Frontline are strokes the SL drags across the map. None of
+    // them exists in the icon set, so all three used to borrow the generic
+    // infantry glyph — which is why a direction spanning half the map was
+    // drawn as one soldier standing at the point the drag began.
     const shape = markerShape(m);
+    if (shape === "arrow" || shape === "frontline") {
+      const end = arrowEnd(m);
+      if (end) {
+        const [bx, by] = worldToScreen(view, cs, end.x, end.y);
+        // An EnemyDirector is placed by one team to call out the OTHER, so it
+        // is drawn in the colour of who is being reported, not who reported.
+        const shaftCol = /enemydirector/i.test(m.type ?? "")
+          ? teamColor(m.team === 1 ? 2 : m.team === 2 ? 1 : 0)
+          : col;
+        if (shape === "frontline") {
+          drawFrontlineSeries(ctx, x, y, bx, by, shaftCol, cs.dpr);
+        } else {
+          drawArrowShaft(ctx, x, y, bx, by, shaftCol, cs.dpr);
+        }
+        drawMarkerLabelFor(ctx, m, x, y, size, cs);
+        continue;
+      }
+    }
     // Colourise (NOT flat-fill) — preserves the icon's inner light/
     // dark structure while shifting its hue to the team colour.
     const img = !shape && url ? icon(url) : null;
-    if (shape) {
-      drawMarkerShape(ctx, shape, x, y, size, col,
-                      shape === "arrow" ? m.yaw : null);
+    if (shape === "diamond") {
+      drawMarkerDiamond(ctx, x, y, size, col);
     } else if (img && img.complete && img.naturalWidth > 0) {
       const bbox = iconBbox(img);
       const colored = colorizedIcon(img, col);
@@ -1120,29 +1222,7 @@ function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
       ctx.fill();
     }
 
-    // Squad attribution label below the icon — squad number alone for
-    // SL markers, `<n>B` for Bravo FTL markers, `<n>C` for Charlie.
-    // Skip when there's no squad info (POI without owner, etc.).
-    const sq = m.squad;
-    if (sq != null && sq > 0) {
-      const ft = m.fireTeamId;
-      const label = ft === 1 ? `${sq}B`
-                   : ft === 2 ? `${sq}C`
-                   : `${sq}`;
-      const fontPx = Math.max(10, Math.round(11 * cs.dpr));
-      ctx.save();
-      ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      const ly = y + size * 0.55 + 2 * cs.dpr;
-      // Dark outline so the digits read on every map tile colour.
-      ctx.lineWidth = Math.max(2, fontPx * 0.25);
-      ctx.strokeStyle = "rgba(0,0,0,0.9)";
-      ctx.strokeText(label, x, ly);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, x, ly);
-      ctx.restore();
-    }
+    drawMarkerLabelFor(ctx, m, x, y, size, cs);
   }
 }
 

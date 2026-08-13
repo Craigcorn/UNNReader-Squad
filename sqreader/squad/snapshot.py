@@ -1878,11 +1878,6 @@ def read_marker(pm: ProcessMemory, alloc: FNameEntryAllocator,
             pm, root + paths.scene_component_to_world_translation_off)
         if v is not None:
             out["position"] = {"x": v.x, "y": v.y, "z": v.z}
-        # A Direction marker is an ARROW, and its heading is the actor's own
-        # rotation — the same transform the position comes from, so there is
-        # no new offset to find. Without it the viewer had nothing to point
-        # with and drew every director as a spotted infantryman.
-        out["yaw"] = _world_yaw(pm, root, paths)
     return out
 
 
@@ -3729,6 +3724,25 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                         asset_name = None
                         if asset_ptr:
                             asset_name = _uobject_name(pm, asset_ptr, alloc)
+                        # Director / Frontline markers are DRAGGED, not
+                        # dropped: the SL pulls them across the map and the
+                        # struct records how far and which way. Point markers
+                        # (POI, Action_*) leave both zero. This is the 0x38
+                        # gap that was read as unused padding — which is why
+                        # a Direction arrow had no direction to point in and
+                        # got drawn as a soldier standing at its start.
+                        arrow_len = arrow_hdg = 0.0
+                        try:
+                            al, ah = struct.unpack(
+                                "<dd", buf[base+0x38:base+0x48])
+                        except struct.error:
+                            al = ah = 0.0
+                        # NaN or an absurd magnitude is a torn read during a
+                        # FastArray resize, not an arrow across the county.
+                        if al == al and 0.0 <= al <= 5e5:
+                            arrow_len = al
+                        if ah == ah and abs(ah) <= 360.0:
+                            arrow_hdg = ah
                         markers.append({
                             "id":          f"{rep_id}",
                             "type":        asset_name,
@@ -3737,6 +3751,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                             "fireTeamId":  ft_id,
                             "ownerPlayerStateAddr": None,
                             "position":    {"x": px, "y": py, "z": pz},
+                            "arrowLength":  arrow_len,
+                            "arrowHeading": arrow_hdg,
                         })
     deployables = [
         read_deployable(pm, alloc, paths, d_addr,

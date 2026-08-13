@@ -443,10 +443,15 @@ export function roleIconUrl(p: { roleId: string | null }): string | null {
  *  A POI is a diamond in Squad. We have no diamond in the icon set, and
  *  substituting the nearest picture is how a point of interest came to look
  *  like a spotted infantryman — so it is drawn instead. */
-export function markerShape(m: Marker): "diamond" | "arrow" | null {
+export function markerShape(m: Marker): "diamond" | "arrow" | "frontline" | null {
   const t = (m.type ?? "").toLowerCase();
   if (t.includes("poi")) return "diamond";
-  if (t.includes("director") || t.includes("frontline")) return "arrow";
+  // A dragged marker is recognised by the geometry it CARRIES, not by its
+  // name: a Director with no shaft recorded (every replay made before the
+  // agent read it) has no direction to draw and must not pretend otherwise.
+  if (!((m.arrowLength ?? 0) > 1)) return null;
+  if (t.includes("frontline")) return "frontline";
+  if (t.includes("director") || t.includes("orderline")) return "arrow";
   return null;
 }
 
