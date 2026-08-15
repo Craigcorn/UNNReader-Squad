@@ -10,7 +10,7 @@
 - [ ] Follows the no-guess policy (no heuristic attribution)
 - [ ] No new runtime dependency (or agreed in an issue first)
 - [ ] Commits are signed off (`git commit -s`). The sign-off is a DCO **and**
-      a licence grant — see [CONTRIBUTING](../CONTRIBUTING.md#sign-off-your-commits-dco--licence-grant).
+      a licence grant — see [CONTRIBUTING](https://github.com/cagrianilokumus/squadreader/blob/main/CONTRIBUTING.md#sign-off-your-commits-dco--licence-grant).
       You keep your copyright; the project may license your work under its
       current or a later licence, including a commercial one. Say so in this PR
       if you would rather not grant that.
