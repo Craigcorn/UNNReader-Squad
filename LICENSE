@@ -1,3 +1,44 @@
+"Commons Clause" License Condition v1.0
+
+The Software is provided to you by the Licensor under the License, as defined
+below, subject to the following condition.
+
+Without limiting other conditions in the License, the grant of rights under the
+License will not include, and the License does not grant to you, the right to
+Sell the Software.
+
+For purposes of the foregoing, "Sell" means practicing any or all of the rights
+granted to you under the License to provide to third parties, for a fee or other
+consideration (including without limitation fees for hosting or consulting /
+support services related to the Software), a product or service whose value
+derives, entirely or substantially, from the functionality of the Software. Any
+license notice or attribution required by the License must also include this
+Commons Clause License Condition notice.
+
+Software:  sqreader
+License:   GNU Affero General Public License v3.0 or later
+Licensor:  Cagri Anil Okumus
+
+-------------------------------------------------------------------------------
+
+NOTE ON WHAT THIS MEANS
+
+You may read, run, modify and share this software freely, including inside a
+company. What you may not do is charge for it -- selling copies, or selling
+hosting or support whose value comes substantially from this software.
+
+Running a game server that happens to use sqreader is not selling it, even if
+that server takes donations or paid whitelists: the value there comes from the
+server, not from this tool.
+
+Because of the condition above, sqreader is NOT "open source" as the Open
+Source Initiative defines the term, and it is not free software as the FSF
+defines it. It is source-available. The AGPL text below still governs
+everything else -- in particular, if you modify it and let others use it over a
+network, you must offer them your modified source.
+
+-------------------------------------------------------------------------------
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

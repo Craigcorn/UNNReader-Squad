@@ -44,9 +44,16 @@ Origin](https://developercertificate.org/). Sign off each commit:
 git commit -s -m "your message"
 ```
 
-The sign-off certifies you wrote the change (or may submit it) under the
-project's license. It also keeps the copyright provenance clean so the project
-can be relicensed or dual-licensed in the future if the community decides to.
+The sign-off certifies you wrote the change, or otherwise have the right to
+submit it, under the project's license as it stands today — the AGPL with the
+Commons Clause (see [LICENSE](LICENSE)). You keep the copyright in what you
+write; you are licensing it, not signing it over.
+
+Be aware of what that means in both directions. A DCO sign-off is **not** a
+copyright assignment and **not** a relicensing grant: nobody, maintainer
+included, can change the licence of your contribution afterwards without
+asking you. If the project ever needs to relicense, every contributor still
+holding copyright has to agree.
 
 ## Reverse-engineered offsets
 

@@ -137,5 +137,16 @@ it in case the new one will not start.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, tests, and the DCO sign-off.
 - [SECURITY.md](SECURITY.md) — reporting a vulnerability.
-- **AGPL-3.0** — see [LICENSE](LICENSE). You may run it, change it and host it;
-  if you host a modified version for others, publish your changes.
+- **AGPL-3.0-or-later with the Commons Clause** — see [LICENSE](LICENSE).
+
+  In plain terms: read it, run it, change it, share it — including at work.
+  Just do not **sell** it, and that includes selling hosting or support whose
+  value comes substantially from this tool. Running a game server that happens
+  to use sqreader is not selling it, donations and paid whitelists included:
+  the value there is the server, not this.
+
+  Everything the AGPL says still holds. If you modify it and let other people
+  use it over a network, you owe them your modified source.
+
+  The added condition means sqreader is **source-available, not open source**
+  in the Open Source Initiative's sense. That is deliberate.

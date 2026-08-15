@@ -1,10 +1,16 @@
 sqreader
 Copyright (c) 2026 Çağrı Anıl Okumuş
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU Affero General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option) any
-later version. See the LICENSE file for the full terms.
+This program is distributed under the GNU Affero General Public License,
+version 3 or later, WITH the "Commons Clause" License Condition v1.0 added on
+top of it. You may read, run, modify and share it freely; you may not sell it,
+nor sell hosting or support whose value comes substantially from it. See the
+LICENSE file for the full terms.
+
+Because of that added condition sqreader is source-available, not "open source"
+as the Open Source Initiative defines the term. Everything else the AGPL says
+still applies - notably, if you modify it and let others use it over a network,
+you owe them your modified source.
 
 ===============================================================================
 Third-party assets and data bundled in this repository
