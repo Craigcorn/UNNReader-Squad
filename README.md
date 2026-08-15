@@ -22,10 +22,12 @@ record whole matches for replay and compute per-player stats and ELO. It is
 ```
 
 `sqreader serve` records matches and serves the replay player + stats dashboard
-in the browser:
+in the browser: a map with every player, vehicle, marker and capture zone
+moving in real time, a scrubbable timeline, a kill feed and a scoreboard.
 
-<!-- Add a screenshot at docs/screenshot.png -->
-![replay + stats](docs/screenshot.png)
+You can watch one without installing anything — the replays at
+[squadreader.com/replays](https://squadreader.com/replays) are produced by this
+agent and played back by the viewer in `frontend/`.
 
 ## Requirements
 
@@ -34,6 +36,20 @@ in the browser:
 - Permission to read the game process's memory: run as **root**, or grant the Python process `CAP_SYS_PTRACE` (and `CAP_DAC_READ_SEARCH`).
 - A running **Squad dedicated server** on the same host. Offsets are reverse-engineered for Squad **v10.4 / SDK v10.4.1**.
 - Node ≥ 18 **only** if you want to rebuild the web UI — a prebuilt `frontend/dist` is committed, so normal use needs no Node.
+
+## How a match is recorded
+
+Two tiers, so the replay is smooth without the reader stealing the box:
+
+- a **full snapshot** about once a second — every player, vehicle, deployable,
+  marker, capture zone and projectile;
+- **position-only frames at 4 Hz** in between, re-reading just where everything
+  is, so movement plays back fluidly.
+
+Both go into one `.sqrx` per match (zstd-compressed NDJSON, ~6-10x smaller than
+raw). A recording is written once and never edited, and nothing is ever
+interpolated: an entity that fails a freshness check is left out of that frame
+rather than guessed at.
 
 ## Install
 

@@ -10,6 +10,11 @@ license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
 classifiers = [
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    # Not a statement about the licence — the project is AGPL and public. This
+    # classifier makes PyPI REFUSE an upload, which is the point: sqreader is
+    # installed from a clone or the signed release, never from an index, and a
+    # stray `twine upload` would publish something nobody can `pip install`
+    # usefully anyway (it needs root on the game host).
     "Private :: Do Not Upload",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -27,6 +32,12 @@ push = ["cryptography>=42"]
 # diff (DeltaWalk). Without it the walk transparently falls back to pure-Python
 # — identical results, a bit slower. Install `.[fast]` to enable.
 fast = ["numpy>=1.24"]
+
+[project.urls]
+Homepage = "https://github.com/cagrianilokumus/squadreader"
+Repository = "https://github.com/cagrianilokumus/squadreader"
+Issues = "https://github.com/cagrianilokumus/squadreader/issues"
+Changelog = "https://github.com/cagrianilokumus/squadreader/blob/main/CHANGELOG.md"
 
 [project.scripts]
 sqreader = "sqreader.cli:main"

@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- On a two-tier recording the viewer discarded every 4 Hz position update. The
+  compact format wraps those lines so they are never diffed, and the browser's
+  decoder had no branch for them at all, so each one came back as a copy of the
+  previous full snapshot - the replay played at the full-frame rate while a
+  quarter of the download was thrown away on arrival. Nothing compared the two
+  decoders against each other, which is why it survived; they now are.
+- A recording whose layer the reader could not identify drew a bare grid. The
+  layer lookup is keyed on the exact display name, so a community that names
+  its scrim layer after itself missed it and the frames carried no map at all.
+  The viewer now falls back to the map name, which those frames do carry.
+- Non-finite coordinates could reach a 4 Hz position frame. The sanity gate was
+  a magnitude test, and `abs(NaN) > limit` is false, so a torn read passed
+  straight through; `z` came from the same struct and was never checked at all.
+- The admin free-camera is no longer drawn on the map. It is not a player,
+  nobody in the match can see it, and it moved wherever whoever was spectating
+  happened to look.
+- Direction and Frontline markers are drawn as the strokes they are, with the
+  placing squad in a disc at the point the drag began.
+
+### Changed
+- Replay decoding in the browser is about twice as fast: guarding every field
+  against one awkward key cost more than half the time, and only that key
+  needs it.
+
 ## [1.4.3] - 2026-08-13
 
 ### Fixed

@@ -59,5 +59,8 @@ jobs:
       - name: Type-check + build
         run: npm run build
 
-      - name: Killfeed diff tests
-        run: npm run test:kf
+      # Every `*.test.mts` under src/, found rather than listed. This step used
+      # to name one suite by hand and there were eight, so a contributor could
+      # break the replay decoder and watch CI stay green.
+      - name: Tests
+        run: npm test
