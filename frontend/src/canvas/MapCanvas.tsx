@@ -275,9 +275,6 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
         return;
       }
       if (e.button !== 0) return;
-      // A plain click puts the last measurement away. Leaving it pinned to
-      // the map for the rest of the session turns a quick answer into litter.
-      rulerRef.current = null;
       cv.classList.add("dragging");
       const st = useViewerStore.getState();
       // Manual pan releases FOLLOW — but commit the current follow
@@ -354,7 +351,17 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
       const [wx, wy] = screenToWorld(view, cssSize, down.x, down.y);
       const win = viewWindow(view);
       const worldRadius = 12 * (win.w / Math.max(1, cssSize.width));
-      onClick(hitTest(snap, wx, wy, worldRadius));
+      const hit = hitTest(snap, wx, wy, worldRadius);
+      // Clicking bare map puts the measurement away; left pinned there it
+      // stops being an answer and becomes litter. Clicking a player or a
+      // vehicle does NOT, because inspecting what you just measured between
+      // is the obvious next thing to do.
+      //
+      // And this belongs in the CLICK branch, never in mousedown: mousedown
+      // also fires at the start of a pan, so clearing there wiped the
+      // measurement the moment you dragged the map to look at it.
+      if (!hit) rulerRef.current = null;
+      onClick(hit);
     };
     cv.addEventListener("mousedown", onMouseDown);
     cv.addEventListener("contextmenu", onContextMenu);
