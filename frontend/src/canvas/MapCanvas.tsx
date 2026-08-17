@@ -8,6 +8,7 @@ import { renderScene, type FollowHighlight } from "./draw";
 import { lerpSnap } from "./interpolation";
 import { autoFit, refitAspect, screenToWorld, viewWindow } from "./worldToScreen";
 import { hitTest, type Hit } from "./hitTest";
+import type { Ruler } from "./ruler";
 import { useViewerStore, RENDER_DELAY_MS } from "../state/viewerStore";
 import { replayClock } from "../state/replayClock";
 import { DEFAULT_VIEW } from "../state/types";
@@ -46,6 +47,11 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
   // Track whether the mousedown→mouseup motion was small enough to
   // count as a click (vs an intentional drag). 4 css pixels feels right.
   const downRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  // A measurement lives outside React state on purpose: it changes on every
+  // mousemove while dragging, and re-rendering the tree at pointer rate to
+  // move a line would be absurd. The render loop reads it each frame.
+  const rulerRef = useRef<Ruler | null>(null);
+  const rulerDragRef = useRef<boolean>(false);
   // Active touch gesture (one-finger pan / two-finger pinch). Fields are shared
   // across the two gesture kinds; `mode` says which are meaningful.
   const touchRef = useRef<{
@@ -211,7 +217,8 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
           if (fp && fp.squadId != null)
             followHl = { key: s.followKey, teamId: fp.teamId, squadId: fp.squadId };
         }
-        renderScene(ctx, shown, rview, cs, s.layers, followHl);
+        renderScene(ctx, shown, rview, cs, s.layers, followHl,
+                    rulerRef.current);
         displayRef.current = { snap: shown, view: rview };
       } else {
         ctx.clearRect(0, 0, cs.width, cs.height);
@@ -226,8 +233,36 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
   // Pan + click detection (click = mousedown→mouseup with <4 px and <300 ms drift)
   useEffect(() => {
     const cv = canvasRef.current; if (!cv) return;
+    // Measuring: right-drag, or shift+left-drag for anyone whose mouse or
+    // trackpad makes a right-drag awkward. Neither collides with pan (plain
+    // left) or select (left click), so nothing had to be given up for it.
+    const worldAt = (e: MouseEvent) => {
+      // Canvas-relative from the bounding rect, NOT offsetX: the move and up
+      // handlers are on `window`, so once the cursor leaves the canvas
+      // offsetX is measured against whatever element it is over instead —
+      // and the line would jump the moment you dragged past the edge.
+      const rect = cv.getBoundingClientRect();
+      const v = useViewerStore.getState().view;
+      const [wx, wy] = screenToWorld(v, {
+        width: cv.width, height: cv.height,
+        cssWidth: cv.clientWidth, cssHeight: cv.clientHeight,
+        dpr: cv.width / Math.max(1, cv.clientWidth),
+      } as never, e.clientX - rect.left, e.clientY - rect.top);
+      return { x: wx, y: wy };
+    };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
     const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
+        e.preventDefault();
+        const p = worldAt(e);
+        rulerRef.current = { a: p, b: p };
+        rulerDragRef.current = true;
+        return;
+      }
       if (e.button !== 0) return;
+      // A plain click puts the last measurement away. Leaving it pinned to
+      // the map for the rest of the session turns a quick answer into litter.
+      rulerRef.current = null;
       cv.classList.add("dragging");
       const st = useViewerStore.getState();
       // Manual pan releases FOLLOW — but commit the current follow
@@ -244,6 +279,10 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
       downRef.current = { x: e.offsetX, y: e.offsetY, t: performance.now() };
     };
     const onMouseMove = (e: MouseEvent) => {
+      if (rulerDragRef.current && rulerRef.current) {
+        rulerRef.current = { a: rulerRef.current.a, b: worldAt(e) };
+        return;
+      }
       if (!dragRef.current) return;
       const v = useViewerStore.getState().view;
       const win = viewWindow(v);
@@ -257,6 +296,14 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
       }));
     };
     const onMouseUp = (e: MouseEvent) => {
+      if (rulerDragRef.current) {
+        rulerDragRef.current = false;
+        // A right-click that never moved is not a measurement, it is someone
+        // asking for a context menu they are not going to get.
+        const r = rulerRef.current;
+        if (r && r.a.x === r.b.x && r.a.y === r.b.y) rulerRef.current = null;
+        return;
+      }
       if (dragRef.current) cv.classList.remove("dragging");
       dragRef.current = null;
       const down = downRef.current;
@@ -285,10 +332,12 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
       onClick(hitTest(snap, wx, wy, worldRadius));
     };
     cv.addEventListener("mousedown", onMouseDown);
+    cv.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
       cv.removeEventListener("mousedown", onMouseDown);
+      cv.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
@@ -482,6 +531,10 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
   // Keyboard: F to fit
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && rulerRef.current) {
+        rulerRef.current = null;
+        return;
+      }
       if ((e.key === "f" || e.key === "F") &&
           !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName ?? "")) {
         resetView();

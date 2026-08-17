@@ -14,6 +14,7 @@ import { drawProjectilesAndImpacts } from "./projectiles";
 import { coord, viewWindow, worldToScreen } from "./worldToScreen";
 import { visibleCaps } from "./capVisibility";
 import { fallbackMap } from "./mapFallback";
+import { drawRuler, type Ruler } from "./ruler";
 
 export function teamColor(t: number | null | undefined): string {
   if (t === 1) return "#d84a54";
@@ -1713,7 +1714,8 @@ export interface LayerVisibility {
 export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
                             view: ViewState, cs: CanvasSize,
                             layers?: LayerVisibility,
-                            follow?: FollowHighlight | null) {
+                            follow?: FollowHighlight | null,
+                            ruler?: Ruler | null) {
   const on = (k: keyof LayerVisibility) => !layers || layers[k] !== false;
   // SL numbers default ON (absent = show, like the entity layers); the
   // all-numbers option defaults OFF (opt-in declutter, absent = hide).
@@ -1738,4 +1740,8 @@ export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
   if (on("rallies")) drawRallyPoints(ctx, snap, view, cs);
   if (on("players")) drawPlayers(ctx, snap, view, cs, showSLNumbers, showAllNumbers, follow ?? null);
   if (on("projectiles")) drawProjectiles(ctx, snap, view, cs);
+  // Last, and never gated by a layer toggle: a measurement is something the
+  // viewer asked for a second ago, so it has to be on top of whatever it was
+  // drawn across.
+  if (ruler) drawRuler(ctx, view, cs, ruler);
 }
