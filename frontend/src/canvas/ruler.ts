@@ -11,7 +11,11 @@ import type { ViewState } from "../state/types";
 import { worldToScreen } from "./worldToScreen";
 
 export interface WorldPoint { x: number; y: number; }
-export interface Ruler { a: WorldPoint; b: WorldPoint; }
+
+/** A measurement is a path, not a pair. One leg is the common case; a route
+ *  walked around a hill is several, and the total is what you actually want
+ *  to know about it. */
+export interface Ruler { points: WorldPoint[]; }
 
 /** UE world units per metre. Squad is centimetres. */
 export const CM_PER_METRE = 100;
@@ -19,6 +23,13 @@ export const CM_PER_METRE = 100;
 /** Flat map distance in metres. */
 export function metresBetween(a: WorldPoint, b: WorldPoint): number {
   return Math.hypot(b.x - a.x, b.y - a.y) / CM_PER_METRE;
+}
+
+/** Total length of a path, in metres. */
+export function pathMetres(points: readonly WorldPoint[]): number {
+  let m = 0;
+  for (let i = 1; i < points.length; i++) m += metresBetween(points[i - 1]!, points[i]!);
+  return m;
 }
 
 /**
@@ -45,29 +56,42 @@ export function bearingDegrees(a: WorldPoint, b: WorldPoint): number {
 
 interface Size { width: number; height: number; dpr: number; }
 
-/** The line, its end caps, and the reading — drawn over everything else. */
+/** Compass label for a leg: "847 m · 112°". */
+export function legLabel(a: WorldPoint, b: WorldPoint): string {
+  return `${formatMetres(metresBetween(a, b))} · `
+    + `${Math.round(bearingDegrees(a, b)) % 360}°`;
+}
+
+
+/** The path, its end caps, and the readings — drawn over everything else. */
 export function drawRuler(ctx: CanvasRenderingContext2D, view: ViewState,
                           cs: Size, r: Ruler): void {
-  const [ax, ay] = worldToScreen(view, cs as never, r.a.x, r.a.y);
-  const [bx, by] = worldToScreen(view, cs as never, r.b.x, r.b.y);
+  const pts = r.points;
+  if (pts.length < 2) return;
   const dpr = cs.dpr;
+  const scr = pts.map((p) => worldToScreen(view, cs as never, p.x, p.y));
 
   ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   // A dark halo under a bright line: the map underneath is sand in one place
   // and forest in another, and a single-colour line disappears into one of
   // them. Same treatment the lane graph and the direction arrows use.
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(bx, by);
+  const trace = () => {
+    ctx.beginPath();
+    ctx.moveTo(scr[0]![0], scr[0]![1]);
+    for (let i = 1; i < scr.length; i++) ctx.lineTo(scr[i]![0], scr[i]![1]);
+  };
+  trace();
   ctx.strokeStyle = "rgba(0,0,0,0.55)";
   ctx.lineWidth = 4 * dpr;
   ctx.stroke();
+  trace();
   ctx.strokeStyle = "#ffd166";
   ctx.lineWidth = 1.6 * dpr;
   ctx.stroke();
 
-  for (const [x, y] of [[ax, ay], [bx, by]] as const) {
+  for (const [x, y] of scr) {
     ctx.beginPath();
     ctx.arc(x, y, 3.2 * dpr, 0, Math.PI * 2);
     ctx.fillStyle = "#ffd166";
@@ -77,27 +101,42 @@ export function drawRuler(ctx: CanvasRenderingContext2D, view: ViewState,
     ctx.stroke();
   }
 
-  const label = formatMetres(metresBetween(r.a, r.b));
   const fontPx = Math.max(11, Math.round(12 * dpr));
   ctx.font = `bold ${fontPx}px system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const mx = (ax + bx) / 2;
-  const my = (ay + by) / 2;
-  const w = ctx.measureText(label).width + 10 * dpr;
-  const h = fontPx + 8 * dpr;
-  ctx.fillStyle = "rgba(0,0,0,0.72)";
-  ctx.beginPath();
-  // Kept off the line itself so the number never sits on top of what it
-  // measures, which is unreadable at the moment you are dragging.
-  const ly = my - h;
-  if ((ctx as CanvasRenderingContext2D & { roundRect?: unknown }).roundRect) {
-    ctx.roundRect(mx - w / 2, ly - h / 2, w, h, 4 * dpr);
-  } else {
-    ctx.rect(mx - w / 2, ly - h / 2, w, h);
+
+  const chip = (text: string, x: number, y: number, bright: boolean) => {
+    const w = ctx.measureText(text).width + 10 * dpr;
+    const h = fontPx + 8 * dpr;
+    ctx.fillStyle = bright ? "rgba(0,0,0,0.78)" : "rgba(0,0,0,0.6)";
+    ctx.beginPath();
+    if ((ctx as CanvasRenderingContext2D & { roundRect?: unknown }).roundRect) {
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, 4 * dpr);
+    } else {
+      ctx.rect(x - w / 2, y - h / 2, w, h);
+    }
+    ctx.fill();
+    ctx.fillStyle = bright ? "#ffd166" : "rgba(255,209,102,0.85)";
+    ctx.fillText(text, x, y);
+  };
+
+  // Every leg gets its own reading, offset off the line so the number never
+  // sits on top of what it measures — unreadable exactly while you drag.
+  const multi = pts.length > 2;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = scr[i - 1]!;
+    const [bx, by] = scr[i]!;
+    const h = fontPx + 8 * dpr;
+    chip(legLabel(pts[i - 1]!, pts[i]!), (ax + bx) / 2, (ay + by) / 2 - h,
+         !multi);
   }
-  ctx.fill();
-  ctx.fillStyle = "#ffd166";
-  ctx.fillText(label, mx, ly);
+  // With more than one leg the total is the answer being looked for, so it
+  // sits at the end of the path in full brightness.
+  if (multi) {
+    const [ex, ey] = scr[scr.length - 1]!;
+    chip(`∑ ${formatMetres(pathMetres(pts))}`, ex, ey - (fontPx + 20 * dpr),
+         true);
+  }
   ctx.restore();
 }

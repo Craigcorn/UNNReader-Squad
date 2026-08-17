@@ -1,6 +1,7 @@
 // The number this puts on screen is the whole feature, so it is the thing
 // worth testing. Framework-free, like the tests beside it.
-import { metresBetween, formatMetres, bearingDegrees } from "./ruler.ts";
+import { metresBetween, formatMetres, bearingDegrees, pathMetres,
+         legLabel } from "./ruler.ts";
 
 let passed = 0, failed = 0;
 function ok(cond: any, msg: string) {
@@ -59,6 +60,31 @@ function near(a: number, b: number, tol: number, msg: string) {
      "a bearing never reaches 360");
   ok(bearingDegrees({ x: 0, y: 0 }, { x: -1, y: -100 }) >= 0,
      "a bearing is never negative");
+}
+
+// --- a path, not just a pair ------------------------------------------------
+{
+  // A route round a hill is several legs and the total is the answer.
+  const pts = [{ x: 0, y: 0 }, { x: 30000, y: 40000 }, { x: 30000, y: 140000 }];
+  near(pathMetres(pts), 500 + 1000, 1e-9, "legs add up");
+  near(pathMetres([{ x: 0, y: 0 }]), 0, 1e-9, "one point has no length");
+  near(pathMetres([]), 0, 1e-9, "an empty path has no length");
+  // Adding a point you are already standing on must not change the total.
+  const same = [...pts, { x: 30000, y: 140000 }];
+  near(pathMetres(same), pathMetres(pts), 1e-9,
+       "a zero-length leg adds nothing");
+}
+
+// --- the label a leg carries ------------------------------------------------
+{
+  const l = legLabel({ x: 0, y: 0 }, { x: 0, y: -100000 });
+  ok(l.includes("1 000 m"), `leg label carries the distance (got ${l})`);
+  ok(l.includes("0°"), `leg label carries the bearing (got ${l})`);
+  const east = legLabel({ x: 0, y: 0 }, { x: 100000, y: 0 });
+  ok(east.includes("90°"), `east reads 90 degrees (got ${east})`);
+  // 360 must never appear — it is the same direction as 0 and reads as a bug.
+  const almost = legLabel({ x: 0, y: 0 }, { x: -1, y: -100000 });
+  ok(!almost.includes("360"), `a bearing never prints 360 (got ${almost})`);
 }
 
 console.log(`ruler: ${passed} passed, ${failed} failed`);

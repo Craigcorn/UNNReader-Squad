@@ -9,6 +9,11 @@ import { lerpSnap } from "./interpolation";
 import { autoFit, refitAspect, screenToWorld, viewWindow } from "./worldToScreen";
 import { hitTest, type Hit } from "./hitTest";
 import type { Ruler } from "./ruler";
+
+// How close a new drag has to start, in world units at 1x zoom, to be
+// treated as continuing the last measurement rather than starting one.
+// Scaled by zoom so it stays about the same distance on screen.
+const EXTEND_SNAP_CM = 1500;
 import { useViewerStore, RENDER_DELAY_MS } from "../state/viewerStore";
 import { replayClock } from "../state/replayClock";
 import { DEFAULT_VIEW } from "../state/types";
@@ -255,7 +260,17 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
       if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
         e.preventDefault();
         const p = worldAt(e);
-        rulerRef.current = { a: p, b: p };
+        // Starting near where the last one ended EXTENDS the path instead of
+        // replacing it, so a route round a hill is measured by dragging leg
+        // after leg. No extra modifier to learn: you simply carry on from
+        // where you stopped, and starting anywhere else begins afresh.
+        const prev = rulerRef.current;
+        const tail = prev?.points[prev.points.length - 1];
+        const near = tail && Math.hypot(tail.x - p.x, tail.y - p.y)
+          <= EXTEND_SNAP_CM / Math.max(0.05, useViewerStore.getState().view.zoom);
+        rulerRef.current = near && prev
+          ? { points: [...prev.points, p] }
+          : { points: [p, p] };
         rulerDragRef.current = true;
         return;
       }
@@ -280,7 +295,9 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
     };
     const onMouseMove = (e: MouseEvent) => {
       if (rulerDragRef.current && rulerRef.current) {
-        rulerRef.current = { a: rulerRef.current.a, b: worldAt(e) };
+        const pts = rulerRef.current.points.slice();
+        pts[pts.length - 1] = worldAt(e);
+        rulerRef.current = { points: pts };
         return;
       }
       if (!dragRef.current) return;
@@ -300,8 +317,16 @@ export function MapCanvas({ onHover, onLeave, onClick }: Props) {
         rulerDragRef.current = false;
         // A right-click that never moved is not a measurement, it is someone
         // asking for a context menu they are not going to get.
+        // A right-click that never moved is not a measurement, it is someone
+        // asking for a context menu they are not going to get.
         const r = rulerRef.current;
-        if (r && r.a.x === r.b.x && r.a.y === r.b.y) rulerRef.current = null;
+        if (r) {
+          const n = r.points.length;
+          const last = r.points[n - 1]!, before = r.points[n - 2]!;
+          if (last.x === before.x && last.y === before.y) {
+            rulerRef.current = n > 2 ? { points: r.points.slice(0, n - 1) } : null;
+          }
+        }
         return;
       }
       if (dragRef.current) cv.classList.remove("dragging");
