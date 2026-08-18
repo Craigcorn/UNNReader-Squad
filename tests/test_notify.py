@@ -9,8 +9,8 @@ from pathlib import Path
 
 from sqreader.plugins import notify
 from sqreader.plugins.notify import (
-    COLOUR_INFO, COLOUR_MAYBE, COLOUR_SURE, DiscordNotifier, build_embed,
-    colour_for, match_clock, replay_url,
+    COLOUR_INFO, COLOUR_MAYBE, COLOUR_SURE, FOOTER_TEXT, DiscordNotifier,
+    build_embed, colour_for, format_evidence, match_clock, replay_url,
 )
 
 
@@ -25,16 +25,62 @@ def _alert(**kw):
 
 # --- the message ------------------------------------------------------------
 
+def _fields(e):
+    return {f["name"]: f["value"] for f in e.get("fields", [])}
+
+
 def test_the_embed_carries_the_evidence_not_just_the_accusation():
     e = build_embed(_alert(), replay_base="https://squadreader.com",
                     server_label="altai-tr-1")
-    d = e["description"]
-    assert "speedhack" in e["title"] and "Kenlaus" in e["title"]
-    assert "90%" in d                                   # confidence
-    assert "22:05" in d                                 # 1325 s of match time
-    assert "speed_ms" in d, "the numbers behind the call must travel with it"
-    assert "watch the replay" in d and "e9e2639f" in d
-    assert e["footer"]["text"] == "altai-tr-1 - cheat_detect"
+    f = _fields(e)
+    # The player's name is the title, because that is what an admin scans for.
+    assert "Kenlaus" in e["title"]
+    assert "speedhack" in e["description"]
+    assert f["Confidence"] == "90%"
+    assert f["Match time"] == "22:05"                   # 1325 s into the match
+    assert f["Server"] == "altai-tr-1"
+    assert "speed_ms" in f["Evidence"], \
+        "the numbers behind the call must travel with it"
+    # Clicking the most obvious thing has to do the most useful thing.
+    assert e["url"].endswith("id=e9e2639f-9062-4d6a-a457-eb6479506af5")
+    assert "Watch the replay" in e["description"]
+
+
+def test_every_alert_carries_the_footer():
+    """These land in front of the exact people who run Squad servers, so the
+    footer is present on everything and in the way of nothing."""
+    e = build_embed(_alert())
+    assert e["footer"]["text"] == FOOTER_TEXT
+    assert "squadreader.com" in FOOTER_TEXT
+
+
+def test_evidence_is_columns_not_json():
+    """A JSON blob is developer output. An admin deciding whether to act wants
+    to read the measurement against the threshold at a glance."""
+    ev = format_evidence({"speed_ms": 24.10371, "threshold_ms": 18.0,
+                          "streak_ticks": 8, "elapsedSec": 1325})
+    lines = ev.splitlines()
+    assert not ev.lstrip().startswith("{"), "still JSON"
+    assert all("elapsedSec" not in ln for ln in lines), \
+        "match time has its own field, it should not repeat here"
+    # Aligned: the values start at the same column so they can be compared.
+    starts = {ln.index(ln.strip().split()[-1]) for ln in lines}
+    assert len(starts) == 1, f"columns are not aligned: {lines}"
+    assert "24.1" in ev, "a long float is trimmed to something readable"
+
+
+def test_evidence_survives_junk():
+    assert format_evidence(None) is None
+    assert format_evidence("not a dict") is None
+    assert format_evidence({}) is None
+    assert format_evidence({"elapsedSec": 5}) is None    # nothing left to show
+    assert format_evidence({"nested": {"a": 1}, "x": 2}) is not None
+
+
+def test_a_missing_replay_link_does_not_leave_a_dead_title():
+    e = build_embed(_alert(match_id=None))
+    assert "url" not in e, "a title link with nowhere to go is worse than none"
+    assert "Watch the replay" not in e["description"]
 
 
 def test_colour_says_how_sure_not_how_bad():
@@ -61,9 +107,12 @@ def test_the_embed_survives_junk():
     must not be the thing that takes the reader down."""
     for bad in ({}, {"details": None}, {"details": "not a dict"},
                 {"confidence": "high"}, {"ts": None}, {"player_name": None,
-                                                       "eos_id": None}):
+                                                       "eos_id": None},
+                {"alert_type": None}, {"details": {"blob": "x" * 5000}}):
         e = build_embed(_alert(**bad))
         assert isinstance(e["title"], str) and isinstance(e["color"], int)
+        for f in e.get("fields", []):
+            assert len(f["value"]) <= 1024, "Discord rejects a field over 1024"
 
 
 def test_match_clock_only_reports_a_time_it_was_given():
@@ -77,6 +126,8 @@ def test_match_clock_only_reports_a_time_it_was_given():
 def test_a_huge_evidence_blob_is_truncated_not_rejected():
     e = build_embed(_alert(details={"blob": "x" * 5000, "elapsedSec": 10}))
     assert len(e["description"]) <= 3900
+    ev = _fields(e)["Evidence"]
+    assert len(ev) <= 1024 and ev.endswith("```")
 
 
 # --- what the reader is promised -------------------------------------------

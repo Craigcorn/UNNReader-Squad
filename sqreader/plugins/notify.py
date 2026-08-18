@@ -89,43 +89,109 @@ def match_clock(details: Any) -> Optional[str]:
     return f"{s // 60}:{s % 60:02d}"
 
 
+#: Shown on every alert. The tool is free and source-available, and the people
+#: reading these are exactly the people who run Squad servers - so the footer
+#: is where it belongs: present on everything, in the way of nothing.
+FOOTER_TEXT = "SquadReader - free replays & stats for Squad servers - squadreader.com"
+
+#: A glyph per confidence band. An admin scanning a busy channel reads the
+#: shape before the words.
+_MARK_SURE = "\U0001F6A9"      # triangular flag
+_MARK_MAYBE = "\u26A0"         # warning sign
+_MARK_INFO = "\u2139"          # information
+
+
+def mark_for(confidence: Optional[float]) -> str:
+    if not isinstance(confidence, (int, float)):
+        return _MARK_INFO
+    if confidence >= 0.8:
+        return _MARK_SURE
+    if confidence >= 0.5:
+        return _MARK_MAYBE
+    return _MARK_INFO
+
+
+def format_evidence(details: Any, limit: int = 900) -> Optional[str]:
+    """The numbers behind the call, as aligned columns rather than JSON.
+
+    A raw JSON blob is developer output. An admin deciding whether to act
+    wants to read `speed_ms  24.1` against `threshold_ms  18.0` at a glance,
+    and the alignment is what makes the comparison instant.
+    """
+    if not isinstance(details, dict):
+        return None
+    rows = [(k, v) for k, v in sorted(details.items()) if k != "elapsedSec"]
+    if not rows:
+        return None
+    width = min(24, max(len(k) for k, _ in rows))
+    lines = []
+    for k, v in rows:
+        if isinstance(v, float):
+            text = f"{v:.4g}"
+        elif isinstance(v, (dict, list)):
+            text = json.dumps(v, ensure_ascii=False, sort_keys=True)
+        else:
+            text = str(v)
+        lines.append(f"{k[:width].ljust(width)}  {text}")
+    body = "\n".join(lines)
+    if len(body) > limit:
+        body = body[:limit - 3] + "..."
+    return body
+
+
 def build_embed(alert: dict, *, replay_base: Optional[str] = None,
                 server_label: Optional[str] = None) -> dict:
-    """One alert as a Discord embed. Pure — this is the part worth testing."""
+    """One alert as a Discord embed. Pure - this is the part worth testing.
+
+    Laid out for someone scanning a channel, not for someone debugging: the
+    player's name is the title because that is what an admin looks for, the
+    numbers sit in columns rather than a JSON blob, and the whole title is a
+    link to the replay so acting on it is one click.
+    """
     details = alert.get("details") or {}
     name = alert.get("player_name") or alert.get("eos_id") or "unknown player"
     conf = alert.get("confidence")
-    title = f"{alert.get('alert_type', 'alert')} - {name}"
-
-    lines: list[str] = []
-    if isinstance(conf, (int, float)):
-        lines.append(f"**confidence** {round(conf * 100)}%")
-    clock = match_clock(details)
-    if clock:
-        lines.append(f"**match time** {clock}")
-    if alert.get("eos_id"):
-        lines.append("**eos** `" + str(alert["eos_id"]) + "`")
-    # The evidence the detector based the call on, verbatim. An alert without
-    # it is an accusation; with it, an admin can disagree.
-    ev = {k: v for k, v in details.items() if k != "elapsedSec"} \
-        if isinstance(details, dict) else {}
-    if ev:
-        body = json.dumps(ev, ensure_ascii=False, sort_keys=True)
-        if len(body) > 900:
-            body = body[:897] + "..."
-        lines.append("```json\n" + body + "\n```")
     url = replay_url(replay_base, alert.get("match_id"))
-    if url:
-        lines.append(f"[watch the replay]({url})")
 
     embed: dict[str, Any] = {
-        "title": title[:250],
-        "description": "\n".join(lines)[:3900],
+        "title": f"{mark_for(conf)}  {name}"[:250],
         "color": colour_for(conf),
+        "footer": {"text": FOOTER_TEXT},
     }
-    footer = " - ".join(x for x in (server_label, alert.get("plugin_id")) if x)
-    if footer:
-        embed["footer"] = {"text": footer[:2000]}
+    if url:
+        # The title itself is the link: the most obvious thing to click is
+        # also the thing you want.
+        embed["url"] = url
+
+    kind = str(alert.get("alert_type") or "alert")
+    desc = [f"**{kind}**"]
+    if url:
+        desc.append(f"[Watch the replay]({url})")
+    embed["description"] = "\n".join(desc)[:3900]
+
+    # Inline fields render as columns, which is the whole reason to use them
+    # instead of more bold text in the description.
+    fields: list[dict] = []
+    if isinstance(conf, (int, float)):
+        fields.append({"name": "Confidence", "value": f"{round(conf * 100)}%",
+                       "inline": True})
+    clock = match_clock(details)
+    if clock:
+        fields.append({"name": "Match time", "value": clock, "inline": True})
+    if server_label:
+        fields.append({"name": "Server", "value": str(server_label)[:60],
+                       "inline": True})
+    ev = format_evidence(details)
+    if ev:
+        fields.append({"name": "Evidence", "value": f"```\n{ev}\n```",
+                       "inline": False})
+    if alert.get("eos_id"):
+        fields.append({"name": "EOS ID",
+                       "value": f"`{alert['eos_id']}`"[:1020],
+                       "inline": False})
+    if fields:
+        embed["fields"] = fields[:25]
+
     ts = alert.get("ts")
     if isinstance(ts, (int, float)):
         embed["timestamp"] = (time.strftime("%Y-%m-%dT%H:%M:%S",
@@ -253,5 +319,6 @@ class DiscordNotifier:
                     return
 
 
-__all__ = ["DiscordNotifier", "build_embed", "colour_for", "match_clock",
-           "replay_url", "QUEUE_MAX", "MAX_EMBEDS"]
+__all__ = ["DiscordNotifier", "build_embed", "colour_for", "format_evidence",
+           "mark_for", "match_clock", "replay_url", "FOOTER_TEXT",
+           "QUEUE_MAX", "MAX_EMBEDS"]
