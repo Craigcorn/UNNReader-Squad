@@ -7,14 +7,21 @@ and which detectors sqreader has the data to run at all.
 
 Tick-rate scaling
 -----------------
-Every "sustained for N ticks" constant is in TICKS, so it only means what you
-think it means at one tick rate. The source ran at 1 s and wrote down the table:
+There is none left to get wrong, and that is deliberate.
 
-    5 s tick -> 3 ticks | 3 s tick -> 5 | 2 s tick -> 8 | 1 s tick -> 15
+The thresholds arrived as TICK counts, which only mean what you think at the
+one tick rate they were written for. The source ran at 1 s and kept a table -
+5 s tick -> 3 ticks, 2 s -> 8, 1 s -> 15 - and a warning to re-scale by hand
+after changing `--hz`. That warning was correctly written and duly ignored: the
+first deployment to switch this on ran at 3 Hz, where the inherited 8 meant 2.7
+seconds instead of 16. A parachute landing lasts about that long.
 
-sqreader runs production at 0.5 Hz, i.e. a 2 s tick, so the streaks here are 8 —
-straight off that table, holding the effective window at ~16 s. If you change
-`serve --hz`, re-scale them or the detector silently changes meaning.
+So durations are in SECONDS now, accumulated from the game's own clock, and a
+sample is worth however much time actually passed. Sixteen seconds is sixteen
+seconds at any tick rate, on any box, with no table to consult.
+
+What still counts in samples is `magic_bullet_consecutive`, and that detector
+is off.
 
 What is NOT here, and exactly why
 ---------------------------------
@@ -111,7 +118,7 @@ class _PlayerState:
         self.last_xy: Optional[tuple[float, float]] = None
         self.last_elapsed: Optional[float] = None
         self.last_soldier_addr: Optional[str] = None
-        self.speed_streak: int = 0
+        self.speed_streak: float = 0.0
         # weapon class -> {"events": n, "first_ts": t, "last_ts": t, "ammo": n}
         self.ammo: dict[str, dict] = {}
         self.magic_streak: int = 0
@@ -140,8 +147,14 @@ class CheatDetect(Plugin):
         # offenders, who cluster at 22-30 m/s. Do not lower it.
         "detect_speedhack": True,
         "speed_max_foot_mps": 18.0,
-        # 8 ticks x 2 s = ~16 s sustained. See the scaling table up top.
-        "speed_sustained_ticks": 8,
+        # How long the player has to stay over the limit before it is called.
+        # In SECONDS, measured from the game's own clock, so it means the same
+        # thing at every --hz. It used to be a tick count, which only meant 16
+        # seconds at the one tick rate it was written for: the same 8 there is
+        # 2.7 s at 3 Hz, and a parachute landing or a bail from a moving truck
+        # lasts about that long. That is a false accusation waiting for a
+        # config nobody thought to re-scale.
+        "speed_sustained_seconds": 16.0,
 
         # ---- infinite ammo ----
         # Same player, same weapon, N damage events, and their carried ammo
@@ -286,7 +299,7 @@ class CheatDetect(Plugin):
     def _speedhack(self, ctx: TickContext, by_eos: dict, in_vehicle: set,
                    elapsed: Optional[float], cache_reset: bool) -> None:
         limit = float(self.config["speed_max_foot_mps"])
-        need = int(self.config["speed_sustained_ticks"])
+        need = float(self.config["speed_sustained_seconds"])
 
         for eos, p in by_eos.items():
             st = self._state(eos)
@@ -305,7 +318,7 @@ class CheatDetect(Plugin):
             # one: a new pawn (respawn), a context change, a cache reset. Drop
             # the streak and re-anchor rather than measure across the gap.
             if not on_foot or cache_reset or addr != st.last_soldier_addr:
-                st.speed_streak = 0
+                st.speed_streak = 0.0
                 st.last_xy = xy
                 st.last_elapsed = elapsed
                 st.last_soldier_addr = addr
@@ -324,9 +337,13 @@ class CheatDetect(Plugin):
             st.last_elapsed = elapsed
 
             if speed > limit:
-                st.speed_streak += 1
+                # Accumulate the game's own seconds rather than counting
+                # samples: a sample is worth 2 s on one deployment and 0.33 s
+                # on another, and one torn read then buys a cheat call on the
+                # fast one. Sixteen seconds is sixteen seconds anywhere.
+                st.speed_streak += dt
             else:
-                st.speed_streak = 0
+                st.speed_streak = 0.0
                 continue
 
             if st.speed_streak >= need and self._cooled_down(
@@ -338,7 +355,7 @@ class CheatDetect(Plugin):
                     details={
                         "speedMps": round(speed, 1),
                         "limitMps": limit,
-                        "sustainedTicks": st.speed_streak,
+                        "sustainedSeconds": round(st.speed_streak, 1),
                         "sprintCapMps": 7.8,
                     })
 

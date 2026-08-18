@@ -66,14 +66,20 @@ def _run(cfg=None):
     return mgr, sink
 
 
-def _walk(mgr, *, speed_mps, ticks, eos="eos-1", start_tick=1, addr="0xA"):
-    """Move a player in a straight line at a fixed speed for N ticks."""
-    step_cm = speed_mps * TICK_SEC * 100.0
+def _walk(mgr, *, speed_mps, ticks, eos="eos-1", start_tick=1, addr="0xA",
+          tick_sec=TICK_SEC):
+    """Move a player in a straight line at a fixed speed for N ticks.
+
+    `tick_sec` is settable because the detector must not care: the same wall
+    clock has to mean the same thing whether the reader samples every 2 s or
+    every third of a second.
+    """
+    step_cm = speed_mps * tick_sec * 100.0
     for i in range(ticks):
         mgr.run_tick(
             _snap([_player(eos=eos, x=step_cm * i, addr=addr)],
-                  tick=start_tick + i, elapsed=TICK_SEC * i),
-            tick=start_tick + i, now=1000.0 + TICK_SEC * i)
+                  tick=start_tick + i, elapsed=tick_sec * i),
+            tick=start_tick + i, now=1000.0 + tick_sec * i)
 
 
 # --------------------------------------------------------------------------
@@ -86,17 +92,48 @@ def test_sprinting_never_flags():
     assert sink.rows == []
 
 
-def test_speedhack_needs_the_full_streak():
-    """8 ticks at 2 s = ~16 s sustained. One tick short must stay quiet."""
-    need = CheatDetect.DEFAULT_CONFIG["speed_sustained_ticks"]
+def test_speedhack_needs_the_full_window():
+    """Sixteen seconds of it. One sample short must stay quiet."""
+    secs = CheatDetect.DEFAULT_CONFIG["speed_sustained_seconds"]
+    need = int(secs / TICK_SEC)
     mgr, sink = _run()
     # The first tick only anchors the position, so N+1 samples give N speeds.
     _walk(mgr, speed_mps=30.0, ticks=need)     # -> need-1 over-speed samples
-    assert sink.rows == [], "fired before the streak was complete"
+    assert sink.rows == [], "fired before the window was complete"
 
     mgr, sink = _run()
     _walk(mgr, speed_mps=30.0, ticks=need + 1)
     assert sink.types() == ["speedhack"]
+
+
+def test_the_window_is_the_same_sixteen_seconds_at_any_tick_rate():
+    """The thresholds arrived as TICK counts with a note to re-scale them by
+    hand after changing --hz. That note was correctly written and duly
+    ignored: the first deployment to switch this on ran six times faster, where
+    the inherited count meant 2.7 seconds instead of 16 - and a parachute
+    landing lasts about that long. Time is measured, not counted."""
+    secs = CheatDetect.DEFAULT_CONFIG["speed_sustained_seconds"]
+
+    for tick_sec in (2.0, 1.0, 1.0 / 3.0):
+        n = int(round(secs / tick_sec))
+        # Just under the window: silent, however many samples that took.
+        mgr, sink = _run()
+        _walk(mgr, speed_mps=30.0, ticks=n - 1, tick_sec=tick_sec)
+        assert sink.rows == [], f"fired early at a {tick_sec:.2f}s tick"
+        # Just over it: fires, however many samples that took.
+        mgr, sink = _run()
+        _walk(mgr, speed_mps=30.0, ticks=n + 2, tick_sec=tick_sec)
+        assert sink.types() == ["speedhack"], \
+            f"never fired at a {tick_sec:.2f}s tick"
+
+
+def test_a_burst_shorter_than_the_window_stays_quiet_when_sampled_fast():
+    """The exact false positive the rescale exists to prevent: a few seconds
+    over the limit - a parachute landing, a bail from a moving truck - read by
+    a fast sampler. Under a tick count it was nine samples and fired."""
+    mgr, sink = _run()
+    _walk(mgr, speed_mps=30.0, ticks=12, tick_sec=1.0 / 3.0)   # ~4 s of it
+    assert sink.rows == [], "a four-second burst was called a speedhack"
 
 
 def test_speedhack_reports_the_speed_it_saw():
@@ -105,6 +142,8 @@ def test_speedhack_reports_the_speed_it_saw():
     d = sink.rows[0]["details"]
     assert abs(d["speedMps"] - 30.0) < 0.5
     assert d["limitMps"] == 18.0
+    assert d["sustainedSeconds"] >= 16.0, \
+        "the evidence has to say how long it lasted, in a unit that travels"
 
 
 def test_a_single_teleport_spike_does_not_flag():
