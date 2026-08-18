@@ -24,7 +24,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from . import __version__, config, elo
 
@@ -870,6 +870,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # stats DB, so without one the plugins run but have nowhere to write —
     # pointless, and we say that instead of failing quietly.
     plugin_mgr = None
+    alert_notifier = None
     plugins_cfg = (Path(args.plugins_config).expanduser()
                    if getattr(args, "plugins_config", None) else None)
     if plugins_cfg:
@@ -880,9 +881,26 @@ def cmd_serve(args: argparse.Namespace) -> int:
                       "— plugins disabled", file=sys.stderr)
             else:
                 cfg = load_config(plugins_cfg)
+                # Storing an alert and announcing it are separate concerns, so
+                # the notifier WRAPS the store rather than being a plugin of
+                # its own: every detector written from now on is announced
+                # without having to know the notifier exists.
+                emit: Callable[[dict], None] = stats_store.insert_alert
+                hook = config.get("alert_webhook")
+                if hook:
+                    from .plugins.notify import DiscordNotifier
+                    alert_notifier = DiscordNotifier(
+                        str(hook),
+                        replay_base=config.get("alert_replay_base") or None,
+                        server_label=args.server_id,
+                        min_confidence=float(
+                            config.get("alert_min_confidence") or 0))
+                    emit = alert_notifier.wrap(emit)
+                    # Never print the URL: it is a credential.
+                    print("plugins: alerts also go to a webhook",
+                          file=sys.stderr)
                 plugin_mgr = PluginManager(
-                    cfg, server_id=args.server_id,
-                    emit_alert=stats_store.insert_alert)
+                    cfg, server_id=args.server_id, emit_alert=emit)
                 if plugin_mgr.plugins:
                     print(f"plugins: {', '.join(plugin_mgr.plugins)}",
                           file=sys.stderr)

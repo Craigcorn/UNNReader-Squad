@@ -79,6 +79,20 @@ DEFAULTS: dict[str, Any] = {
     # swap between the two processes and rolls back if the new binary will not
     # boot. See sqreader/updater.py.
     "update_enabled": True,
+
+    # Where to announce plugin alerts. A Discord webhook URL, or None to keep
+    # them in the database only. This is a CREDENTIAL — anyone holding it can
+    # post into that channel — so it lives in the config file rather than in a
+    # command line other users on the box can read out of `ps`.
+    "alert_webhook": None,
+    # Alerts below this confidence are stored but not announced. Detectors are
+    # tuned to be noisy on purpose so the evidence is kept; a channel humans
+    # actually read wants a higher bar than a table does.
+    "alert_min_confidence": 0.0,
+    # Base URL used to build "watch the replay" links, e.g.
+    # "https://squadreader.com". Without it an alert still arrives, just
+    # without a way to go and look at it.
+    "alert_replay_base": None,
 }
 
 _cache: dict[str, Any] | None = None

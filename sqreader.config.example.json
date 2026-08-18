@@ -13,6 +13,21 @@
   "squad_log_glob": "/home/*/serverfiles/SquadGame/Saved/Logs/SquadGame.log",
   "server_id": "squad",
 
+  "_alerts_comment": [
+    "Plugin alerts (see --plugins-config) always land in the stats database.",
+    "Set alert_webhook to a Discord webhook URL to have them announced there",
+    "as well. That URL is a CREDENTIAL - anyone holding it can post in the",
+    "channel - which is why it lives here and not on a command line other",
+    "users on the box can read out of `ps`.",
+    "alert_replay_base builds a 'watch the replay' link on each alert; without",
+    "it the alert still arrives, just with no way to go and look.",
+    "alert_min_confidence keeps the noisy end of a detector in the database",
+    "without putting it in a channel humans are expected to read."
+  ],
+  "alert_webhook": null,
+  "alert_replay_base": "https://squadreader.com",
+  "alert_min_confidence": 0.0,
+
   "_multi_instance_comment": [
     "Running SEVERAL Squad servers on one box? Set squad_port to the -Port= of",
     "the one THIS agent reads, and give each agent its own server_id. Without",
