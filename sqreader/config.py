@@ -80,6 +80,12 @@ DEFAULTS: dict[str, Any] = {
     # boot. See sqreader/updater.py.
     "update_enabled": True,
 
+    # Path to plugins_config.json, for deployments whose start command is not
+    # ours to edit - a container entrypoint baked into an image, a unit file
+    # someone else manages. `--plugins-config` still wins when it is given.
+    # Without either, no plugin is constructed at all.
+    "plugins_config": None,
+
     # Where to announce plugin alerts. A Discord webhook URL, or None to keep
     # them in the database only. This is a CREDENTIAL — anyone holding it can
     # post into that channel — so it lives in the config file rather than in a

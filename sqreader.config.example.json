@@ -13,6 +13,13 @@
   "squad_log_glob": "/home/*/serverfiles/SquadGame/Saved/Logs/SquadGame.log",
   "server_id": "squad",
 
+  "_plugins_comment": [
+    "Plugins are off unless a config path is given. --plugins-config wins;",
+    "this key is the fallback for deployments whose start command is not",
+    "yours to edit. The file it points at is {plugin_id: {enabled, config}}."
+  ],
+  "plugins_config": null,
+
   "_alerts_comment": [
     "Plugin alerts (see --plugins-config) always land in the stats database.",
     "Set alert_webhook to a Discord webhook URL to have them announced there",

@@ -871,8 +871,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # pointless, and we say that instead of failing quietly.
     plugin_mgr = None
     alert_notifier = None
-    plugins_cfg = (Path(args.plugins_config).expanduser()
-                   if getattr(args, "plugins_config", None) else None)
+    # The flag wins; the config key is the fallback, so a deployment whose
+    # start command belongs to somebody else - an image entrypoint, a unit
+    # file - can still turn plugins on by editing a file it does own.
+    _plugins_cfg_raw = (getattr(args, "plugins_config", None)
+                        or config.get("plugins_config"))
+    plugins_cfg = (Path(str(_plugins_cfg_raw)).expanduser()
+                   if _plugins_cfg_raw else None)
     if plugins_cfg:
         try:
             from .plugins import PluginManager, load_config

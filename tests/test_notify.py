@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from sqreader.plugins import notify
 from sqreader.plugins.notify import (
@@ -182,3 +183,39 @@ def test_a_batch_is_one_message_not_ten(monkeypatch):
 
 def test_it_never_sends_more_embeds_than_discord_accepts():
     assert notify.MAX_EMBEDS <= 10
+
+
+# --- turning plugins on without owning the start command --------------------
+
+def test_plugins_can_be_enabled_from_the_config_file(tmp_path, monkeypatch):
+    """Altai's agent is started by a container entrypoint that is not in this
+    repo, so `--plugins-config` could not be added to it. A deployment must be
+    able to turn plugins on by editing a file it does own."""
+    from sqreader import config
+
+    cfg = tmp_path / "plugins_config.json"
+    cfg.write_text('{"cheat_detect": {"enabled": true}}', encoding="utf-8")
+    monkeypatch.setattr(config, "get",
+                        lambda k, d=None: str(cfg) if k == "plugins_config"
+                        else d)
+
+    class Args:
+        plugins_config = None
+    raw = getattr(Args, "plugins_config", None) or config.get("plugins_config")
+    assert raw and Path(str(raw)).is_file()
+
+    from sqreader.plugins import load_config
+    loaded = load_config(Path(str(raw)))
+    assert loaded.get("cheat_detect", {}).get("enabled") is True
+
+
+def test_the_flag_still_wins_over_the_config_key(tmp_path, monkeypatch):
+    from sqreader import config
+    monkeypatch.setattr(config, "get",
+                        lambda k, d=None: "/from/config" if k == "plugins_config"
+                        else d)
+
+    class Args:
+        plugins_config = "/from/flag"
+    raw = getattr(Args, "plugins_config", None) or config.get("plugins_config")
+    assert raw == "/from/flag"
