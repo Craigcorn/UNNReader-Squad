@@ -61,6 +61,7 @@ jobs:
       # each run so nothing accumulates. This build is UNSIGNED — signing is a
       # separate step before central will actually serve it.
       - name: Publish binary to the ci-build prerelease
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -69,3 +70,43 @@ jobs:
             --prerelease \
             --title "CI build (unsigned)" \
             --notes "Latest agent binary from CI. Unsigned — for testing and for feeding into the signing step, not for direct distribution."
+
+      # A tag gets a real release of its own. `ci-build` is a rolling tag that
+      # is deleted and recreated on every run, which makes it useless as a
+      # version signal: anyone subscribing to release webhooks would get a
+      # delete and a create on each CI run, always under the same name, and the
+      # asset behind it is explicitly not the thing to distribute.
+      #
+      # People running this without squadreader.com have no other channel -
+      # the signed manifest and staged rollout ride the central check-in, which
+      # they do not use. GitHub releases are the only thing they can automate
+      # against, so a tag has to produce something that means "version X
+      # exists, here it is, here is its checksum".
+      - name: Publish the tagged release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Verify the checksums here rather than trusting the build step: a
+          # release asset that does not match its own SHA256SUMS is worse than
+          # no release, because it is the file people verify against.
+          ( cd dist && sha256sum -c SHA256SUMS )
+          # Notes come from the CHANGELOG section for this version. Done in
+          # Python rather than awk because the pattern needs a literal `[`,
+          # and by the time that has survived YAML, the shell and awk's own
+          # string parser it had turned into a character class that matched
+          # nothing - producing an empty release note that still looked like
+          # it had worked.
+          python3 - "$TAG" > notes.md <<'PY'
+          import re, sys
+          tag = sys.argv[1].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## \[" + re.escape(tag) + r"\].*?$(.*?)(?=^## \[|\Z)",
+                        text, re.S | re.M)
+          body = (m.group(1).strip() if m else "")
+          print(body or "See CHANGELOG.md.")
+          PY
+          gh release create "$TAG" dist/sqreader-* dist/SHA256SUMS \
+            --title "$TAG" \
+            --notes-file notes.md
