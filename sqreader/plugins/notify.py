@@ -49,6 +49,13 @@ MAX_EMBEDS = 10
 #: How long the worker waits for more alerts before posting what it has.
 BATCH_WINDOW_SEC = 2.0
 
+#: Discord rejects a whole message when its embeds TOGETHER exceed 6000
+#: characters — with a bare 400 that names no cause. Ten embeds are allowed but
+#: ten *large* ones are not, so batching by count alone silently loses the
+#: entire batch exactly when there is most to say. Split by size as well, with
+#: headroom for the JSON envelope.
+MAX_MESSAGE_CHARS = 5500
+
 #: Colour by how sure the detector is. Red does not mean "bad", it means
 #: "confident": someone scanning the channel should see at a glance which rows
 #: are worth opening.
@@ -199,6 +206,39 @@ def build_embed(alert: dict, *, replay_base: Optional[str] = None,
     return embed
 
 
+def embed_chars(embed: dict) -> int:
+    """The characters Discord counts against the per-message limit: the text
+    fields, not the JSON around them."""
+    n = len(str(embed.get("title") or "")) + len(str(embed.get("description") or ""))
+    n += len(str((embed.get("footer") or {}).get("text") or ""))
+    for f in embed.get("fields") or []:
+        n += len(str(f.get("name") or "")) + len(str(f.get("value") or ""))
+    return n
+
+
+def split_by_size(embeds: list[dict],
+                  limit: int = MAX_MESSAGE_CHARS) -> list[list[dict]]:
+    """Group embeds into messages that will not be rejected.
+
+    A single embed over the limit is still sent on its own: build_embed already
+    truncates every field, so an oversized one means Discord's rules changed,
+    and posting it to find out beats dropping it silently.
+    """
+    out: list[list[dict]] = []
+    cur: list[dict] = []
+    size = 0
+    for e in embeds:
+        n = embed_chars(e)
+        if cur and (size + n > limit or len(cur) >= MAX_EMBEDS):
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(e)
+        size += n
+    if cur:
+        out.append(cur)
+    return out
+
+
 class DiscordNotifier:
     """Posts alerts to a Discord webhook, off the reader's thread."""
 
@@ -280,11 +320,14 @@ class DiscordNotifier:
         return batch
 
     def _post(self, batch: list[dict]) -> None:
-        payload = json.dumps({
-            "embeds": [build_embed(a, replay_base=self._replay_base,
-                                   server_label=self._server_label)
-                       for a in batch],
-        }).encode("utf-8")
+        embeds = [build_embed(a, replay_base=self._replay_base,
+                              server_label=self._server_label)
+                  for a in batch]
+        for chunk in split_by_size(embeds):
+            self._post_embeds(chunk)
+
+    def _post_embeds(self, embeds: list[dict]) -> None:
+        payload = json.dumps({"embeds": embeds}).encode("utf-8")
         for attempt in range(3):
             try:
                 req = urllib.request.Request(
@@ -306,9 +349,18 @@ class DiscordNotifier:
                     if self._stop.wait(min(max(wait, 0.5), 30.0)):
                         return
                     continue
-                # The URL is a credential — log the code and reason only.
-                log.warning("alert webhook rejected: HTTP %s %s",
-                            e.code, e.reason)
+                # The URL is a credential — log the code, the reason, and what
+                # Discord said was wrong (its body names the offending field
+                # and never echoes the URL). Without that a 400 is unfixable
+                # from the logs alone, which is how a whole batch went missing
+                # once already.
+                why = ""
+                try:
+                    why = (e.read() or b"")[:300].decode("utf-8", "replace")
+                except Exception:
+                    pass
+                log.warning("alert webhook rejected: HTTP %s %s %s",
+                            e.code, e.reason, why)
                 return
             except Exception as e:                   # DNS, TLS, timeout, ...
                 if attempt == 2:

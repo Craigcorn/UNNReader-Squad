@@ -31,6 +31,38 @@ follows [Semantic Versioning](https://semver.org/).
   against one awkward key cost more than half the time, and only that key
   needs it.
 
+## [1.4.4] - 2026-08-19
+
+### Added
+- Plugin alerts can be sent to a Discord webhook. Detection already worked
+  and every alert already landed in the database, but nothing ever read that
+  table - so the only way to learn about a cheater was to open SQLite, which
+  means nobody learned about anything. Set `alert_webhook` in the config.
+  Alerts carry the evidence the detector based its call on and a link to the
+  replay they came from.
+- Plugins can be switched on from the config file (`plugins_config`), not only
+  from the command line. On a deployment whose start command belongs to an
+  image or a unit file somebody else manages, the detectors could not be
+  enabled at all - which is why they had never run anywhere.
+- `scripts/plugin_replay.py` runs the detectors over recorded matches offline.
+  A detector is an accusation generator, and until now the only way to find
+  out what its thresholds did on your server was to switch it on and watch a
+  channel fill with names. Now it can be measured against the archive instead.
+
+### Fixed
+- Cheat detection measured "sustained for N ticks", which only meant what it
+  says at one tick rate. The inherited value meant 16 seconds at 0.5 Hz and
+  2.7 seconds at 3 Hz - and a parachute landing or a bail from a moving
+  vehicle lasts about that long, which is a false accusation waiting for a
+  config nobody thought to rescale. Durations are now measured in seconds from
+  the game's own clock and mean the same thing at any rate.
+- The 4 Hz position sampler could write a non-finite coordinate. Its gate was
+  a magnitude test, and `abs(nan) > 5e6` is false by IEEE rules, so a torn
+  read passed straight through into the recording; `z` was never checked at
+  all.
+- A recording whose layer the recorder could not identify - a scrim layer a
+  community named after itself - now draws its map instead of a bare grid.
+
 ## [1.4.3] - 2026-08-13
 
 ### Fixed

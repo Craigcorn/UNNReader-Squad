@@ -270,3 +270,38 @@ def test_the_flag_still_wins_over_the_config_key(tmp_path, monkeypatch):
         plugins_config = "/from/flag"
     raw = getattr(Args, "plugins_config", None) or config.get("plugins_config")
     assert raw == "/from/flag"
+
+
+# -- message size limit ---------------------------------------------------
+
+def test_embeds_are_split_so_a_message_stays_under_discords_limit():
+    """Ten embeds are allowed; ten LARGE ones are not, and Discord answers a
+    whole over-size message with a bare 400."""
+    from sqreader.plugins.notify import MAX_MESSAGE_CHARS, embed_chars, split_by_size
+    big = {"title": "t" * 200, "description": "d" * 1800,
+           "fields": [{"name": "n" * 20, "value": "v" * 900}]}
+    chunks = split_by_size([dict(big) for _ in range(8)])
+    assert len(chunks) > 1
+    for c in chunks:
+        assert sum(embed_chars(e) for e in c) <= MAX_MESSAGE_CHARS or len(c) == 1
+
+
+def test_small_embeds_still_travel_together():
+    from sqreader.plugins.notify import split_by_size
+    small = {"title": "x", "description": "y"}
+    assert len(split_by_size([dict(small) for _ in range(5)])) == 1
+
+
+def test_the_embed_count_cap_still_applies():
+    from sqreader.plugins.notify import MAX_EMBEDS, split_by_size
+    tiny = {"title": "x"}
+    chunks = split_by_size([dict(tiny) for _ in range(MAX_EMBEDS + 3)])
+    assert len(chunks) == 2
+    assert len(chunks[0]) == MAX_EMBEDS
+
+
+def test_one_oversized_embed_is_sent_alone_rather_than_dropped():
+    from sqreader.plugins.notify import split_by_size
+    huge = {"title": "t", "description": "d" * 9000}
+    chunks = split_by_size([huge])
+    assert chunks == [[huge]]
