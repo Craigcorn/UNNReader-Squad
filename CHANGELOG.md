@@ -4,33 +4,6 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-### Fixed
-- On a two-tier recording the viewer discarded every 4 Hz position update. The
-  compact format wraps those lines so they are never diffed, and the browser's
-  decoder had no branch for them at all, so each one came back as a copy of the
-  previous full snapshot - the replay played at the full-frame rate while a
-  quarter of the download was thrown away on arrival. Nothing compared the two
-  decoders against each other, which is why it survived; they now are.
-- A recording whose layer the reader could not identify drew a bare grid. The
-  layer lookup is keyed on the exact display name, so a community that names
-  its scrim layer after itself missed it and the frames carried no map at all.
-  The viewer now falls back to the map name, which those frames do carry.
-- Non-finite coordinates could reach a 4 Hz position frame. The sanity gate was
-  a magnitude test, and `abs(NaN) > limit` is false, so a torn read passed
-  straight through; `z` came from the same struct and was never checked at all.
-- The admin free-camera is no longer drawn on the map. It is not a player,
-  nobody in the match can see it, and it moved wherever whoever was spectating
-  happened to look.
-- Direction and Frontline markers are drawn as the strokes they are, with the
-  placing squad in a disc at the point the drag began.
-
-### Changed
-- Replay decoding in the browser is about twice as fast: guarding every field
-  against one awkward key cost more than half the time, and only that key
-  needs it.
-
 ## [1.4.4] - 2026-08-19
 
 ### Added
@@ -48,8 +21,35 @@ follows [Semantic Versioning](https://semver.org/).
   A detector is an accusation generator, and until now the only way to find
   out what its thresholds did on your server was to switch it on and watch a
   channel fill with names. Now it can be measured against the archive instead.
+- The map has a ruler: right-drag (or shift+drag) reads the distance in
+  metres with its compass bearing, and a drag continued from the last
+  endpoint extends it into a route, each leg keeping its own reading with
+  the total at the end. Distances are flat map metres - the ones keypads are
+  drawn in - so height is ignored on purpose: two points either side of a
+  valley are not closer for sharing an altitude. A plain click or Escape
+  puts the measurement away; panning the map, or inspecting one of the two
+  things just measured between, does not.
+
+### Changed
+- The Commons Clause now sits on top of the AGPL: use it, change it, share
+  it - just do not sell it, and that includes selling hosting or support
+  whose value comes substantially from this tool. Running a game server that
+  happens to use sqreader is not selling it, donations and paid whitelists
+  included: the value there is the server, not this. Everything the AGPL says
+  still holds, and the added condition makes sqreader source-available rather
+  than open source in the OSI's sense - deliberately, and said plainly in
+  LICENSE, README and NOTICE rather than buried.
+- Replay decoding in the browser is about twice as fast: guarding every field
+  against one awkward key cost more than half the time, and only that key
+  needs it.
 
 ### Fixed
+- On a two-tier recording the viewer discarded every 4 Hz position update. The
+  compact format wraps those lines so they are never diffed, and the browser's
+  decoder had no branch for them at all, so each one came back as a copy of the
+  previous full snapshot - the replay played at the full-frame rate while a
+  quarter of the download was thrown away on arrival. Nothing compared the two
+  decoders against each other, which is why it survived; they now are.
 - Cheat detection measured "sustained for N ticks", which only meant what it
   says at one tick rate. The inherited value meant 16 seconds at 0.5 Hz and
   2.7 seconds at 3 Hz - and a parachute landing or a bail from a moving
@@ -60,8 +60,15 @@ follows [Semantic Versioning](https://semver.org/).
   a magnitude test, and `abs(nan) > 5e6` is false by IEEE rules, so a torn
   read passed straight through into the recording; `z` was never checked at
   all.
-- A recording whose layer the recorder could not identify - a scrim layer a
-  community named after itself - now draws its map instead of a bare grid.
+- A recording whose layer the reader could not identify - a scrim layer a
+  community named after itself - drew a bare grid. The layer lookup is keyed
+  on the exact display name, so those frames carried no map at all; the viewer
+  now falls back to the map name, which they do carry.
+- The admin free-camera is no longer drawn on the map. It is not a player,
+  nobody in the match can see it, and it moved wherever whoever was spectating
+  happened to look.
+- Direction and Frontline markers are drawn as the strokes they are, with the
+  placing squad in a disc at the point the drag began.
 
 ## [1.4.3] - 2026-08-13
 
