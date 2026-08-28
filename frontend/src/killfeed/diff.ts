@@ -82,6 +82,12 @@ export interface PendingDeath {
   // even though it is emitted a tick later.
   wallClockMs: number;
   gameTimeSec: number | null;
+  // The snapshot tick the death was observed on. The hold expires only when
+  // a frame with a DIFFERENT tick arrives: a two-tier replay interleaves
+  // reconstructed position frames that share the base frame's tick and carry
+  // no damage events by design, and expiring on one of those is giving up
+  // one frame before the evidence could possibly arrive.
+  heldAtTick: number | null;
 }
 
 export function createDiffState(): DiffState {
@@ -462,11 +468,23 @@ export function diffSnapshot(
     };
   };
 
-  // Deaths held from LAST tick go first — their evidence, if any, arrived in
-  // this tick's buffer/events — and emit unconditionally: one tick is the
-  // whole budget, and an honest "?" beats a row that never appears.
-  for (const v of state.pendingDeaths) out.push(resolveDeath(v, true)!);
-  state.pendingDeaths = [];
+  // Deaths held from an EARLIER tick go first — their evidence, if any, has
+  // now arrived in the buffer/events. The hold's budget is one ADVANCED
+  // tick, not one call: reconstructed position frames share their base
+  // frame's tick and carry no events, so only a frame with a new tick can
+  // prove the evidence is truly absent. On a frame with a new tick the death
+  // emits unconditionally — an honest "?" beats a row that never appears.
+  {
+    const stillHeld: PendingDeath[] = [];
+    for (const v of state.pendingDeaths) {
+      const tickAdvanced = v.heldAtTick == null || snap.tick == null
+        || snap.tick !== v.heldAtTick;
+      const e = resolveDeath(v, tickAdvanced);
+      if (e) out.push(e);
+      else stillHeld.push(v);
+    }
+    state.pendingDeaths = stillHeld;
+  }
 
   for (const p of deaths) {
     const vname = p.name as string;
@@ -478,6 +496,7 @@ export function diffSnapshot(
       vehicleClass: findPlayerVehicle(snap, vname)?.classShort ?? null,
       wallClockMs: wallMs,
       gameTimeSec: gameTime,
+      heldAtTick: snap.tick ?? null,
     };
     const e = resolveDeath(v, false);
     if (e) out.push(e);

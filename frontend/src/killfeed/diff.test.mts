@@ -91,10 +91,10 @@ function evt(o: any): any {
 // one tick for its (usually late) damage event before conceding.
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("B","b",2,0,0)]));
-  const r0 = diffSnapshot(s, snap([P("B","b",2,0,1)], []));
+  diffSnapshot(s, snap([P("B","b",2,0,0)], [], 1));
+  const r0 = diffSnapshot(s, snap([P("B","b",2,0,1)], [], 2));
   eq(r0.newEntries.length, 0, "evidence-free death held one tick");
-  const r = diffSnapshot(s, snap([P("B","b",2,0,1)], []));
+  const r = diffSnapshot(s, snap([P("B","b",2,0,1)], [], 3));
   eq(r.newEntries.length, 1, "one died row");
   eq(r.newEntries[0].killer, null, "no killer invented");
   eq(r.newEntries[0].victim, "B", "victim B");
@@ -257,14 +257,33 @@ function evt(o: any): any {
 // event at N+1). The death is held one tick and becomes a Suicide row, not "?".
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("A","a",1,0,0)]));                        // seed
-  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)]));             // deaths++, no events
+  diffSnapshot(s, snap([P("A","a",1,0,0)], [], 1));                 // seed
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 2));      // deaths++, no events
   eq(r1.newEntries.length, 0, "evidence-free death held one tick");
   const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)],
-    [evt({ killed: true, victim: "A", selfInflicted: true })]));
+    [evt({ killed: true, victim: "A", selfInflicted: true })], 3));
   eq(r2.newEntries.length, 1, "held death emitted on the next tick");
   eq(r2.newEntries[0].suicide, true, "late selfInflicted event makes it a suicide");
   eq(r2.newEntries[0].killer, null, "a suicide row has no killer");
+}
+
+// The two-tier shape that broke the first version of the hold: reconstructed
+// position frames share the base frame's TICK and carry no damage events, so
+// a hold that expires per CALL concedes on a position frame one call before
+// the evidence can arrive. The hold must survive same-tick frames.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0)], [], 1));                 // seed
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 2));      // full: deaths++
+  eq(r1.newEntries.length, 0, "death held on its full frame");
+  const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 2));      // pos frame: same tick, no events
+  eq(r2.newEntries.length, 0, "hold survives a same-tick position frame");
+  const r3 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 2));      // another pos frame
+  eq(r3.newEntries.length, 0, "hold survives several of them");
+  const r4 = diffSnapshot(s, snap([P("A","a",1,0,1)],
+    [evt({ killed: true, victim: "A", selfInflicted: true })], 3)); // next full: evidence
+  eq(r4.newEntries.length, 1, "suicide emitted on the next full frame");
+  eq(r4.newEntries[0].suicide, true, "attributed as a suicide, not ?");
 }
 
 // Same-tick suicide is immediate — the hold exists only for missing evidence.
@@ -282,11 +301,11 @@ function evt(o: any): any {
 // suicides.
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)]));
-  const r1 = diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,1)]));
+  diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)], [], 1));
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,1)], [], 2));
   eq(r1.newEntries.length, 0, "death with late event held");
   const r2 = diffSnapshot(s, snap([P("A","a",1,1,0), P("B","b",2,0,1)],
-    [evt({ killed: true, attacker: "A", victim: "B", victimEosId: "b", victimTeam: 2 })]));
+    [evt({ killed: true, attacker: "A", victim: "B", victimEosId: "b", victimTeam: 2 })], 3));
   const held = r2.newEntries.find((e: any) => e.victim === "B");
   ok(held, "held death emitted");
   eq(held!.killer, "A", "late killed event attributes the killer");
@@ -296,11 +315,11 @@ function evt(o: any): any {
 // with nothing invented.
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("A","a",1,0,0)]));
-  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)]));
+  diffSnapshot(s, snap([P("A","a",1,0,0)], [], 1));
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 2));
   eq(r1.newEntries.length, 0, "held");
-  const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)]));
-  eq(r2.newEntries.length, 1, "conceded after one tick");
+  const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)], [], 3));
+  eq(r2.newEntries.length, 1, "conceded after one advanced tick");
   eq(r2.newEntries[0].killer, null, "no killer invented");
   eq(r2.newEntries[0].suicide, false, "not guessed as a suicide");
 }

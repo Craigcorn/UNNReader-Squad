@@ -82,10 +82,15 @@ follows [Semantic Versioning](https://semver.org/).
   no evidence yet, so an honest "?", one frame before the honesty was
   earned. Suicide events also never enter the attack buffer - they have no
   attacker - so the late event had no second chance to attach. An
-  evidence-free death is now held a single tick and retried against the
-  next frame before it concedes; the same hold attributes any ordinary kill
-  whose event runs a frame late, and a death on a recording's final frame
-  is flushed rather than lost. The feed is computed by the viewer, so this
+  evidence-free death is now held and retried until a frame with a NEW tick
+  still carries nothing - not merely until the next frame, because a
+  two-tier replay interleaves reconstructed position frames that share the
+  base frame's tick and carry no events by design, and the first version of
+  this hold conceded on one of those, one frame before the evidence could
+  possibly arrive (verified against the real recording: full frame, position
+  frame, then the evidence). The same hold attributes any ordinary kill
+  whose event runs a frame late, and a death on a recording's final frame is
+  flushed rather than lost. The feed is computed by the viewer, so this
   repairs old recordings too - the same replay that showed "?" shows
   "Suicide" on reload.
 - Backfilling a two-tier recording handed the stats writer its 4 Hz position
