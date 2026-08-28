@@ -128,13 +128,30 @@ directly (read-only — never mutate the snapshot).
   any magazine-dump-plus-mandatory-reload cycle could produce.
 - **Model:** per `(player, held weapon className)` track: estimated capacity
   = the largest single-magazine value ever observed for that weapon (memory-
-  verified, no static tables), and a rolling consumption window. Alert when
-  `consumed > capacity_est * ceiling_factor` within `window_seconds`, with an
-  absolute floor so tiny-mag weapons can't trip on estimation noise.
-- **Config defaults (deliberately loose until D):** `noreload_window_seconds:
-  30.0`, `noreload_ceiling_factor: 3.0` (three full magazines through the gun
-  in 30 s with zero reload pauses — belt-fed MGs at ~200-round boxes and
-  ~8-second reloads stay under this), `noreload_min_rounds: 120`.
+  verified, no static tables), and a rolling consumption window. The legit
+  ceiling is the mandatory dump-then-reload cycle, so it must scale with
+  capacity, not multiply it flatly (a flat "3× capacity" default was
+  considered and rejected: a legit rifle player mag-spamming at robot speed
+  reaches ~150 rounds/30 s, which would have crossed a 120-round flat
+  threshold — a false accusation waiting):
+
+  ```
+  cycle_min = capacity_est / MAX_RPS + RELOAD_MIN
+  ceiling   = capacity_est * (window / cycle_min + 1)   # +1 = partial mag at the edge
+  alert when consumed > ceiling * noreload_margin
+        and consumed >= noreload_min_rounds
+  ```
+
+- **Config defaults (provisional until D):** `noreload_window_seconds: 30.0`,
+  `noreload_max_rps: 17.0` (~1000 rpm — faster than any infantry weapon),
+  `noreload_reload_min_seconds: 3.0` (faster than any real reload),
+  `noreload_margin: 1.5`, `noreload_min_rounds: 120` (floor against
+  capacity-estimation noise). Worked numbers to keep in the comment: 30-round
+  rifle → ceiling ≈ 217, ×1.5 ≈ 325, vs a cheater's continuous ~350–500 in
+  30 s — detectable; 200-round belt box → threshold ≈ 690, so a no-reload
+  MG (~300) is invisible, and acceptably so: belt weapons reload so rarely
+  the cheat barely helps there. The detector's value is on magazine weapons,
+  where reloads are constant.
 - **Guards:** reset the window on weapon-class change (the visible pool is a
   different gun's — same rule `infinite_ammo` applies), on respawn, on
   vehicle entry; ignore ticks where the magazines list is absent. Resupply
