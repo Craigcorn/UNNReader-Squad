@@ -152,13 +152,46 @@ directly (read-only — never mutate the snapshot).
   MG (~300) is invisible, and acceptably so: belt weapons reload so rarely
   the cheat barely helps there. The detector's value is on magazine weapons,
   where reloads are constant.
-- **Guards:** reset the window on weapon-class change (the visible pool is a
-  different gun's — same rule `infinite_ammo` applies), on respawn, on
+- **Single-shot path (grenade launchers, rockets — where UNN actually sees
+  this cheat).** The windowed model is structurally blind there: capacity is
+  1, the whole pool is a handful of rounds, and the 120-round floor can never
+  be reached. For observed capacity below `noreload_smallmag_capacity: 10`,
+  switch to a **shot-spacing rule**: a drop of `>= 2 + floor(dt /
+  noreload_reload_min_seconds)` rounds within one tick interval means two
+  shots closer together than one mandatory reload — mechanically impossible
+  (dt in game-clock seconds; at dt≈2 s vs the 3 s universal reload, any
+  2-round drop violates). Count such strikes; alert on
+  `noreload_strikes: 2` within the cooldown window. The `min_rounds` floor
+  applies **only** to the windowed path.
+- **Guards (both paths):** reset on weapon-class change (the visible pool is
+  a different gun's — same rule `infinite_ammo` applies), on respawn, on
   vehicle entry; ignore ticks where the magazines list is absent. Resupply
   only *increases* the sum → masks toward false negatives, which is the safe
   direction; say so in a comment.
-- **Details payload:** weapon, rounds consumed, window seconds, capacity
-  estimate, ceiling used.
+- **Details payload:** weapon, path taken, rounds consumed, dt/window,
+  capacity estimate, ceiling or strike count.
+
+### B2b. `infinite_ammo` extension for launchers (projectile-corroborated)
+
+The existing `infinite_ammo` matches the damage event's `causerWeapon`
+against the held weapon's class by substring — and for explosives the log's
+causer is expected to be the **projectile** class, not the launcher, so
+launcher events are likely discarded silently (verify against archive
+`causerWeapon` strings in D). The verified route that avoids the problem:
+`projectiles[]` entries carry a memory-verified `firer`
+(`read_projectile`, snapshot.py:1531-1543). New default-off variant
+(`detect_infinite_ammo_launcher: False`): count projectile spawns attributed
+to a player (diff `projectiles[]` by id per tick, same restart-flood guard
+as B3) while their held launcher's ammo sum never decreases across
+`inf_ammo_launcher_min_shots: 3` verified launches → alert. Works with zero
+damage events (spraying a treeline) and never guesses attribution.
+
+**D verification items for B2/B2b:** how launcher magazines present in real
+data (list shape for 1-round weapons); whether disposable tubes (AT4-style)
+despawn as a weapon swap after firing; which projectile classes
+`read_projectile` actually tracks (if 40 mm GL rounds are absent from
+`projectiles[]`, the GL case falls back to the damage-event route with
+corrected causer matching).
 
 ### B3. `remote_mine`
 
