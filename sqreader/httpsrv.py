@@ -12,6 +12,8 @@ Endpoints
 ---------
     GET /                       landing page
     GET /viewer  /viewer.html   the canvas viewer (replay UI)
+    GET /<anything else>        the viewer again — the SPA owns its own URLs,
+                                so a deep link survives a hard reload
     GET /health                 producer liveness (last-tick age, plain text)
     GET /health/deep            rich JSON ops stats (build ms, cache sizes,
                                 hit rates) — via the producer's callback
@@ -343,6 +345,27 @@ def _resolve_sqmap(sqmaps_dir: Path, name: str) -> Optional[Path]:
     return None
 
 
+def _looks_like_spa_route(path: str, accept: Optional[str]) -> bool:
+    """Whether a GET that matched no endpoint should be answered with the app.
+
+    The viewer is a single-page app: `/viewer/<recording-id>` is a route the
+    browser resolves in JavaScript after `index.html` has loaded, and this
+    server has never heard of it. That works perfectly until somebody hard-
+    reloads the page or opens a link a teammate sent them, at which point the
+    request arrives here and used to get a 404.
+
+    A missing FILE must still be a 404, though. Serving `index.html` in place
+    of a bundle or an image turns a clear "not found" into a syntax error three
+    layers away, in a stack trace that says nothing about the real problem. So
+    anything that looks like a file — a dot in the last path segment — keeps
+    its 404 unless the request is a navigation that explicitly asked for HTML,
+    which is exactly what a hard reload of a dotted route is.
+    """
+    if "." not in path.rsplit("/", 1)[-1]:
+        return True
+    return "text/html" in (accept or "").lower()
+
+
 def _make_handler(
     heartbeat: _TickBeat,
     recordings_dir: Optional[Path],
@@ -441,6 +464,15 @@ def _make_handler(
                           "/viewer-next", "/viewer-next/") \
                     or path.startswith("/assets/"):
                 self._handle_spa(path)
+            elif (frontend_dir is not None
+                    and not path.startswith("/api/")
+                    and _looks_like_spa_route(
+                        path, self.headers.get("Accept"))):
+                # A single-page app owns its own URLs: /viewer/<id> is a route
+                # the browser resolves in JavaScript and this server has never
+                # heard of. Answering 404 works right up until somebody reloads
+                # the page or opens a link a teammate sent them.
+                self._handle_spa("/")
             else:
                 self.send_error(404, "no such endpoint")
 
@@ -632,23 +664,19 @@ def _make_handler(
             Serve the Vite-built SPA.
 
             Routes:
-              /                                  → index.html
-              /viewer  /viewer.html  /viewer-next → index.html (aliases)
               /assets/<hashed>                   → dist/assets/<hashed>
+              anything else                      → index.html
 
-            /viewer-next stays as a legacy alias for any bookmarks
-            from the Phase 1 migration window.
+            The caller decides what counts as an app route (see
+            `_looks_like_spa_route`); this only serves what it is handed.
+            /viewer-next stays as a legacy alias for any bookmarks from the
+            Phase 1 migration window.
             """
             if frontend_dir is None:
                 self.send_error(404, "frontend disabled (server started "
                                 "without --frontend-dir)")
                 return
-            if path in ("/", "/viewer", "/viewer.html",
-                        "/viewer-next", "/viewer-next/"):
-                target = frontend_dir / "index.html"
-                ctype = "text/html; charset=utf-8"
-                cache = "no-cache"
-            elif path.startswith("/assets/"):
+            if path.startswith("/assets/"):
                 # Hashed bundle filenames, safe to long-cache.
                 rel = path[len("/assets/"):]
                 if not re.match(r"^[A-Za-z0-9_.\-]+$", rel):
@@ -670,8 +698,9 @@ def _make_handler(
                 }.get(ext, "application/octet-stream")
                 cache = "public, max-age=31536000, immutable"
             else:
-                self.send_error(404, "no such SPA path")
-                return
+                target = frontend_dir / "index.html"
+                ctype = "text/html; charset=utf-8"
+                cache = "no-cache"
             try:
                 body = target.read_bytes()
             except FileNotFoundError:

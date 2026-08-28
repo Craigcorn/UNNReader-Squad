@@ -42,6 +42,14 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- A link into the viewer stopped working the moment anyone reloaded it. Only
+  four paths mapped to the app, so `/viewer/<recording-id>` - a route the
+  browser resolves for itself once the page has loaded - reached the server
+  as a real request and got a 404. It worked if you clicked your way there
+  and failed if you shared the link, which is the worse of the two. Anything
+  that is not an API path and does not look like a file now serves the app; a
+  missing bundle or image still gets its 404, because an HTML body under a
+  `.js` URL is a syntax error three layers from the actual problem.
 - Every detector that reads the kill feed was silently doing nothing. The
   attacker on a damage event is looked up by account id, and the lookup gave
   up rather than falling back to the name when that id matched nobody - which
