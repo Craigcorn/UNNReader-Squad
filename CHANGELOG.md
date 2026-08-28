@@ -75,6 +75,19 @@ follows [Semantic Versioning](https://semver.org/).
   Recordings made before this carry no team and never will.
 
 ### Fixed
+- A suicide showed in the kill feed as a question mark. The capture was
+  perfect - the recording holds a self-inflicted killed event naming the
+  victim - but the death counter increments one frame before the tracker
+  emits that event, and the feed judged the death on the frame it happened:
+  no evidence yet, so an honest "?", one frame before the honesty was
+  earned. Suicide events also never enter the attack buffer - they have no
+  attacker - so the late event had no second chance to attach. An
+  evidence-free death is now held a single tick and retried against the
+  next frame before it concedes; the same hold attributes any ordinary kill
+  whose event runs a frame late, and a death on a recording's final frame
+  is flushed rather than lost. The feed is computed by the viewer, so this
+  repairs old recordings too - the same replay that showed "?" shows
+  "Suicide" on reload.
 - Backfilling a two-tier recording handed the stats writer its 4 Hz position
   frames. A position frame is not a snapshot - it is a side channel to the
   recorder, and the live reader never gives one to the stats writer - so

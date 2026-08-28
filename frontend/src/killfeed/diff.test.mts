@@ -1,6 +1,6 @@
 // Standalone unit test for the event-first kill-feed diff. Bundled with
 // esbuild and run under node — no test framework needed.
-import { createDiffState, diffSnapshot } from "./diff.ts";
+import { createDiffState, diffSnapshot, drainPendingDeaths } from "./diff.ts";
 
 let passed = 0, failed = 0;
 function ok(cond: any, msg: string) {
@@ -86,10 +86,14 @@ function evt(o: any): any {
   eq(byV["D"], "C", "D killed by C (not cross-paired)");
 }
 
-// 4. Death with no event -> honest "died", no invented killer.
+// 4. Death with no event -> honest "died", no invented killer. The row now
+// appears one tick after the counter, because an evidence-free death is held
+// one tick for its (usually late) damage event before conceding.
 {
   const s = createDiffState();
   diffSnapshot(s, snap([P("B","b",2,0,0)]));
+  const r0 = diffSnapshot(s, snap([P("B","b",2,0,1)], []));
+  eq(r0.newEntries.length, 0, "evidence-free death held one tick");
   const r = diffSnapshot(s, snap([P("B","b",2,0,1)], []));
   eq(r.newEntries.length, 1, "one died row");
   eq(r.newEntries[0].killer, null, "no killer invented");
@@ -246,6 +250,72 @@ function evt(o: any): any {
   const r = diffSnapshot(s, at([P("A","a",1,1,0), P("B","b",2,0,1)], [], 131));   // B bleeds out @131 (31s<45s)
   eq(r.newEntries.length, 1, "bleed-out death emitted after many quiet ticks");
   eq(r.newEntries[0].killer, "A", "attacker survives the game-time TTL at 4 Hz");
+}
+
+// A give-up suicide whose event arrives one tick AFTER the death counter —
+// the exact shape observed on real data (deaths++ at frame N, selfInflicted
+// event at N+1). The death is held one tick and becomes a Suicide row, not "?".
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0)]));                        // seed
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)]));             // deaths++, no events
+  eq(r1.newEntries.length, 0, "evidence-free death held one tick");
+  const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)],
+    [evt({ killed: true, victim: "A", selfInflicted: true })]));
+  eq(r2.newEntries.length, 1, "held death emitted on the next tick");
+  eq(r2.newEntries[0].suicide, true, "late selfInflicted event makes it a suicide");
+  eq(r2.newEntries[0].killer, null, "a suicide row has no killer");
+}
+
+// Same-tick suicide is immediate — the hold exists only for missing evidence.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0)]));
+  const r = diffSnapshot(s, snap([P("A","a",1,0,1)],
+    [evt({ killed: true, victim: "A", selfInflicted: true })]));
+  eq(r.newEntries.length, 1, "same-tick suicide not deferred");
+  eq(r.newEntries[0].suicide, true, "same-tick suicide flagged");
+}
+
+// A real killed event arriving one tick late attributes the killer instead
+// of conceding "?" — the hold benefits every late-evidence death, not just
+// suicides.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)]));
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,1)]));
+  eq(r1.newEntries.length, 0, "death with late event held");
+  const r2 = diffSnapshot(s, snap([P("A","a",1,1,0), P("B","b",2,0,1)],
+    [evt({ killed: true, attacker: "A", victim: "B", victimEosId: "b", victimTeam: 2 })]));
+  const held = r2.newEntries.find((e: any) => e.victim === "B");
+  ok(held, "held death emitted");
+  eq(held!.killer, "A", "late killed event attributes the killer");
+}
+
+// Evidence never arrives: the honest "?" appears after exactly one held tick,
+// with nothing invented.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0)]));
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)]));
+  eq(r1.newEntries.length, 0, "held");
+  const r2 = diffSnapshot(s, snap([P("A","a",1,0,1)]));
+  eq(r2.newEntries.length, 1, "conceded after one tick");
+  eq(r2.newEntries[0].killer, null, "no killer invented");
+  eq(r2.newEntries[0].suicide, false, "not guessed as a suicide");
+}
+
+// A death on the final frame of a finite stream: drainPendingDeaths flushes
+// it as the unattributed row instead of losing it.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("A","a",1,0,0)]));
+  const r1 = diffSnapshot(s, snap([P("A","a",1,0,1)]));
+  eq(r1.newEntries.length, 0, "held at stream end");
+  const drained = drainPendingDeaths(s);
+  eq(drained.length, 1, "drain flushes the held death");
+  eq(drained[0].victim, "A", "drained row keeps its victim");
+  eq(drainPendingDeaths(s).length, 0, "drain empties the hold");
 }
 
 console.log(`\nkillfeed diff tests: ${passed} passed, ${failed} failed`);

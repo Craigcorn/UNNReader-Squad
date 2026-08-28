@@ -18,7 +18,7 @@ import { useEffect } from "react";
 import { fetchRecordingFrames, fetchRecordingMeta } from "./recordings";
 import { useViewerStore } from "../state/viewerStore";
 import { replayLoad } from "../state/replayLoad";
-import { createDiffState, diffSnapshot } from "../killfeed/diff";
+import { createDiffState, diffSnapshot, drainPendingDeaths } from "../killfeed/diff";
 import type { KillFeedEntry } from "../state/types";
 
 export function useReplayLoader() {
@@ -108,6 +108,10 @@ export function useReplayLoader() {
         const res = diffSnapshot(dstate, frames[i]!);
         for (const e of res.newEntries) timeline.push({ ...e, frameIdx: i });
       }
+      // A death on the very last frame is still held for its late evidence —
+      // flush it as the honest unattributed row rather than losing it.
+      for (const e of drainPendingDeaths(dstate))
+        timeline.push({ ...e, frameIdx: frames.length - 1 });
       setReplayKillTimeline(timeline);
       // Open at the FIRST frame so a replay starts at the beginning of the
       // match (was frames.length-1 = the end). Push it into curSnap twice so

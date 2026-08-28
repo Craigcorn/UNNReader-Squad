@@ -55,6 +55,13 @@ export interface DiffState {
   attackSeen: Set<string>;
   // recent attack events awaiting the death they caused
   attackBuffer: BufferedAttack[];
+  // Deaths whose evidence had not arrived yet. The death COUNTER increments
+  // one tick before the memory tracker emits the matching damage event
+  // (observed on real data: a give-up suicide showed deaths++ at frame N and
+  // its selfInflicted event at N+1) — so an evidence-free death is held ONE
+  // tick and retried against the next tick's events before it is allowed to
+  // become a "?" row. Finite streams flush via drainPendingDeaths.
+  pendingDeaths: PendingDeath[];
   // tick counter for unique entry ids
   seq: number;
   // initialised flag — first observed snapshot just seeds prevStats,
@@ -65,12 +72,25 @@ export interface DiffState {
   unattributedKills: number;
 }
 
+export interface PendingDeath {
+  vname: string;
+  veos: string | null;
+  teamId: number | null;
+  roleId: string | null;
+  vehicleClass: string | null;
+  // Captured at the death tick, so the row keeps the moment it happened
+  // even though it is emitted a tick later.
+  wallClockMs: number;
+  gameTimeSec: number | null;
+}
+
 export function createDiffState(): DiffState {
   return {
     prevStats: new Map(),
     lastKnownWeapon: new Map(),
     attackSeen: new Set(),
     attackBuffer: [],
+    pendingDeaths: [],
     seq: 0,
     inited: false,
     unattributedKills: 0,
@@ -349,14 +369,24 @@ export function diffSnapshot(
   // stable id, else name): found -> exact "A killed B"; not found -> an
   // honest "B died" with the world cause if an event names them. Never a
   // guessed killer.
-  for (const p of deaths) {
-    const vname = p.name as string;
-    const veos = p.eosId ?? null;
+  //
+  // One wrinkle, observed on real data: the death counter increments one
+  // tick BEFORE the memory tracker emits the matching damage event (a
+  // give-up suicide showed deaths++ at frame N and its selfInflicted event
+  // at N+1). Suicide events also never enter the attack buffer — they have
+  // no attacker — so the same-tick scan below is their only witness, and it
+  // used to run one tick too early and conclude "?". A death with no
+  // evidence this tick is therefore HELD one tick and retried against the
+  // next tick's buffer and events; only then does it concede.
+  const resolveDeath = (
+    v: PendingDeath, mustEmit: boolean,
+  ): KillFeedEntry | null => {
+    const vname = v.vname;
     let buf: BufferedAttack | undefined;
     for (let i = state.attackBuffer.length - 1; i >= 0; i--) {
       const b = state.attackBuffer[i]!;
       if (b.used || b.ev.victim !== vname) continue;
-      if (veos != null && b.ev.victimEosId != null && b.ev.victimEosId !== veos) continue;
+      if (v.veos != null && b.ev.victimEosId != null && b.ev.victimEosId !== v.veos) continue;
       buf = b;
       break;
     }
@@ -371,11 +401,11 @@ export function diffSnapshot(
       const w = resolveWeapon(attacker ?? "", vname, [ev], killerPlayer,
                               killerVehicle, state.lastKnownWeapon);
       const kTeam = attacker ? teamByName(attacker) : null;
-      const vTeam = p.teamId ?? ev.victimTeam;
-      out.push({
+      const vTeam = v.teamId ?? ev.victimTeam;
+      return {
         id: nextId(),
-        wallClockMs: wallMs,
-        gameTimeSec: gameTime,
+        wallClockMs: v.wallClockMs,
+        gameTimeSec: v.gameTimeSec,
         killer: suicide ? null : attacker,
         killerTeam: kTeam,
         killerRoleId: attacker ? playerByName.get(attacker)?.roleId ?? null : null,
@@ -387,18 +417,18 @@ export function diffSnapshot(
         headshot: w.headshot,
         victim: vname,
         victimTeam: vTeam,
-        victimRoleId: p.roleId ?? null,
-        victimVehicleClass: findPlayerVehicle(snap, vname)?.classShort ?? null,
+        victimRoleId: v.roleId,
+        victimVehicleClass: v.vehicleClass,
         tk: !suicide && kTeam !== null && kTeam === vTeam,
         suicide,
         wounded: false,
-      });
-      continue;
+      };
     }
 
-    // No killed event for this death: world cause (fall/drown), a
-    // bleed-out, or a kill the backend didn't capture. Show it with no
-    // attacker rather than inventing one; pull the cause from any event.
+    // No buffered attack for this death: a suicide (those events carry no
+    // attacker and are never buffered), a world cause (fall/drown), a
+    // bleed-out, or a kill the backend didn't capture. Scan this tick's
+    // events; show the death with no attacker rather than inventing one.
     let damageType: string | null = null;
     let isSuicide = false;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -407,10 +437,13 @@ export function diffSnapshot(
       if (ev.attacker === vname || ev.selfInflicted) isSuicide = true;
       if (ev.damageType) { damageType = ev.damageType; break; }
     }
-    out.push({
+    // Nothing names this death at all: hold it one tick (the evidence is
+    // usually one tick behind the counter) unless the hold is already spent.
+    if (!isSuicide && damageType == null && !mustEmit) return null;
+    return {
       id: nextId(),
-      wallClockMs: wallMs,
-      gameTimeSec: gameTime,
+      wallClockMs: v.wallClockMs,
+      gameTimeSec: v.gameTimeSec,
       killer: null,
       killerTeam: null,
       killerRoleId: null,
@@ -420,13 +453,35 @@ export function diffSnapshot(
       hitDistance: null,
       headshot: false,
       victim: vname,
-      victimTeam: p.teamId,
-      victimRoleId: p.roleId ?? null,
-      victimVehicleClass: findPlayerVehicle(snap, vname)?.classShort ?? null,
+      victimTeam: v.teamId,
+      victimRoleId: v.roleId,
+      victimVehicleClass: v.vehicleClass,
       tk: false,
       suicide: isSuicide,
       wounded: false,
-    });
+    };
+  };
+
+  // Deaths held from LAST tick go first — their evidence, if any, arrived in
+  // this tick's buffer/events — and emit unconditionally: one tick is the
+  // whole budget, and an honest "?" beats a row that never appears.
+  for (const v of state.pendingDeaths) out.push(resolveDeath(v, true)!);
+  state.pendingDeaths = [];
+
+  for (const p of deaths) {
+    const vname = p.name as string;
+    const v: PendingDeath = {
+      vname,
+      veos: p.eosId ?? null,
+      teamId: p.teamId ?? null,
+      roleId: p.roleId ?? null,
+      vehicleClass: findPlayerVehicle(snap, vname)?.classShort ?? null,
+      wallClockMs: wallMs,
+      gameTimeSec: gameTime,
+    };
+    const e = resolveDeath(v, false);
+    if (e) out.push(e);
+    else state.pendingDeaths.push(v);
   }
 
   // Age the attack buffer; drop consumed entries. Expire the rest by GAME TIME
@@ -447,6 +502,38 @@ export function diffSnapshot(
   if (state.attackSeen.size > 600) state.attackSeen = trimSet(state.attackSeen, 300);
 
   return { newEntries: out };
+}
+
+// Flush deaths still held for late evidence. A finite stream (the replay
+// precompute) must call this after its last frame, or a death on the final
+// tick would be held forever and never shown; live never needs it, because a
+// next tick always comes and drains the hold inline.
+export function drainPendingDeaths(state: DiffState): KillFeedEntry[] {
+  const out: KillFeedEntry[] = [];
+  for (const v of state.pendingDeaths) {
+    out.push({
+      id: `kf-drain-${state.seq++}`,
+      wallClockMs: v.wallClockMs,
+      gameTimeSec: v.gameTimeSec,
+      killer: null,
+      killerTeam: null,
+      killerRoleId: null,
+      killerVehicleClass: null,
+      weaponClass: null,
+      damageType: null,
+      hitDistance: null,
+      headshot: false,
+      victim: v.vname,
+      victimTeam: v.teamId,
+      victimRoleId: v.roleId,
+      victimVehicleClass: v.vehicleClass,
+      tk: false,
+      suicide: false,
+      wounded: false,
+    });
+  }
+  state.pendingDeaths = [];
+  return out;
 }
 
 // Keep only the most recently-added `keepLast` members of an insertion-
