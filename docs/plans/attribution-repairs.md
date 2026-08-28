@@ -1,6 +1,6 @@
 # Implementation plan: the two remaining attribution repairs
 
-Status: **awaiting Craig's approval** · drafted 2026-08-29 · target branch: `Replay-Improvements`
+Status: **approved 2026-08-29 — in implementation** · target branch: `Replay-Improvements`
 
 Read first: `CLAUDE.md` (hard rules and gates), and the execution-convention
 sections of `docs/plans/detectors-and-seeding.md` (house voice, the local
