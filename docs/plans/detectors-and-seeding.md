@@ -10,7 +10,36 @@ items were derived and approved in discussion), and skim
 untouched by this plan. Changelog entries go under `[Unreleased]` in the
 house narrative voice.
 
+Execution notes: work lands as house-voiced commits on `Replay-Improvements`,
+pushed as they complete. On this Windows dev box, full-repo mypy currently
+aborts on unrelated numpy stubs in the system Python — judge by per-file
+mypy and CI, don't chase it. Test-server access facts live in Workstream C.
+
 **In scope:** Workstreams A–E below.
+
+## Reference corpus (main server, Squad 10.5.x)
+
+Four real finalized matches (108–139 peak players; three RAAS, one
+Territory Control), recorded by the managed upstream agent, at
+`C:\Users\CRAIG\Documents\UNN\Misc\SquadReader Replays` (`.sqrx` +
+`.meta.json` each). This corpus is D's false-positive validation set and
+already settled several verification questions on 2026-08-28:
+
+- **The six ODK collector fields populate at 10.5.x** (captures up to 239,
+  suppliesDelivered up to 40 971, etc.) — see Workstream E for what remains.
+- **Causer mismatch confirmed:** explosive damage events name the projectile
+  (`BP_40MM_Proj2_C`, `BP_AT4_HighPenetration_Rocket_Proj2_C`), bullets name
+  the gun (`BP_L85A2_C`), vehicle weapons name the vehicle — the current
+  `infinite_ammo` substring check discards all non-rifle events.
+- **`projectiles[]` covers launchers**: 40 mm GL rounds, all rocket
+  families, mortars, tank shells, ATGMs all appear with tracked classes.
+- **Single-shot magazine shapes**: `BP_M136AT4_C → [1]`,
+  `BP_RPG7V2_Tandem_2mag_C → [1, 1]`, `BP_M320_HE_C → [1, 1, 1, 1]`; note
+  bayonets/binoculars present as `[0]` — capacity 0 must never arm B2.
+- **The main server also records single-tier at 0.5 Hz** (`positionFrames:
+  0`) — two-tier is aspirational everywhere today, so Workstream C's enable
+  makes the test box the first two-tier deployment; treat its recordings as
+  the first real exercise of that path.
 **Explicitly out of scope:** the parity harness (own plan, next), all Tier 1/2
 wishlist *stats* persistence (awaiting team reaction), the seek index and any
 wire-format change, `remote_shovel` (needs a live probing session first),
@@ -138,10 +167,11 @@ that's where the tuning history lives). Shot evidence, no ammo dependence:
 (`read_projectile`, snapshot.py:1531-1543); diff by projectile id per tick,
 with the same restart-flood guard as B3; works with zero damage events
 (spraying a treeline). (b) **bullets** — damage events, **after fixing
-causer matching**: the log likely names the projectile/round class rather
-than the gun, which would mean launcher and possibly other events have been
-silently discarded by the substring check all along (verify real
-`causerWeapon` strings in D). Alert when `fire_no_ammo_min_shots` (default
+causer matching**: confirmed against the reference corpus — explosives name
+the projectile class and vehicle weapons name the vehicle, so the substring
+check has been silently discarding every non-rifle event; the fix maps
+projectile/vehicle causers before matching, or matches only rifle-shaped
+causers and leaves launchers to the projectile path. Alert when `fire_no_ammo_min_shots` (default
 4) verified shots span `fire_no_ammo_min_window_seconds` (default 10) while
 the held weapon's summed ammo never decreases; any sum *increase* (resupply)
 resets the observation. Config flag `detect_fire_no_ammo: False` until D.
@@ -191,7 +221,9 @@ plumbing, same default-off posture):
   (dt in game-clock seconds; at dt≈2 s vs the 3 s universal reload, any
   2-round drop violates). Count such strikes; alert on
   `noreload_strikes: 2` within the cooldown window. The `min_rounds` floor
-  applies **only** to the windowed path.
+  applies **only** to the windowed path. Arm either path only when
+  `capacity_est >= 1`: bayonets and binoculars present as `[0]` magazines
+  in real data and can never fire.
 - **Guards (both paths):** reset on weapon-class change (the visible pool is
   a different gun's — same rule `infinite_ammo` applies), on respawn, on
   vehicle entry; ignore ticks where the magazines list is absent. Resupply
@@ -213,12 +245,11 @@ plumbing, same default-off posture):
    cheater's server-side ammo moves — stays unproven until the first live
    incident, which (with alerts wired) becomes the first labeled recording;
    revisit thresholds and the primary/secondary split on that day.
-3. **Launcher mechanics:** how launcher magazines present in real data (list
-   shape for 1-round weapons); whether disposable tubes (AT4-style) despawn
-   as a weapon swap after firing; which projectile classes `read_projectile`
-   actually tracks (if 40 mm GL rounds are absent from `projectiles[]`, the
-   GL case falls back to the damage-event route with corrected causer
-   matching); real `causerWeapon` strings for explosive damage events.
+3. **Launcher mechanics — mostly answered by the reference corpus** (see
+   that section: magazine shapes, projectile coverage including 40 mm GL
+   rounds, real causer strings). One item remains: whether disposable tubes
+   (AT4-style) despawn as a weapon swap after firing — observable by
+   following an AT4 carrier across ticks in the corpus.
 
 ### B3. `remote_mine`
 
@@ -286,9 +317,10 @@ passes `--hz 0.5` and no `--record-hz`, so recordings have `positionFrames: 0`.
 
 ## Workstream D — validate detectors against the archive, then decide
 
-1. Run `scripts/plugin_replay.py` with all three new detectors enabled over
-   every recording on the test server (and the exported production
-   recordings, once Craig provides them).
+1. Run `scripts/plugin_replay.py` with all new detectors enabled over the
+   reference corpus (`C:\Users\CRAIG\Documents\UNN\Misc\SquadReader
+   Replays` — four real 100+-player matches; this is the corpus that
+   matters) plus the test-server archive for completeness.
 2. Produce a short report: alerts per detector per match, with the evidence
    payloads. Zero false accusations on known-clean matches is the bar —
    missed cheaters are acceptable, false accusations are not.
@@ -308,14 +340,18 @@ six ODK stats-collector field checks fail even with a player online:
 `captures`, `defenses`, `fobsBuilt`, `fobsDestroyed`, `vehicleDamage`,
 `suppliesDelivered` ("no player carried it — offset drift?").
 
-1. **Event-gated or drifted?** The fast path: Craig is providing main-server
-   replay exports, recorded by the managed *upstream* agent on the same
-   Squad 10.5.x. If those recordings carry nonzero values for the six, the
-   game populates them at this version and upstream reads them — and our
-   fork reading zeros on the same version makes drift near-certain: go
-   straight to step 2. (The test archive is 2-player seed movement and is
-   expected to show nothing; the main server is also confirmed on 10.5.x,
-   so whatever E derives is what production eventually needs.)
+1. **The corpus scan (2026-08-28) already proved the fields populate at
+   10.5.x** in the upstream agent's recordings (see Reference corpus). One
+   decisive test remains, on the test box with at least one player online:
+   take a single `sqreader snapshot` and inspect that player's `stats`
+   block. **Keys present with zero values** → our offsets resolve and the
+   fields are simply event-gated on an idle server — fix `doctor`'s
+   heuristic to accept verified zeros instead of demanding activity, done.
+   **Keys absent entirely** → our hardcoded offsets drifted while
+   upstream's healed ones didn't → step 2. (Corpus recordings show the keys
+   present for ~65% of player-ticks — absent only for players whose stats
+   component isn't resolved yet — so wholesale absence is the drift
+   signature.)
 2. **If drifted:** re-derive the six offsets with
    `scripts/dump_struct_layout.py` against the live process, update the
    offset table + `doctor` entries. These feed leaderboard aggregates
