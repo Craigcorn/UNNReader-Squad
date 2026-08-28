@@ -340,18 +340,15 @@ six ODK stats-collector field checks fail even with a player online:
 `captures`, `defenses`, `fobsBuilt`, `fobsDestroyed`, `vehicleDamage`,
 `suppliesDelivered` ("no player carried it — offset drift?").
 
-1. **The corpus scan (2026-08-28) already proved the fields populate at
-   10.5.x** in the upstream agent's recordings (see Reference corpus). One
-   decisive test remains, on the test box with at least one player online:
-   take a single `sqreader snapshot` and inspect that player's `stats`
-   block. **Keys present with zero values** → our offsets resolve and the
-   fields are simply event-gated on an idle server — fix `doctor`'s
-   heuristic to accept verified zeros instead of demanding activity, done.
-   **Keys absent entirely** → our hardcoded offsets drifted while
-   upstream's healed ones didn't → step 2. (Corpus recordings show the keys
-   present for ~65% of player-ticks — absent only for players whose stats
-   component isn't resolved yet — so wholesale absence is the drift
-   signature.)
+1. **RESOLVED 2026-08-28: event-gated, not drifted.** The decisive test ran
+   with a player online during a live round on the test box: his stats
+   block read `fobsBuilt: 1`, `suppliesDelivered: 3000`, `defenses: 32` —
+   the six fields resolve and track real actions at 10.5.3. Step 2
+   (re-derivation) is **not needed**. Remaining E work: fix `doctor`'s
+   heuristic to accept present-with-zero as verified (skip, don't fail, on
+   an idle server). Footnote for the stats redesign, not this plan:
+   `captures` read 0 despite a real capture while `defenses` accumulated —
+   the ODK counters' *semantics* need understanding before display.
 2. **If drifted:** re-derive the six offsets with
    `scripts/dump_struct_layout.py` against the live process, update the
    offset table + `doctor` entries. These feed leaderboard aggregates
