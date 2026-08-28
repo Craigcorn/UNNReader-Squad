@@ -106,7 +106,12 @@ def main() -> int:
                     targets[kind].add(obj)
                     break
             else:
-                if "Proj" in name:
+                # Projectile ACTORS only — the dry run showed the bare "Proj"
+                # substring also catching their own components
+                # (SQProjectileMovement, SQProjectileRootComponent), whose
+                # back-pointers are noise for this question.
+                if ("Proj" in name and "Component" not in name
+                        and "Movement" not in name):
                     projectiles.append((obj, name))
 
         for addr, pname in projectiles:

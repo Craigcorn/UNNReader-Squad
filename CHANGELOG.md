@@ -46,6 +46,14 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- Every projectile's firer read as nobody. The field moved eight bytes in a
+  Squad update and two bools took its old place, so the reader interpreted a
+  bool and its padding as a pointer and came back empty - 95 494 out of
+  95 494 projectiles in four real matches, and failing safe meant nobody was
+  told for an entire version cycle. The offset is now taken from the game's
+  own reflection data, like the fields around it, with the corrected constant
+  kept only as the fallback - so the next time Squad moves it, the read heals
+  itself instead of going quiet.
 - On a two-tier replay the viewer's tick counter seesawed by about a thousand
   and the Hz readout jittered between 3 and 4.5. Both are the same mistake
   read twice. A position frame carries two counters - the 4 Hz sampler's own

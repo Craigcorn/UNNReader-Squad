@@ -480,10 +480,16 @@ PC_PLAYER_STATS_INDEX_OFFSET = 0x08A0
 # AController.PlayerState — reflection-derived (AController.PlayerState), with
 # this fallback. Used to resolve a controller pointer to a player name.
 PC_PLAYER_STATE_OFFSET = 0x02C0
-# SQProjectile.InstigatorController — the controller that fired this round.
-# Hardcoded (not cleanly reflectable); a null/wrong read fails safe to no
-# firer, so a Squad-patch drift blanks the field rather than breaking anything.
-PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET = 0x0580
+# SQProjectile.DamageInstigatorController — the controller that fired this
+# round. Reflection-derived in resolve_paths (the property reflects fine; the
+# old "not cleanly reflectable" note was itself a symptom of probing tools
+# whose anchors had gone stale), with this constant as the fallback. It has
+# drifted once already: 10.4.1 had it at 0x0580, a 10.5.x update moved it to
+# 0x0588 and left two bools where it used to be — so the old read interpreted
+# bClientAuthoritativeImpact plus padding as a pointer and every firer came
+# back null (95 494 of 95 494 projectiles in the reference corpus). Failing
+# safe hid the drift for an entire version cycle; reflection ends that.
+PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET = 0x0588
 
 # SQPlayerController.RecentVoiceChannel — reflection-derived (see resolve_paths),
 # with this as the fallback offset. uint8 ESQVoiceChannel; a wrong/torn read is
@@ -955,6 +961,10 @@ class SnapshotPaths:
     # SQPlayerController.RecentVoiceChannel offset (reflection-derived; module
     # constant is the fallback). None if unresolved. uint8 ESQVoiceChannel.
     pc_voice_channel_off: int | None
+    # SQProjectile.DamageInstigatorController offset (reflection-derived;
+    # module constant is the fallback). The one projectile field that has
+    # already drifted once — see PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET.
+    projectile_instigator_off: int
     ps_offsets: dict[str, int]
     soldier_offsets: dict[str, int]
     gs_offsets: dict[str, int]
@@ -1071,6 +1081,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # Whitelisted projectile bases (mortar / guided / smoke); their
         # subclass-of check is unioned into the projectile filter.
         **{name: "Class" for name in PROJECTILE_BASE_NAMES},
+        # SQProjectile itself — not tracked (bullets), only reflected: its
+        # layout yields the DamageInstigatorController offset for the firer.
+        "SQProjectile": "Class",
         # Squad's per-player stats-collector singletons. Their per-player
         # counters (captures/defenses/fobsBuilt/fobsDestroyed/vehicleDamage/
         # suppliesDelivered) are memory-only — not in RCON.
@@ -1178,6 +1191,16 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     pc_voice_channel_off = (pc_layout["RecentVoiceChannel"].offset
                             if "RecentVoiceChannel" in pc_layout
                             else PC_RECENT_VOICE_CHANNEL_OFFSET)
+    # DamageInstigatorController — who fired an in-flight projectile.
+    # Reflected off SQProjectile; the module constant (already drifted once,
+    # 0x580 -> 0x588 across a Squad update) is only the fallback.
+    sq_projectile_class_addr = _addr("SQProjectile")
+    proj_layout = (get_class_layout(pm, sq_projectile_class_addr, alloc)
+                   if sq_projectile_class_addr else {})
+    projectile_instigator_off = (
+        proj_layout["DamageInstigatorController"].offset
+        if "DamageInstigatorController" in proj_layout
+        else PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET)
     return SnapshotPaths(
         sq_player_state_class=sq_player_state_class_addr,
         sq_soldier_class=sq_soldier_class_addr,
@@ -1201,6 +1224,7 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         pc_stats_index_off=pc_stats_index_off,
         pc_playerstate_off=pc_playerstate_off,
         pc_voice_channel_off=pc_voice_channel_off,
+        projectile_instigator_off=projectile_instigator_off,
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -1535,7 +1559,7 @@ def read_projectile(pm: ProcessMemory, alloc: FNameEntryAllocator,
     out["firer"] = None
     if paths.pc_playerstate_off is not None and "PlayerNamePrivate" in paths.ps_offsets:
         ctrl = _safe(lambda: pm.read_u64(
-            p_addr + PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET))
+            p_addr + paths.projectile_instigator_off))
         if ctrl:
             ps = _safe(lambda: pm.read_u64(ctrl + paths.pc_playerstate_off))
             if ps:
