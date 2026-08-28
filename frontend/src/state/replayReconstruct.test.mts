@@ -33,9 +33,15 @@ function full(tick: number): any {
     gameState: { matchState: "InProgress" },
   };
 }
-function pos(tick: number, players: any[], vehicles: any[] = []): any {
-  return { t: "pos", tick, timestamp: `2026-01-01T00:00:0${tick}.5+00:00`,
-           fullTick: 1, players, vehicles };
+// `fullTick: null` omits the key entirely - a default parameter cannot be
+// bypassed by passing `undefined`, which is exactly what it means.
+function pos(tick: number, players: any[], vehicles: any[] = [],
+             fullTick: number | null = 1): any {
+  const f: any = { t: "pos", tick,
+                   timestamp: `2026-01-01T00:00:0${tick}.5+00:00`,
+                   players, vehicles };
+  if (fullTick !== null) f.fullTick = fullTick;
+  return f;
 }
 
 // 1. isPositionFrame discriminates.
@@ -70,7 +76,7 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
   eq(rec.players[1].soldier!.position!.x, 30, "Bob carries last x");
   eq(rec.players[1].soldier!.health, 100, "Bob carries last health");
   eq(rec.timestamp, "2026-01-01T00:00:02.5+00:00", "timestamp from pos frame");
-  eq(rec.tick, 2, "tick from pos frame");
+  eq(rec.tick, 1, "tick from fullTick, not the sampler's own counter");
   eq(rec.damageEvents.length, 0, "damageEvents emptied (no double-count)");
   eq(rec.markers, base.markers, "markers shared by reference (no clone)");
   eq(rec.gameState, base.gameState, "gameState shared by reference");
@@ -110,6 +116,44 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
   eq(out[1].players[0].soldier!.position!.x, 12, "2nd frame Alice at 12");
   eq(out[2].players[0].soldier!.position!.x, 13, "3rd frame Alice at 13");
   eq(out[3].tick, 4, "4th frame is the new full frame");
+}
+
+// 8. A position frame carries TWO counters and only one of them is the world's.
+// `tick` is the 4 Hz sampler's loop counter, `fullTick` the build the positions
+// were spliced onto. They drift apart for as long as the service has been up -
+// about a thousand apart on the first real two-tier recording - so reading the
+// wrong one made the viewer's tick seesaw between the two on alternate frames.
+{
+  const rec = reconstructFromPosition(
+    full(1041), pos(2317, [{ id: "eos-a", x: 1, y: 2 }], [], 1041));
+  eq(rec.tick, 1041, "fullTick wins over the sampler tick");
+}
+
+// 9. No fullTick - a frame from before the encoder shipped it - falls back to
+// the base frame's tick, which is the same world anyway since a position frame
+// never advances it. Never the sampler's counter.
+{
+  const rec = reconstructFromPosition(
+    full(1041), pos(2317, [{ id: "eos-a", x: 1, y: 2 }], [], null));
+  eq(rec.tick, 1041, "falls back to the base tick, not the sampler tick");
+}
+
+// 10. Across a whole two-tier stream the tick never jumps about.
+{
+  const r = new ReplayReconstructor();
+  const lines = [full(100),
+                 pos(9001, [{ id: "eos-a", x: 1, y: 1 }], [], 100),
+                 pos(9002, [{ id: "eos-a", x: 2, y: 2 }], [], 100),
+                 pos(9003, [{ id: "eos-a", x: 3, y: 3 }], [], 100),
+                 full(101),
+                 pos(9004, [{ id: "eos-a", x: 4, y: 4 }], [], 101)];
+  const ticks: number[] = [];
+  for (const line of lines) {
+    const out = r.push(line);
+    if (out) ticks.push(out.tick!);
+  }
+  eq(JSON.stringify(ticks), JSON.stringify([100, 100, 100, 100, 101, 101]),
+     "tick is monotonic across a two-tier stream");
 }
 
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);

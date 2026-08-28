@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { DEFAULT_VIEW } from "./types";
 import { patchSnapshot, resetCarryOver } from "./carryOver";
 import { replayLoad } from "./replayLoad";
+import { advanceTickRate } from "./tickRate";
 import type {
   ConnStatus, KillFeedEntry, Mode, RecordingMeta, Snapshot, TeamState, ViewState,
 } from "./types";
@@ -141,6 +142,11 @@ interface Store {
   lastInProgressTeams: TeamState[] | null;
   curArrivalMs: number;
   avgTickMs: number;
+  // Anchors for the Hz readout: when the tick last ADVANCED, and to what. A
+  // two-tier stream delivers several frames per tick, and timing those would
+  // report the position cadence instead of the snapshot rate. See tickRate.ts.
+  lastTickMs: number;
+  lastTick: number | null;
 
   // Render-delay interpolation buffer: a timestamped ring of the last few
   // PATCHED snapshots. The canvas renders at (now - DELAY) between the two
@@ -253,6 +259,8 @@ export const useViewerStore = create<Store>((set) => ({
   // (that is a FIXED constant in MapCanvas), so its EMA jitter can never
   // time-warp the map. See ingestLive + MapCanvas RENDER_DELAY_MS.
   avgTickMs: NOMINAL_TICK_MS,
+  lastTickMs: 0,
+  lastTick: null,
   snapBuffer: [],
   view: { ...DEFAULT_VIEW },
   replay: {
@@ -292,7 +300,11 @@ export const useViewerStore = create<Store>((set) => ({
     // without that, the first replay frame is diffed against the live match's
     // stats and invents kills that never happened.
     resetCarryOver();
-    set({ mode: m, snapBuffer: [], killFeed: [], replayKillTimeline: [] });
+    // The rate anchor goes too: the outgoing stream's tick number means nothing
+    // to the incoming one, and the interval between the two is a mode switch,
+    // not a cadence.
+    set({ mode: m, snapBuffer: [], killFeed: [], replayKillTimeline: [],
+          lastTickMs: 0, lastTick: null });
   },
   setStatus(s) {
     set({ status: s });
@@ -310,15 +322,15 @@ export const useViewerStore = create<Store>((set) => ({
       // time, so running it in replay re-injects end-of-match ghosts when
       // you seek backward. Pass replay frames through untouched.
       const patched = s.mode === "replay" ? snap : patchSnapshot(snap, now);
-      let avg = s.avgTickMs;
-      let prev = s.prevSnap;
-      if (s.curSnap) {
-        const dt = now - s.curArrivalMs;
-        if (dt > 50 && dt < 5000) avg = avg * 0.7 + dt * 0.3;
-        prev = s.curSnap;
-      } else {
-        prev = patched;  // first tick — lerp identity
-      }
+      // The Hz readout times TICK ADVANCES, not arrivals: a two-tier stream
+      // hands us three position frames per snapshot, and timing those reported
+      // the sampler's cadence in a field labelled as the reader's. tickRate.ts
+      // has the whole story.
+      const rate = advanceTickRate(
+        { avgTickMs: s.avgTickMs, lastTickMs: s.lastTickMs,
+          lastTick: s.lastTick },
+        patched.tick, now);
+      const prev = s.curSnap ?? patched;   // first tick — lerp identity
       // Append to the render-delay ring. Trim by TIME first (rate-independent:
       // always keeps ~SNAP_BUFFER_SPAN_MS of frames whether the reader runs at
       // 0.5 Hz or 4 Hz), then a hard frame ceiling as a memory backstop. Raw
@@ -341,7 +353,9 @@ export const useViewerStore = create<Store>((set) => ({
         curSnap: patched,
         lastInProgressTeams,
         curArrivalMs: now,
-        avgTickMs: avg,
+        avgTickMs: rate.avgTickMs,
+        lastTickMs: rate.lastTickMs,
+        lastTick: rate.lastTick,
         snapBuffer,
       };
     });

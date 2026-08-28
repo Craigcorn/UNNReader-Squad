@@ -46,6 +46,18 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- On a two-tier replay the viewer's tick counter seesawed by about a thousand
+  and the Hz readout jittered between 3 and 4.5. Both are the same mistake
+  read twice. A position frame carries two counters - the 4 Hz sampler's own
+  loop count and the build its positions were spliced onto - and the viewer
+  was displaying the first, so reconstructed frames showed the sampler's
+  number and full frames the builder's, alternating, the two having drifted
+  apart for as long as the service had been up. It now reads the build
+  counter, which the encoder was shipping all along. The rate readout had the
+  matching problem: it timed arrivals, and a two-tier stream arrives four
+  times a second, so a reader building one snapshot a second was labelled 4
+  Hz. It now times the tick advancing, which means the same thing on a
+  single-tier recording and the right thing on a two-tier one.
 - `doctor` reported offset drift on six stats-collector fields whenever the
   server was quiet. The rule was "some player must be carrying a value, or the
   offsets have drifted", and those counters are event-gated: Squad only

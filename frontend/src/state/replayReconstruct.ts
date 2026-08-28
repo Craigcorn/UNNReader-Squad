@@ -76,7 +76,15 @@ export function reconstructFromPosition(
   return {
     ...base, // shares gameState/teams/squads/zones/markers/deployables/… by ref
     timestamp: pos.timestamp,
-    tick: pos.tick ?? base.tick,
+    // `fullTick`, never `tick`. A position frame carries TWO counters and they
+    // are not the same number: `tick` is the 4 Hz sampler's own loop counter
+    // and `fullTick` is the build the positions were spliced onto. The two
+    // namespaces drift apart for as long as the service has been up — about a
+    // thousand apart on the first real two-tier recording — so taking `tick`
+    // here made the viewer's tick display seesaw between the sampler's count
+    // on reconstructed frames and the builder's on full ones. The encoder was
+    // always shipping the right value; this is which one to read.
+    tick: pos.fullTick ?? base.tick,
     players,
     vehicles,
     // Kills are per-tick deltas already delivered on the full frame that
