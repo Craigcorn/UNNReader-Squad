@@ -309,6 +309,74 @@ def _str_tuple(value: Any) -> tuple[str, ...]:
     return tuple(v.strip() for v in value if isinstance(v, str) and v.strip())
 
 
+# Which collector each spliced player-stat field is read from. The grouping is
+# the load-bearing part: two fields from the same collector share ONE array
+# entry, which is what makes a disagreement between them mean something.
+COLLECTOR_FIELD_SOURCE: dict[str, str] = {
+    "fobsBuilt":         "logistics",
+    "suppliesDelivered": "logistics",
+    "vehicleDamage":     "combat",
+    "fobsDestroyed":     "combat",
+    "captures":          "objective",
+    "defenses":          "objective",
+}
+
+
+def _collector_field_verdicts(
+        players: list[dict]) -> dict[str, tuple[str, str]]:
+    """Doctor's verdict on each ODK collector field, from one snapshot.
+
+    Returns ``{field: (verdict, detail)}`` with verdict ``ok`` / ``skip`` /
+    ``fail``.
+
+    The rule used to be "some player must be carrying a value, or the offsets
+    have drifted", and that cost a diagnostic session. These counters are
+    EVENT-GATED: Squad creates a player's entry in a collector when they first
+    score in that category, so a server in warmup — or a whole round in which
+    nobody happened to destroy a FOB — reads exactly like a broken offset.
+    Absence is not evidence of drift. It is not evidence of anything.
+
+    A verified ZERO is a real answer: it says the entry exists and we read it.
+    The old rule accepted one only by accident, and then cried drift the moment
+    the entry had not been created yet. Confirmed against a live 10.5.3 server
+    with a player online building a FOB — fobsBuilt 1, suppliesDelivered 3000,
+    defenses 32 — the offsets resolve and track real actions.
+
+    What IS evidence: the two fields of one collector come out of a single
+    array entry, so if one of them read and its sibling did not, that struct's
+    layout is wrong. That is the only drift this check can honestly assert, and
+    now it is the only thing it does assert.
+    """
+    fields = tuple(COLLECTOR_FIELD_SOURCE)
+    if not players:
+        return {f: ("skip", "no players online — no counter to read")
+                for f in fields}
+    carried: dict[str, list[float]] = {f: [] for f in fields}
+    for p in players:
+        st = p.get("stats") or {}
+        for f in fields:
+            v = st.get(f)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                carried[f].append(v)
+    out: dict[str, tuple[str, str]] = {}
+    for f in fields:
+        vals = carried[f]
+        if vals:
+            zeros = sum(1 for v in vals if v == 0)
+            out[f] = ("ok", f"{len(vals)}/{len(players)} players, "
+                            f"max={max(vals):g}"
+                            + (f", {zeros} verified zero" if zeros else ""))
+            continue
+        sibling = next(s for s in fields if s != f
+                       and COLLECTOR_FIELD_SOURCE[s] == COLLECTOR_FIELD_SOURCE[f])
+        if carried[sibling]:
+            out[f] = ("fail", f"'{sibling}' came out of the same collector "
+                              f"entry and this did not — layout drift")
+        else:
+            out[f] = ("skip", "event-gated — nobody has scored one yet")
+    return out
+
+
 def _seeding_game_modes() -> frozenset[str]:
     return frozenset(_str_tuple(config.get("seeding_game_modes")))
 
@@ -1880,25 +1948,21 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"  {'OK  ' if cls_addr else 'INFO'} {cls_name} "
               + (f"resolved @ {cls_addr:#x}" if cls_addr
                  else "not loaded this tick (map init / Jensen?)"))
-    # Snapshot already spliced collector counters onto players. A populated
-    # match should have at least one player with a non-null collector field.
-    _fields = ("captures", "defenses", "fobsBuilt", "fobsDestroyed",
-               "vehicleDamage", "suppliesDelivered")
-    seen = {f: False for f in _fields}
-    for p in snap.get("players", []):
-        st = p.get("stats") or {}
-        for f in _fields:
-            if st.get(f) is not None:
-                seen[f] = True
+    # Snapshot already spliced collector counters onto players. What that can
+    # and cannot prove is `_collector_field_verdicts`' whole subject: a value
+    # (zero included) proves the offsets resolve, an absence proves nothing
+    # because the counters are event-gated, and only two fields of one
+    # collector disagreeing is drift.
     any_collector = any(paths.collector_classes.values())
-    for f in _fields:
-        # Only demand the value when the class was actually present; otherwise
-        # its absence is expected, not a drift.
-        if any_collector:
-            check(f"collector field '{f}' present on some player", seen[f],
-                  "" if seen[f] else "no player carried it — offset drift?")
-        else:
+    for f, (verdict, detail) in _collector_field_verdicts(
+            snap.get("players") or []).items():
+        label = f"collector field '{f}' readable"
+        if not any_collector:
             print(f"  INFO collector field '{f}' — no collector loaded to check")
+        elif verdict == "skip":
+            print(f"  SKIP {label}  {detail}")
+        else:
+            check(label, verdict == "ok", detail)
 
     # Phase-8 reader fields. Each is fail-safe (null on a wrong offset), so
     # these are INFO/observational: "did the field come through on a live

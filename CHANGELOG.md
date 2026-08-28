@@ -46,6 +46,17 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- `doctor` reported offset drift on six stats-collector fields whenever the
+  server was quiet. The rule was "some player must be carrying a value, or the
+  offsets have drifted", and those counters are event-gated: Squad only
+  creates a player's entry once they first score in that category, so warmup -
+  or a whole round where nobody destroyed a FOB - looked exactly like a broken
+  offset. It sent somebody re-deriving offsets that were fine. A value now
+  passes whether or not it is zero (a verified zero says the entry exists and
+  we read it), nothing to read is reported as skipped rather than failed, and
+  the one thing this check can honestly call drift - two fields out of the
+  same collector entry disagreeing about whether they read at all - is the one
+  thing it now fails on.
 - A link into the viewer stopped working the moment anyone reloaded it. Only
   four paths mapped to the app, so `/viewer/<recording-id>` - a route the
   browser resolves for itself once the page has loaded - reached the server
