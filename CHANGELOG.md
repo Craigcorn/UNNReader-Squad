@@ -75,6 +75,25 @@ follows [Semantic Versioning](https://semver.org/).
   Recordings made before this carry no team and never will.
 
 ### Fixed
+- The kill the game itself had credited was thrown away on every licensed
+  server. When a downed player finally dies, Squad's own Die line names the
+  credited killer by id, and for a death that outlived the wound correlation
+  that id is the last thing left identifying them. The reader looked it up in
+  the memory roster - where a licensed server reports an account UUID, while
+  every id in the log is a 32-hex EOS ProductUserId. Two namespaces, one map,
+  no possible hit: the recovery written to kill the bare "?" rows had never
+  once fired on the servers this reader actually runs on. It now asks the log
+  instead of the roster. Every damage line already prints an attacker's name
+  and their id side by side, and every revive prints both players and both
+  ids - which is where the medics come from, who can go a whole match without
+  dealing damage - so the parser keeps what it has read and answers the Die
+  line out of its own pages. The same pairing repairs the self-death check,
+  which was asking "is the credited killer the victim themselves?" in the
+  same wrong namespace and always hearing no. A player the log has never
+  named resolves to nothing at all, and their id is still handed to the
+  roster afterwards, because where the two namespaces do coincide that lookup
+  works. Nothing is guessed on the way past: an id nobody can name is still a
+  question mark.
 - A player who waited out most of the medic timer died as a question mark.
   The correlation that names the wounder when a downed player finally gives
   up remembered wounds for 180 seconds - but Squad allows 300 before the

@@ -47,8 +47,17 @@ _DIE_RE = re.compile(
     r"(?:\s*\(Online IDs:\s*EOS:\s*(?P<from_eos>\w+))?"
     r"(?:.*?caused by (?P<causer>\S+))?"
 )
-# "<reviver> (Online IDs: ...) has revived <victim> (Online IDs: ...)"
-_REVIVE_RE = re.compile(r"has revived (?P<victim>.+?) \(Online IDs:")
+# "<reviver> (Online IDs: EOS: ... steam: ...) has revived <victim> (Online IDs: ...)"
+# Both halves of the line carry a name AND that name's EOS id, so a revive
+# teaches the id cache two players at once — including the medic, who may
+# never deal damage all match and would otherwise be unknown to it. The
+# id-bearing prefix is OPTIONAL: identifying the revive and its victim is what
+# clears the correlation state, and that must keep working even if a future
+# log revision moves the reviver's ids somewhere this pattern cannot see.
+_REVIVE_RE = re.compile(
+    r"(?:LogSquad: (?P<reviver>.+?) \(Online IDs:\s*EOS:\s*(?P<reviver_eos>\w+)[^)]*\)\s*)?"
+    r"has revived (?P<victim>.+?) \(Online IDs:(?:\s*EOS:\s*(?P<victim_eos>\w+))?"
+)
 _TS_RE = re.compile(r"^\[(?P<ts>[\d.]+-[\d.]+:[\d]+)\]")
 
 
@@ -67,8 +76,17 @@ def resolve_event_names(events: list[dict], players: list[dict]) -> list[dict]:
     attacker (a death long after the wound, past the correlation TTL), the Die
     line still carried the killer's controller EOS in `killerEos`. Resolve it to
     a name against the live roster here — or, if it is the victim's own EOS,
-    flag a self death rather than crediting them their own kill. This is what
-    converts the bare "?" rows into named kills."""
+    flag a self death rather than crediting them their own kill.
+
+    This roster attempt is the FALLBACK, not the main path. It only works where
+    the roster's `eosId` and the log's ids are the same namespace, which is to
+    say on an unlicensed server: a licensed one reports `OnlineUserId` as a UUID
+    in memory while every id in the log is a 32-hex EOS ProductUserId, so the
+    map can never hit and this recovery silently did nothing on exactly the
+    servers that matter. `DamageLogParser` now resolves the Die line's id
+    against the log's own id cache first (same namespace by construction) and
+    only leaves `killerEos` set when that misses. Kept anyway, because where the
+    namespaces do coincide it still names a killer the log never mentioned."""
     bases = [p["name"] for p in players if p.get("name")]
     base_set = set(bases)
     eos_to_name = {p["eosId"]: p["name"]
@@ -185,14 +203,35 @@ class DamageLogParser:
     # itself credited the wounder). The margin over 300 absorbs log-timestamp
     # jitter. The GC that enforces this runs on every processed death, so on
     # a busy server the TTL bites at exactly its value.
-    def __init__(self, *, ttl_sec: float = 330.0, max_buffer: int = 512):
+    def __init__(self, *, ttl_sec: float = 330.0, max_buffer: int = 512,
+                 max_eos_names: int = 1024):
         self.ttl = ttl_sec
         # victim -> (attacker, eos, weapon, ts) from the most recent hit
         self._pending: dict[str, tuple] = {}
         # victim -> (attacker, eos, weapon, ts) recorded at incap, awaiting death
         self._wounded_by: dict[str, tuple] = {}
+        # log-EOS -> display name, learned from the log's OWN lines. The Die
+        # line names the credited killer by id and nothing else, so a name for
+        # that id has to come from somewhere; the roster cannot supply one on a
+        # licensed server (different namespace — see resolve_event_names), but
+        # every ActualDamage line already carries an attacker's name and their
+        # id together, in the same namespace as the Die line by construction.
+        # Revive lines add the players who never dealt damage. Lifetime is the
+        # parser's, because a name is stable for the session that owns it.
+        self._eos_names: dict[str, str] = {}
+        self.max_eos_names = max_eos_names
         self._events: deque = deque(maxlen=max_buffer)
         self._last_ts: float = 0.0
+
+    def _remember_eos(self, eos: Optional[str], name: Optional[str]) -> None:
+        """Learn one id -> name pair. Insertion-ordered, so the bound evicts the
+        oldest id seen — a match's roster is a few hundred players at most, and
+        an evicted id costs a "?" on a death, never a wrong name."""
+        if not eos or not name or eos == "INVALID":
+            return
+        self._eos_names[eos] = name
+        while len(self._eos_names) > self.max_eos_names:
+            del self._eos_names[next(iter(self._eos_names))]
 
     def _gc(self, now: float) -> None:
         for d in (self._pending, self._wounded_by):
@@ -208,6 +247,7 @@ class DamageLogParser:
         if m:
             victim = m.group("victim").strip()
             attacker = m.group("attacker").strip()
+            self._remember_eos(m.group("eos"), attacker)
             self._pending[victim] = (
                 attacker, m.group("eos"), _norm_weapon(m.group("weapon")), ts)
             return
@@ -218,6 +258,9 @@ class DamageLogParser:
             # so their NEXT death (a fresh incap, or a later world cause) is
             # not mis-credited to the old wounder.
             victim = m.group("victim").strip()
+            rev = m.group("reviver")
+            self._remember_eos(m.group("reviver_eos"), rev.strip() if rev else None)
+            self._remember_eos(m.group("victim_eos"), victim)
             self._wounded_by.pop(victim, None)
             self._pending.pop(victim, None)
             return
@@ -252,9 +295,11 @@ class DamageLogParser:
             # EOS the game scores the kill to). Keep it: when the name-cache has
             # expired — a death long after the wound, e.g. round-end deaths of
             # players downed minutes earlier, past the correlation TTL — this is
-            # the ONLY thing that still identifies the killer. resolve_event_names
-            # turns it into a name against the live roster (or a self death if it
-            # is the victim's own EOS). This is what kills the bare "?" rows.
+            # the ONLY thing that still identifies the killer. It is turned into
+            # a name below against the log's own id cache (or a self death if it
+            # is the victim's own id), and only what that misses is handed to
+            # resolve_event_names to try the roster. This is what kills the bare
+            # "?" rows.
             die_eos = m.group("from_eos")
             killer_eos = die_eos if die_eos and die_eos != "INVALID" else None
             # No damage record attributes this death — classify it from the
@@ -273,8 +318,30 @@ class DamageLogParser:
                 if causer and causer != "nullptr" \
                         and not causer.startswith("BP_Soldier"):
                     damage_type = _norm_weapon(causer)
+                # The id cache is the log answering its own question, so it
+                # outranks every heuristic below it: same namespace as the Die
+                # line by construction, and the pairing was read off a line
+                # that named both halves. Resolving it here rather than in
+                # resolve_event_names is the whole repair — the roster it
+                # consults holds UUIDs on a licensed server and can never match
+                # a 32-hex log id, which left these deaths as bare "?" rows on
+                # exactly the servers this reader is deployed on.
+                cached = self._eos_names.get(killer_eos) if killer_eos else None
+                if cached is not None:
+                    if cached == victim:
+                        # The credited killer is the victim: a give-up or a
+                        # self-kill. Answering this from the roster asked the
+                        # same impossible question in the same wrong namespace.
+                        self_inflicted = True
+                    else:
+                        attacker, eos = cached, killer_eos
+                    killer_eos = None          # answered; no roster attempt left
                 elif frm and frm != "nullptr" and (not causer or causer == "nullptr"):
                     self_inflicted = True
+                # A player the cache has never seen — no damage dealt, no
+                # revive either way all match — stays unresolved here and goes
+                # out with killer_eos for the roster fallback to try. If that
+                # misses too the row is an honest "?", never a guess.
             self._emit(victim, attacker, eos, weapon, ts,
                        wounded=False, killed=True,
                        self_inflicted=self_inflicted, damage_type=damage_type,

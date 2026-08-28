@@ -27,9 +27,16 @@ def die(victim, ctrl="nullptr", eos="INVALID", caused=None):
     return line
 
 
-def revive(reviver, victim):
-    return (f"{TS}LogSquad: {reviver} (Online IDs: EOS: 0002re steam: 1) "
-            f"has revived {victim} (Online IDs: EOS: 0002vi steam: 2)")
+def revive(reviver, victim, reos="0002re", veos="0002vi"):
+    return (f"{TS}LogSquad: {reviver} (Online IDs: EOS: {reos} steam: 1) "
+            f"has revived {victim} (Online IDs: EOS: {veos} steam: 2)")
+
+
+def stamped(line, sec):
+    """Re-stamp a helper line `sec` seconds after the fixture timestamp, for the
+    tests that have to outlive the 330 s correlation TTL."""
+    m, s = divmod(24 + sec, 60)
+    return line.replace(TS, f"[2026.07.12-18.{31 + m:02d}.{s:02d}:082][892]")
 
 
 def only(evs, **kw):
@@ -207,6 +214,113 @@ def test_die_eos_recovers_attacker_after_cache_expiry():
     assert k[0]["attacker"] == "KillerBob"       # recovered by EOS
     assert k[0]["attackerEosId"] == "0002killer"
     assert "killerEos" not in k[0]               # scratch field dropped
+
+
+def test_die_eos_resolved_from_the_logs_own_id_cache():
+    # The repair: the Die line's credited-killer id is resolved against ids the
+    # LOG itself supplied, so it works on a licensed server (where the roster's
+    # ids are UUIDs and can never match a 32-hex log id). KillerB's id enters
+    # the cache from a hit on somebody else entirely; 400 s later the wound
+    # correlation is long dead and the id is all that is left.
+    p = DamageLogParser()
+    p.feed(stamped(actual("Bystander", "『GM』 KillerB", "0002killerb",
+                          "BP_AK74_C_1"), 0))
+    p.feed(stamped(actual("VictimA", "『GM』 KillerB", "0002killerb",
+                          "BP_AK74_C_1"), 1))
+    p.feed(stamped(wound("VictimA"), 2))
+    p.drain()
+    p.feed(stamped(die("Bystander", ctrl="nullptr"), 400))   # GC purges the wound
+    p.feed(stamped(die("VictimA", ctrl="BP_PlayerController_C_5", eos="0002killerb",
+                       caused="BP_Soldier_RU_Rifleman1_Desert_C_1"), 420))
+    evs = p.drain()
+    k = only(evs, killed=True, victim="VictimA")
+    assert len(k) == 1
+    assert k[0]["attacker"] == "『GM』 KillerB"     # named without the roster
+    assert k[0]["attackerEosId"] == "0002killerb"
+    assert k[0]["selfInflicted"] is False
+    assert k[0]["killerEos"] is None               # answered here, nothing left to try
+    # ...and the licensed-server roster, whose ids are a different namespace
+    # entirely, only has to strip the clan tag.
+    resolve_event_names(evs, [
+        {"name": "KillerB", "eosId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+        {"name": "VictimA", "eosId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},
+    ])
+    assert k[0]["attacker"] == "KillerB"
+
+
+def test_die_eos_matching_the_victims_own_cached_id_is_a_self_death():
+    # Ruby's own id is in the cache from a hit SHE dealt. When the Die line
+    # credits that id, the kill is hers to nobody — the self-death check, now
+    # asked in the namespace that can answer it. The causer here is a real
+    # class, so the older "from a controller with no causer" heuristic stays
+    # silent and only the cache can call this.
+    p = DamageLogParser()
+    p.feed(stamped(actual("SomeoneElse", "Ruby", "0002ruby", "BP_AK74_C_1"), 0))
+    p.feed(stamped(actual("Ruby", "KillerB", "0002killerb", "BP_M4_C_1"), 5))
+    p.feed(stamped(wound("Ruby"), 6))
+    p.drain()
+    p.feed(stamped(die("Bystander", ctrl="nullptr"), 400))   # GC purges the wound
+    p.feed(stamped(die("Ruby", ctrl="BP_PlayerController_C_3", eos="0002ruby",
+                       caused="BP_Frag_C_1"), 420))
+    k = only(p.drain(), killed=True, victim="Ruby")
+    assert len(k) == 1
+    assert k[0]["attacker"] is None            # never credited her own kill
+    assert k[0]["selfInflicted"] is True
+    assert k[0]["damageType"] == "BP_Frag_C"
+
+
+def test_die_eos_unknown_to_the_cache_is_left_for_the_roster():
+    # A killer the log never named — no damage dealt, no revive either way.
+    # The cache does not guess; the id goes out as it always did, for the
+    # roster fallback to try, and an honest "?" is the answer when it misses.
+    p = DamageLogParser()
+    p.feed(actual("Bystander", "SomeoneElse", "0002else", "BP_AK74_C_1"))
+    p.feed(die("Victim", ctrl="BP_PlayerController_C_5", eos="0002ghost",
+               caused="BP_Soldier_RU_Rifleman1_Desert_C_1"))
+    evs = p.drain()
+    k = only(evs, killed=True, victim="Victim")
+    assert len(k) == 1
+    assert k[0]["attacker"] is None
+    assert k[0]["selfInflicted"] is False
+    assert k[0]["killerEos"] == "0002ghost"    # still handed to resolve_event_names
+    resolve_event_names(evs, [{"name": "Victim", "eosId": "0002victim"}])
+    assert k[0]["attacker"] is None            # roster misses too — stays "?"
+    assert k[0]["selfInflicted"] is False
+
+
+def test_revive_line_teaches_the_cache_both_of_its_players():
+    # A medic can spend a whole match without dealing damage, so the damage
+    # lines never name them — but every revive names both parties WITH their
+    # ids, which is exactly the pairing the Die line needs later.
+    p = DamageLogParser()
+    p.feed(stamped(revive("Doc", "Ruby", reos="0002doc", veos="0002ruby"), 0))
+    p.feed(stamped(wound("VictimA"), 1))
+    p.feed(stamped(wound("VictimB"), 2))
+    p.drain()
+    p.feed(stamped(die("Bystander", ctrl="nullptr"), 400))   # GC purges both wounds
+    p.feed(stamped(die("VictimA", ctrl="BP_PlayerController_C_2", eos="0002doc",
+                       caused="BP_Soldier_RU_Rifleman1_Desert_C_1"), 420))
+    p.feed(stamped(die("VictimB", ctrl="BP_PlayerController_C_4", eos="0002ruby",
+                       caused="BP_Soldier_RU_Rifleman1_Desert_C_1"), 421))
+    evs = p.drain()
+    ka = only(evs, killed=True, victim="VictimA")
+    kb = only(evs, killed=True, victim="VictimB")
+    assert len(ka) == 1 and len(kb) == 1
+    assert ka[0]["attacker"] == "Doc"          # the reviver half of the line
+    assert ka[0]["attackerEosId"] == "0002doc"
+    assert kb[0]["attacker"] == "Ruby"         # the revived half
+    assert kb[0]["attackerEosId"] == "0002ruby"
+
+
+def test_eos_name_cache_is_bounded():
+    # Parser lifetime is a whole session, so the cache needs a ceiling. It
+    # evicts the oldest id it learned, which costs a "?" and never a name.
+    p = DamageLogParser(max_eos_names=4)
+    for i in range(6):
+        p.feed(actual(f"V{i}", f"K{i}", f"0002k{i}", "BP_AK74_C_1"))
+    assert len(p._eos_names) == 4
+    assert "0002k0" not in p._eos_names        # oldest evicted
+    assert p._eos_names["0002k5"] == "K5"
 
 
 def test_die_eos_self_kill_not_credited_to_victim():
