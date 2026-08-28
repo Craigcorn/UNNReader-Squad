@@ -177,7 +177,15 @@ class DamageLogParser:
     """Pure correlation state machine — feed it lines, drain events. No I/O,
     so it is directly unit-testable."""
 
-    def __init__(self, *, ttl_sec: float = 180.0, max_buffer: int = 512):
+    # 330, not a round three minutes: Squad lets a downed player wait 300 s
+    # for a medic before the forced give-up, and players hoping for a revive
+    # routinely use most of it. The previous 180 s meant any incap held past
+    # three minutes died unattributed — verified on a real recording (wounded
+    # at 27:24, gave up at 31:41, 257 s later: "?" in the feed while the game
+    # itself credited the wounder). The margin over 300 absorbs log-timestamp
+    # jitter. The GC that enforces this runs on every processed death, so on
+    # a busy server the TTL bites at exactly its value.
+    def __init__(self, *, ttl_sec: float = 330.0, max_buffer: int = 512):
         self.ttl = ttl_sec
         # victim -> (attacker, eos, weapon, ts) from the most recent hit
         self._pending: dict[str, tuple] = {}

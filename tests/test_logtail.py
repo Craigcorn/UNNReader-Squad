@@ -55,6 +55,27 @@ def test_wound_carries_attacker_and_weapon():
     assert w[0]["causerWeapon"] == "BP_AK74_C"
 
 
+def test_incap_held_past_three_minutes_still_attributed():
+    # Squad allows a downed player 300 s before the forced give-up, and
+    # players hoping for a medic routinely use most of it. The correlation
+    # TTL used to be 180 s — so a give-up at 4m17s came out unattributed,
+    # verified on a real recording ("?" in the feed while the game credited
+    # the wounder). The bystander death 200 s in matters: the GC pass runs on
+    # every processed death, which is what purged the wound on a busy server.
+    def stamp(line, sec):
+        m, s = divmod(24 + sec, 60)
+        return line.replace(TS, f"[2026.07.12-18.{31 + m:02d}.{s:02d}:082][892]")
+    p = DamageLogParser()
+    p.feed(stamp(actual("VictimA", "KillerB", "0002ab", "BP_AK74_C_1"), 0))
+    p.feed(stamp(wound("VictimA"), 1))
+    p.feed(stamp(die("Bystander", ctrl="nullptr"), 200))
+    p.feed(stamp(die("VictimA", ctrl="nullptr"), 257))
+    k = only(p.drain(), killed=True, victim="VictimA")
+    assert len(k) == 1
+    assert k[0]["attacker"] == "KillerB"
+    assert k[0]["selfInflicted"] is False
+
+
 def test_bleed_out_death_attributed_to_the_wounder():
     # The classic Squad case: hit -> Wound (attacker known) -> later Die from
     # nullptr (bleed-out, no attacker on the line). Must credit the wounder.

@@ -75,6 +75,14 @@ follows [Semantic Versioning](https://semver.org/).
   Recordings made before this carry no team and never will.
 
 ### Fixed
+- A player who waited out most of the medic timer died as a question mark.
+  The correlation that names the wounder when a downed player finally gives
+  up remembered wounds for 180 seconds - but Squad allows 300 before the
+  forced give-up, and players hoping for a revive routinely use most of
+  them. Verified on a real match: wounded at 27:24, gave up at 31:41, and
+  the feed showed "?" while the game itself credited the wounder. The
+  memory now outlasts the longest possible incap. Recordings already
+  written keep their nulls - a recording cannot be got back afterwards.
 - A suicide showed in the kill feed as a question mark. The capture was
   perfect - the recording holds a self-inflicted killed event naming the
   victim - but the death counter increments one frame before the tracker
