@@ -1,6 +1,6 @@
 # Implementation plan: three detectors + seeding exclusion + two-tier enable
 
-Status: **awaiting Craig's approval** · drafted 2026-08-28 · target branch: `Replay-Improvements`
+Status: **approved 2026-08-28 — in implementation** · target branch: `Replay-Improvements`
 
 This is a self-contained handoff spec. Before starting, read `CLAUDE.md`
 (hard rules — they all apply here), `docs/stats-wishlist.md` (where these
