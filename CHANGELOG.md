@@ -7,7 +7,7 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Three new cheat detectors, all shipped switched OFF. `stamina_hack` catches
+- Four new cheat detectors, all shipped switched OFF. `stamina_hack` catches
   sprint-speed movement on a bar that never falls - sprinting drains stamina
   in Squad without exception, so neither half of that is suspicious alone and
   the pair is. `no_reload` reads the magazine pool: firing drains the summed
@@ -22,10 +22,14 @@ follows [Semantic Versioning](https://semver.org/).
   where `infinite_ammo` assumes a cheater's ammo stops falling, this one
   counts verified shots first and asks about the ledger second, taking no
   position on a premise nobody has confirmed. Off is deliberate and not
-  temporary politeness - a detector is an accusation generator, and none of
-  these has been measured against a real archive yet. Run
-  `scripts/plugin_replay.py` over your recordings before switching any of
-  them on.
+  temporary politeness. All four were replayed over nine real recordings -
+  four 100-player matches and a test server's archive - and three of them had
+  to be corrected before they stopped accusing innocent people; the fourth
+  never fired. Zero false accusations is what that measurement earns, and it
+  is not the same thing as catching anybody, which remains unproven until the
+  first real incident. Run `scripts/plugin_replay.py` over your own
+  recordings before switching any of them on, because your server is not that
+  archive.
 - Seeding matches are no longer recorded at all - no replay, no stats row,
   nothing queued for upload. A seed session is two people shooting a wall for
   six hours, and it arrived in the archive dressed as a match: a 40 MB file
