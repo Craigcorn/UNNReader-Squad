@@ -980,8 +980,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                          "being written (default 120, same as backfill)")
     ap.add_argument("--out", type=Path, default=None,
                     help="write the text report here as well as to stdout")
-    ap.add_argument("--json", type=Path, default=None,
-                    help="write the machine-readable report here")
+    ap.add_argument("--json", nargs="?", const="-", default=None,
+                    metavar="PATH",
+                    help="emit the machine-readable report — to PATH, or to "
+                         "stdout instead of the text report when given bare")
     ap.add_argument("--max-diffs", type=int, default=40,
                     help="how many individual diffs to print (default 40)")
     ap.add_argument("--keep", action="store_true",
@@ -990,6 +992,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--verbose", action="store_true",
                     help="show the backfill's own progress output")
     args = ap.parse_args(argv)
+
+    try:
+        # The report is written in prose, and prose has punctuation. A Windows
+        # console defaults to a codepage that cannot spell it.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
 
     if args.config is not None:
         # Set before anything reads config: `sqreader.config` caches on first
@@ -1075,15 +1084,26 @@ def _run(args: argparse.Namespace, work: Path, config: Any) -> int:
             + ", ".join(idx.unidentified[:5]))
 
     text = render_text(report, max_diffs=args.max_diffs)
-    print(text, end="")
+    # ASCII-escaped on the way to stdout: a Windows console encodes it in the
+    # local codepage, which turns the report's punctuation into bytes no JSON
+    # parser will take. The file copy below is written as UTF-8 by hand and can
+    # keep the real characters.
+    payload = report_json(report) if args.json else None
+    stdout_blob = json.dumps(payload, indent=2) if args.json else ""
+    # A bare `--json` means "give me the report as data" — so it replaces the
+    # human one on stdout rather than being buried under it.
+    if args.json == "-":
+        print(stdout_blob)
+    else:
+        print(text, end="")
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8")
-    if args.json:
-        args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(
-            json.dumps(report_json(report), indent=2, ensure_ascii=False),
-            encoding="utf-8")
+    if args.json and args.json != "-":
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
     return 0 if report.ok else 1
 
 

@@ -455,6 +455,8 @@ def test_the_module_runs_as_a_command(tmp_path):
         cwd=str(repo), capture_output=True, text=True)
     assert proc.returncode == 0
     assert "--recordings-dir" in proc.stdout
+    # `--json` reads as a flag and as a destination; both have to work.
+    assert "[--json [PATH]]" in proc.stdout
 
 
 # -- end to end ---------------------------------------------------------------
@@ -618,3 +620,22 @@ def test_changing_one_recorded_value_shows_up_as_exactly_one_difference(tmp_path
     report = _compare(rec, live_db, replay_db)
     assert [(d.table, d.column) for d in report.diffs] == [
         ("player_matches", "kills")], sp.render_text(report)
+
+
+def test_the_command_emits_a_report_something_else_can_read(tmp_path, capsys):
+    """`--json` on its own hands the report to tooling instead of a person —
+    and it has to survive a console whose codepage cannot spell an em dash."""
+    rec = tmp_path / "recordings"
+    live_db = tmp_path / "live.db"
+    _run_live(_synthetic_match(), rec, live_db)
+
+    code = sp.main([
+        "--recordings-dir", str(rec), "--live-db", str(live_db),
+        "--config", str(_config(tmp_path)), "--work-dir", str(tmp_path / "w"),
+        "--skip-newer-than", "0", "--json"])
+    assert code == 0
+    blob = json.loads(capsys.readouterr().out)
+    assert blob["ok"] is True
+    assert blob["scope"]["matchesInScope"] == [MATCH_ID]
+    assert blob["scope"]["endingsUnrecorded"] == []
+    assert blob["excludedTables"]["plugin_alerts"]
