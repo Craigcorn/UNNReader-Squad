@@ -181,6 +181,14 @@ dormant live mode (snapshot buffer and render-delay machinery are intact).
    seeding excluded. Needed before the platform retention job is written.
 3. **Alert delivery path** — direct Discord webhook from the agent vs routing
    through the platform. Parked; decide before the Phase 2 alert relay.
+4. **Production rollout path for the fork** — the public server currently runs
+   a managed upstream instance that cannot be modified (its stats DB and
+   recordings can be exported). When Phases 1–2 are proven on the test server,
+   decide whether the fork replaces that instance or first runs alongside it
+   in record-only mode (readers are read-only and can coexist; the cost is
+   CPU). Until then, UNN's new pipeline runs on the test server only, and the
+   freeze line for production history is whenever the fork reaches the public
+   box. Decide during Phase 2/3.
 
 ## Glossary
 
