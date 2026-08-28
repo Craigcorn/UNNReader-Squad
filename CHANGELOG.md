@@ -63,6 +63,11 @@ follows [Semantic Versioning](https://semver.org/).
   player is holding: exact equality matched every one of the 2499 comparable
   pairs the loose test did, and a substring rule can pair two unrelated class
   names by accident.
+- A stale soldier reading is no longer read for ammunition. A stale block
+  repeats last tick's magazines, and a frozen magazine count is exactly what
+  an ammo cheat looks like - so a stale read did not weaken that signal, it
+  manufactured it. Real example from the archive: a soldier stuck at
+  `[30, 29, 30, 30, 30, 30]` for a dozen ticks with kills still arriving.
 - Replays failed to load behind a spec-strict reverse proxy. The server spoke
   HTTP/1.0 - the stdlib default - while streaming recordings with
   Transfer-Encoding: chunked, which does not exist in HTTP/1.0. Lenient
