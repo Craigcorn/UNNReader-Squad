@@ -25,7 +25,11 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   be in the snapshot *before* the recorder and `record_tick` see it (log kill
   events are merged in `cli.py` pre-write; keep it that way). Any change that
   makes live-computed and replay-recomputed stats diverge is a bug, not a
-  trade-off.
+  trade-off. It is measurable, so measure it: anything touching `stats.py`,
+  `elo.py`, `recorder.py`, `possample.py` or the wire format runs
+  `scripts/stats_parity.py` against the test-box corpus before push, and a
+  non-zero exit is a failed gate — every diff is fixed or written down in the
+  tool's exclusion catalog with its reason.
 - **Recordings are immutable; consumers are bi-versioned.** Old `.sqrx` files
   must keep playing forever. Any wire-format change bumps the format version
   and extends the Python↔TypeScript cross-language fixture

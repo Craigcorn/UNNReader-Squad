@@ -27,7 +27,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts import stats_parity as sp                                # noqa: E402
-from sqreader.sqrx import SqrxWriter                                  # noqa: E402
+from sqreader.recorder import _handle_snap, finalize_recording        # noqa: E402
+from sqreader.recording_lifecycle import MATCH_TRANSITION_CONFIRM_TICKS  # noqa: E402
+from sqreader.sqrx import SqrxReader, SqrxWriter                      # noqa: E402
+from sqreader.stats import StatsStore                                 # noqa: E402
 
 # A schema shaped like the real one, small enough to reason about. The table
 # NAMES are the real ones on purpose: that puts the shipped semantic keys in
@@ -452,3 +455,166 @@ def test_the_module_runs_as_a_command(tmp_path):
         cwd=str(repo), capture_output=True, text=True)
     assert proc.returncode == 0
     assert "--recordings-dir" in proc.stdout
+
+
+# -- end to end ---------------------------------------------------------------
+
+MATCH_ID = "8e3f1c22-0d44-5aa1-9b77-1f0c2ab34d51"
+
+
+def _snap(tick: int, *, state: str = "InProgress", t1: int = 300,
+          t2: int = 280, kills: int = 0, in_vehicle: bool = False,
+          kill_event: bool = False) -> dict:
+    """One synthetic tick, shaped like the real thing where stats look."""
+    stamp = f"2026-07-15T12:{tick // 60:02d}:{tick % 60:02d}+00:00"
+    gs: dict = {"matchState": state, "mapName": "Fallujah",
+                "gameModeName": "RAAS", "gameModeId": "RAAS",
+                "layer": {"name": "Fallujah_RAAS_v1"}}
+    if state == "InProgress":
+        gs["matchId"] = MATCH_ID
+    players = [
+        {"eosId": EOS_A, "name": "Alice", "teamId": 1, "clanTag": "UNN",
+         "roleId": "Rifleman", "squadName": "Alpha", "score": 40.0 + kills,
+         "soldier": {"position": {"x": 1000.0 + tick, "y": 2000.0}},
+         "stats": {"kills": kills, "deaths": 1, "woundeds": kills,
+                   "objectiveScore": 12.0, "teamWorkScore": 3.0,
+                   "combatScore": 5.0 * kills, "healPoints": 1.5,
+                   "revivedPoints": 2.0, "fobsBuilt": 1,
+                   "suppliesDelivered": 900, "captures": 2, "defenses": 3,
+                   "vehicleDamage": 1250.5, "lives": 3}},
+        {"eosId": EOS_B, "name": "Bob", "teamId": 2, "clanTag": None,
+         "roleId": "Medic", "squadName": "Bravo", "score": 20.0,
+         "soldier": {"position": {"x": 3000.0, "y": 4000.0}},
+         "stats": {"kills": 0, "deaths": kills, "woundeds": 0,
+                   "objectiveScore": 4.0, "teamWorkScore": 8.0}},
+    ]
+    snap: dict = {
+        "timestamp": stamp, "tick": tick, "gameState": gs,
+        "teams": [{"id": 1, "tickets": t1, "factionId": "USA"},
+                  {"id": 2, "tickets": t2, "factionId": "RUS"}],
+        "players": players if state == "InProgress" else [],
+        "damageEvents": [],
+        "vehicles": [],
+    }
+    if in_vehicle:
+        snap["vehicles"] = [{
+            "id": 77, "classShort": "BTR82A",
+            "position": {"x": 5000.0 + tick * 300, "y": 6000.0},
+            "seats": [{"idx": 0, "occupantEosId": EOS_A}]}]
+    if kill_event:
+        snap["damageEvents"] = [{
+            "attacker": "Alice", "victim": "Bob", "ts": 1000.0 + tick,
+            "causerWeapon": "BP_L85A2_C", "damageType": "Bullet",
+            "hitDistance": 142.5, "headshot": True, "killed": True,
+            "wounded": False, "victimTeam": 2}]
+    return snap
+
+
+def _synthetic_match() -> list[dict]:
+    """A short match with everything the stats writer records, then its end.
+
+    The tail is what this whole test is about: three confirmed post-match ticks,
+    the same evidence the live writer uses to stamp `finalized` and publish a
+    winner. Whether the recording carries them is the parity question.
+    """
+    snaps = [_snap(t, kills=0) for t in range(1, 4)]
+    snaps += [_snap(t, kills=1, in_vehicle=True) for t in range(4, 8)]
+    snaps.append(_snap(8, kills=2, in_vehicle=True, kill_event=True))
+    snaps += [_snap(t, kills=2) for t in range(9, 12)]
+    snaps += [_snap(t, state="WaitingPostMatch", t1=120, t2=0)
+              for t in range(12, 12 + MATCH_TRANSITION_CONFIRM_TICKS)]
+    return snaps
+
+
+def _run_live(snaps: list[dict], rec_dir: Path, db: Path) -> None:
+    """Drive the snapshots through the live path, in `cli.py`'s order."""
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    box: dict = {"current": None, "last_state": None, "inactive_ticks": 0,
+                 "pending_match_id": None, "pending_match_buffer": [],
+                 "last_tick": None, "tick_sequence_required": False,
+                 "missing_tick_warned": False}
+    buf: list = []
+    store = StatsStore(db, server_id="t", elo=True)
+    try:
+        for snap in snaps:
+            _handle_snap(snap=snap, raw_line=json.dumps(snap), state_box=box,
+                         out_dir=rec_dir, server_id="t", min_ticks=0,
+                         filename_buffer=buf)
+            store.record_tick(snap)
+    finally:
+        if box.get("current") is not None:       # a shutdown mid-match
+            finalize_recording(box["current"], reason="test shutdown")
+        store.close()
+
+
+def _replay(rec_dir: Path, out_db: Path, cfg: Path) -> None:
+    sp.run_backfill(rec_dir, out_db, server_id="t", skip_newer_than=0.0,
+                    config_path=cfg)
+
+
+def _config(tmp_path: Path) -> Path:
+    """Pin the replay's configuration so the test does not inherit the box's."""
+    path = tmp_path / "sqreader.config.json"
+    path.write_text(json.dumps({"seeding_game_modes": [],
+                                "seeding_layer_patterns": []}),
+                    encoding="utf-8")
+    return path
+
+
+def _compare(rec_dir: Path, live_db: Path, replay_db: Path) -> sp.ParityReport:
+    live = sqlite3.connect(f"file:{live_db}?mode=ro", uri=True)
+    live.row_factory = sqlite3.Row
+    replay = sqlite3.connect(f"file:{replay_db}?mode=ro", uri=True)
+    replay.row_factory = sqlite3.Row
+    try:
+        idx = sp.index_archive(rec_dir, skip_newer_than=0.0,
+                               seeding_modes=frozenset(), seeding_layers=())
+        return sp.diff_databases(live, replay, sp.build_scope(live, idx))
+    finally:
+        live.close()
+        replay.close()
+
+
+def test_a_recorded_match_replays_into_the_same_stats(tmp_path):
+    """The claim the whole pipeline stands on, measured end to end."""
+    rec = tmp_path / "recordings"
+    live_db = tmp_path / "live.db"
+    _run_live(_synthetic_match(), rec, live_db)
+    assert list(rec.glob("*.sqrx")), "the live path recorded nothing to compare"
+
+    replay_db = tmp_path / "replay.db"
+    _replay(rec, replay_db, _config(tmp_path))
+    report = _compare(rec, live_db, replay_db)
+    assert report.ok, sp.render_text(report)
+
+    # ... and the comparison was not vacuous.
+    pm = next(t for t in report.tables if t.table == "player_matches")
+    assert pm.scoped_rows == 2
+    matches = next(t for t in report.tables if t.table == "matches")
+    assert matches.scoped_rows == 1
+
+
+def test_changing_one_recorded_value_shows_up_as_exactly_one_difference(tmp_path):
+    rec = tmp_path / "recordings"
+    live_db = tmp_path / "live.db"
+    _run_live(_synthetic_match(), rec, live_db)
+
+    sqrx = next(iter(rec.glob("*.sqrx")))
+    lines = []
+    with SqrxReader(sqrx) as r:
+        for line in r:
+            snap = json.loads(line)
+            for p in (snap.get("players") or []):
+                if p.get("eosId") == EOS_A:
+                    p["stats"]["kills"] = (p["stats"].get("kills") or 0) + 5
+            lines.append(json.dumps(snap))
+    sqrx.unlink()
+    with SqrxWriter(sqrx, server_id="t") as w:
+        for line in lines:
+            w.write_line(line)
+
+    replay_db = tmp_path / "replay.db"
+    _replay(rec, replay_db, _config(tmp_path))
+    report = _compare(rec, live_db, replay_db)
+    assert [(d.table, d.column) for d in report.diffs] == [
+        ("player_matches", "kills")], sp.render_text(report)
