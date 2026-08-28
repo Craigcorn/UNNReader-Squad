@@ -308,10 +308,14 @@ six ODK stats-collector field checks fail even with a player online:
 `captures`, `defenses`, `fobsBuilt`, `fobsDestroyed`, `vehicleDamage`,
 `suppliesDelivered` ("no player carried it — offset drift?").
 
-1. **Event-gated or drifted?** Inspect the archive recordings and stats DB
-   for any historical nonzero value of the six (the box lacks the sqlite3
-   CLI — use the venv Python). If none: run or wait for a real round
-   containing a capture, a FOB build, and a supply run, then rerun `doctor`.
+1. **Event-gated or drifted?** The fast path: Craig is providing main-server
+   replay exports, recorded by the managed *upstream* agent on the same
+   Squad 10.5.x. If those recordings carry nonzero values for the six, the
+   game populates them at this version and upstream reads them — and our
+   fork reading zeros on the same version makes drift near-certain: go
+   straight to step 2. (The test archive is 2-player seed movement and is
+   expected to show nothing; the main server is also confirmed on 10.5.x,
+   so whatever E derives is what production eventually needs.)
 2. **If drifted:** re-derive the six offsets with
    `scripts/dump_struct_layout.py` against the live process, update the
    offset table + `doctor` entries. These feed leaderboard aggregates
