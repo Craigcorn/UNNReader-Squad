@@ -381,6 +381,22 @@ def _make_handler(
             return None
 
     class _H(http.server.BaseHTTPRequestHandler):
+        # HTTP/1.1 so Transfer-Encoding: chunked is spec-valid — under the
+        # stdlib's HTTP/1.0 default, spec-strict proxies (traefik) treat the
+        # chunked body as raw bytes and forward the chunk framing to the
+        # browser, which then fails to decode the stream ("Recording failed
+        # to load"). Lenient clients decode it anyway, which is why a direct
+        # connection never showed it.
+        protocol_version = "HTTP/1.1"
+
+        def send_response(self, code, message=None) -> None:
+            # Not every response path declares Content-Length, which HTTP/1.1
+            # keep-alive would require — force the one-request-per-connection
+            # lifecycle we had under HTTP/1.0. send_header('Connection') also
+            # flips close_connection in the stdlib.
+            super().send_response(code, message)
+            self.send_header("Connection", "close")
+
         # silence stdlib's per-request logging — too noisy at 5 Hz
         def log_message(self, *_args) -> None:
             pass

@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Replays failed to load behind a spec-strict reverse proxy. The server spoke
+  HTTP/1.0 - the stdlib default - while streaming recordings with
+  Transfer-Encoding: chunked, which does not exist in HTTP/1.0. Lenient
+  clients decode it anyway, which is why a direct connection never showed the
+  problem; a proxy that follows the spec (traefik) forwarded the chunk
+  framing as body bytes, and the viewer reported "Recording failed to load".
+  The server now speaks HTTP/1.1 and closes each connection explicitly,
+  keeping the one-request-per-connection lifecycle it always had.
+
 ## [1.4.4] - 2026-08-19
 
 ### Added
