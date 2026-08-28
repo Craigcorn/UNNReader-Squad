@@ -62,6 +62,22 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- Every recording stopped one frame before the end of its match. The frames
+  that prove a match ended - three consecutive not-playing ticks, the same
+  evidence the live writer requires - were counted and thrown away, so a
+  finished `.sqrx` ended on the last frame of play and held nothing to show
+  the game was over. The sidecar asserted it; the stream could not. Replay
+  that file and it can only conclude `unverified`: no confirmed ending, so no
+  winner, so no rating - while the agent, watching those same frames go past
+  live, had recorded all three. The whole archive was missing the ending of
+  every match in it, and nobody could have noticed without replaying one and
+  comparing. Those frames are now written. They are counted separately from
+  `ticks`, exactly as the 4 Hz position frames are, so `durationSec` and
+  `peakPlayers` keep describing the match that was played - which is also how
+  the stats row measures it. An uncertain shutdown writes however many frames
+  it actually saw, because one is not three and a replay has to be able to
+  tell the difference.
+
 - Every projectile's firer read as nobody. The field moved eight bytes in a
   Squad update and two bools took its old place, so the reader interpreted a
   bool and its padding as a pointer and came back empty - 95 494 out of

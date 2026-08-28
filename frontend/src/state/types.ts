@@ -546,9 +546,13 @@ export interface RecordingMeta {
   peakPlayers: number | null;
   // Two-tier recording: `ticks` counts full (~1 Hz rich) frames only, for
   // backward-compat; positionFrames counts the 4 Hz position frames spliced in
-  // at load time. totalFrames = ticks + positionFrames = the reconstructed
-  // Snapshot[] length (loader progress denominator). Absent on full-only .sqrx.
+  // at load time; endFrames counts the post-match frames that show the match
+  // ending (kept out of `ticks` so it keeps meaning "frames of play", the same
+  // way durationSec and peakPlayers do). totalFrames is their sum = the
+  // reconstructed Snapshot[] length (loader progress denominator). All three
+  // are absent on older .sqrx.
   positionFrames?: number | null;
+  endFrames?: number | null;
   totalFrames?: number | null;
   team1Tickets?: number | null;
   team2Tickets?: number | null;

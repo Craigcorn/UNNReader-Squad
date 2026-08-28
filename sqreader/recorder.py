@@ -8,9 +8,14 @@ State machine:
 - WaitingToStart / WaitingPostMatch  → idle, no writes
 - InProgress, stable new matchId     → open new writer, start recording
 - InProgress, same matchId           → keep writing
-- 3 known not-InProgress ticks       → close writer, finalize sidecar
+- 3 known not-InProgress ticks       → write those frames, close, finalize
 - ambiguous tick                     → keep the current writer open
 - shutdown                           → close writer as unverified
+
+The not-InProgress frames are written because they are the only evidence in the
+file that the match ended. Without them a replay of a finished recording can
+conclude nothing but `unverified`, and the stats it recomputes disagree with the
+ones the agent recorded live — see `_write_end_frames`.
 
 Logs only on state transitions (open/close/error) so we don't spam
 the journal at 3 Hz.
@@ -21,7 +26,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +56,11 @@ _OPEN_STALL_WARN_TICKS = 30
 # over a handful of matches a day, so this is generous by orders of magnitude —
 # it is a bound, not a working size.
 _EXCLUDED_ID_MEMORY = 64
+# How many end-of-match frames a recording may carry. Three is what confirms an
+# ending, so this is a bound against a pathological run of them, not a working
+# size — and it keeps the EARLIEST frames, because those are the ones the stats
+# writer confirmed from.
+_END_FRAME_BUFFER_LIMIT = 32
 
 # Persistent recording lifecycle written into every metadata sidecar.
 #
@@ -118,6 +128,13 @@ class RecordingState:
     # `ticks`, central `has_replay`, peakPlayers) stays full-frame-only and
     # backward-compatible; positionFrames is purely additive.
     position_count: int = 0
+    # The frames that show the match ENDING — a recognised not-playing state,
+    # held here until the ending is confirmed and then written to the file.
+    # They are why a replay can reach the same verdict the live writer reached;
+    # see `_write_end_frames`. Counted separately for the same reason position
+    # frames are: `ticks` means "frames of the match being played".
+    end_frames: list[str] = field(default_factory=list)
+    end_frame_count: int = 0
 
 
 def _utc_now() -> datetime:
@@ -150,6 +167,7 @@ def extract_metadata(sqrx_path: Path) -> dict:
     last: Optional[dict] = None
     ticks = 0
     position_frames = 0
+    end_frames = 0
     peak_players = 0
     with SqrxReader(sqrx_path) as r:
         server_id = r.server_id
@@ -167,6 +185,15 @@ def extract_metadata(sqrx_path: Path) -> dict:
             if snap.get("t") == "pos":
                 position_frames += 1
                 continue
+            # The frames that show the match ending get the same treatment, and
+            # for the same reason: `ticks`, `durationSec` and `peakPlayers`
+            # describe the match being PLAYED, and the live stats row measures
+            # its duration to the last playing frame too. The frame says which
+            # kind it is, so this and `finalize_recording` cannot disagree.
+            gs = snap.get("gameState") or {}
+            if gs.get("matchState") in _INACTIVE_MATCH_STATES:
+                end_frames += 1
+                continue
             if first is None:
                 first = snap
             last = snap
@@ -183,6 +210,7 @@ def extract_metadata(sqrx_path: Path) -> dict:
         ticks=ticks,
         peak_players=peak_players,
         position_frames=position_frames,
+        end_frames=end_frames,
     )
 
 
@@ -196,6 +224,7 @@ def _build_meta(
     ticks: int,
     peak_players: int,
     position_frames: int = 0,
+    end_frames: int = 0,
 ) -> dict:
     """Common meta dict assembly used by both finalize and self-heal paths."""
     first_gs = (first_snap or {}).get("gameState") or {}
@@ -213,7 +242,8 @@ def _build_meta(
         "sizeBytes": size_bytes,
         "ticks": ticks,
         "positionFrames": position_frames,
-        "totalFrames": ticks + position_frames,
+        "endFrames": end_frames,
+        "totalFrames": ticks + position_frames + end_frames,
         "durationSec": duration,
         "startedAtUtc": (
             first_ts.isoformat() if first_ts
@@ -284,6 +314,7 @@ def finalize_recording(state: RecordingState, *, min_ticks: int = 0,
     only be set when snapshots prove the match transitioned; shutdown paths
     deliberately remain ``unverified`` because the match may still be live.
     """
+    _write_end_frames(state)
     try:
         state.writer.close()
     except Exception as e:
@@ -312,7 +343,9 @@ def finalize_recording(state: RecordingState, *, min_ticks: int = 0,
                       if state.path.exists() else 0),
         "ticks": state.tick_count,
         "positionFrames": state.position_count,
-        "totalFrames": state.tick_count + state.position_count,
+        "endFrames": state.end_frame_count,
+        "totalFrames": (state.tick_count + state.position_count
+                        + state.end_frame_count),
         "durationSec": int((last_ts - first_ts).total_seconds()),
         "startedAtUtc": first_ts.isoformat(),
         "endedAtUtc": last_ts.isoformat(),
@@ -470,6 +503,10 @@ def _handle_snap(
     # end-state confirmation so non-consecutive glitches cannot accumulate.
     if not is_active and not is_known_inactive:
         state_box["inactive_ticks"] = 0
+        # The stats writer discards its own run on an ambiguous tick too, so
+        # dropping the frames here keeps the two reading the same evidence.
+        if current is not None:
+            current.end_frames.clear()
         _clear_pending_match()
         if current is None:
             filename_buffer.clear()
@@ -503,6 +540,15 @@ def _handle_snap(
                 state_box["last_state"] = match_state
             return
 
+        # KEEP THE FRAME. Until this landed, the confirming frames were counted
+        # and thrown away, so every finished recording stopped on the last
+        # frame of play and the file held no evidence that the match had ended
+        # at all. A replay of it could only ever conclude `unverified`: no
+        # confirmed ending, therefore no winner, therefore no rating — while
+        # the live writer, watching the same frames go past, had recorded all
+        # three. The archive was missing the end of every match it held.
+        if len(current.end_frames) < _END_FRAME_BUFFER_LIMIT:
+            current.end_frames.append(raw_line)
         inactive_ticks = int(state_box.get("inactive_ticks", 0)) + 1
         state_box["inactive_ticks"] = inactive_ticks
         if inactive_ticks < _MATCH_END_CONFIRM_TICKS:
@@ -529,6 +575,10 @@ def _handle_snap(
 
     state_box["inactive_ticks"] = 0
     state_box["preopen_idle_ticks"] = 0
+    if current is not None:
+        # Play resumed, so whatever looked like an ending was not one. Same
+        # judgement the stats writer makes on an active tick.
+        current.end_frames.clear()
 
     # Active match. A different id must also be stable: one torn FString must
     # neither close A nor create a B recording containing a live A snapshot.
@@ -648,6 +698,35 @@ def _handle_snap(
 
     # Steady-state: append to current writer.
     _write_line(current, snap, raw_line)
+
+
+def _write_end_frames(state: RecordingState) -> None:
+    """Append the frames that showed the match ending, then forget them.
+
+    Side-channel, exactly like `write_position_frame`: it appends lines and
+    counts them, and touches nothing else. `tick_count`, `peak_players` and the
+    first/last timestamps stay full-frame-only, so `ticks`, `durationSec` and
+    `peakPlayers` keep meaning "the match that was played" — which is also what
+    the stats row's `duration_sec` measures, and the two agreeing is the whole
+    point of writing these frames in the first place.
+
+    Called from `finalize_recording`, so it covers every way a recording can
+    close: a confirmed ending flushes the three frames that confirmed it, and a
+    shutdown mid-teardown flushes however many had been seen. A replay then
+    reaches the same verdict from the same evidence, including "not enough
+    evidence".
+    """
+    if not state.end_frames:
+        return
+    for line in state.end_frames:
+        try:
+            state.raw_bytes += state.writer.write_line(line)
+            state.end_frame_count += 1
+        except Exception as e:   # a lost end frame must not lose the recording
+            log.warning("end-frame write failed for %s: %r",
+                        state.path.name, e)
+            break
+    state.end_frames.clear()
 
 
 def _write_line(state: RecordingState, snap: dict, raw_line: str) -> None:

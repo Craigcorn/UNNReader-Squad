@@ -155,3 +155,133 @@ def test_dropped_sse_frames_cannot_fake_consecutive_match_ids(tmp_path):
     assert current.tick_count == 4
 
     finalize_recording(current, reason="test cleanup")
+
+
+# ---------------------------------------------------------------------------
+# The end of the match has to be IN the file
+#
+# A finished recording used to stop on the last frame of play. The frames that
+# proved the match had ended were counted and dropped, so nothing in the
+# archive said the match was over — the sidecar asserted it, the stream could
+# not show it. Replaying such a file reproduces `unverified`, no winner and no
+# rating, while the live writer watching the same frames recorded all three.
+# ---------------------------------------------------------------------------
+
+def _frames(path) -> list[dict]:
+    from sqreader.sqrx import SqrxReader
+    with SqrxReader(path) as r:
+        return [json.loads(line) for line in r]
+
+
+def test_a_finished_recording_carries_the_frames_that_ended_the_match(tmp_path):
+    state_box = _state_box()
+    filename_buffer = []
+    for tick in range(1, 5):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("InProgress", tick=tick))
+    current = state_box["current"]
+
+    for tick in range(5, 5 + _MATCH_END_CONFIRM_TICKS):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("WaitingPostMatch", tick=tick))
+    assert state_box["current"] is None
+
+    states = [(f.get("gameState") or {}).get("matchState")
+              for f in _frames(current.path)]
+    assert states[-_MATCH_END_CONFIRM_TICKS:] == \
+        ["WaitingPostMatch"] * _MATCH_END_CONFIRM_TICKS
+    # ... and in the order they arrived: the first one is where the terminal
+    # ticket counts come from.
+    assert states.count("InProgress") == 4
+
+
+def test_the_end_frames_do_not_count_as_play(tmp_path):
+    """`ticks`, `durationSec` and `peakPlayers` describe the match that was
+    played — and the stats row measures its duration the same way."""
+    state_box = _state_box()
+    filename_buffer = []
+    for tick in range(1, 5):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("InProgress", tick=tick))
+    current = state_box["current"]
+    sidecar = current.path.with_suffix(".meta.json")
+    for tick in range(5, 5 + _MATCH_END_CONFIRM_TICKS):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("WaitingPostMatch", tick=tick))
+
+    meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert meta["ticks"] == 4
+    assert meta["endFrames"] == _MATCH_END_CONFIRM_TICKS
+    assert meta["totalFrames"] == 4 + _MATCH_END_CONFIRM_TICKS
+    assert meta["recordingState"] == "finalized"
+    # The sidecar still names the match, not the teardown after it.
+    assert meta["mapName"] == "Fallujah"
+    assert meta["matchId"] == "match-a"
+
+
+def test_rescanning_a_recording_counts_the_end_frames_the_same_way(tmp_path):
+    """The self-heal path and the finalize path must not disagree about what a
+    frame is, or a lost sidecar would rewrite the match's own duration."""
+    from sqreader.recorder import extract_metadata
+
+    state_box = _state_box()
+    filename_buffer = []
+    for tick in range(1, 5):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("InProgress", tick=tick))
+    current = state_box["current"]
+    sidecar = current.path.with_suffix(".meta.json")
+    for tick in range(5, 5 + _MATCH_END_CONFIRM_TICKS):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("WaitingPostMatch", tick=tick))
+
+    written = json.loads(sidecar.read_text(encoding="utf-8"))
+    rescanned = extract_metadata(current.path)
+    for field in ("ticks", "endFrames", "totalFrames", "durationSec",
+                  "peakPlayers", "mapName"):
+        assert rescanned[field] == written[field], field
+
+
+def test_play_resuming_discards_the_frames_that_looked_like_an_ending(tmp_path):
+    """Two post-match ticks and then play again is not an ending, and the file
+    must not suggest it was."""
+    state_box = _state_box()
+    filename_buffer = []
+    for tick in range(1, 5):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("InProgress", tick=tick))
+    current = state_box["current"]
+    for tick in (5, 6):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("WaitingPostMatch", tick=tick))
+    _step(tmp_path, state_box, filename_buffer, _snap("InProgress", tick=7))
+    assert state_box["current"] is current
+    assert current.end_frames == []
+
+    finalize_recording(current, reason="test cleanup")
+    states = [(f.get("gameState") or {}).get("matchState")
+              for f in _frames(current.path)]
+    assert "WaitingPostMatch" not in states
+
+
+def test_a_shutdown_writes_only_what_it_saw(tmp_path):
+    """An uncertain close flushes however many confirming frames arrived — one
+    is not three, and a replay must be able to tell."""
+    state_box = _state_box()
+    filename_buffer = []
+    for tick in range(1, 5):
+        _step(tmp_path, state_box, filename_buffer,
+              _snap("InProgress", tick=tick))
+    current = state_box["current"]
+    _step(tmp_path, state_box, filename_buffer,
+          _snap("WaitingPostMatch", tick=5))
+    assert state_box["current"] is current      # not confirmed yet
+
+    finalize_recording(current, reason="serve shutdown")
+    meta = json.loads(current.path.with_suffix(".meta.json").read_text(
+        encoding="utf-8"))
+    assert meta["recordingState"] == "unverified"
+    assert meta["endFrames"] == 1
+    states = [(f.get("gameState") or {}).get("matchState")
+              for f in _frames(current.path)]
+    assert states.count("WaitingPostMatch") == 1
