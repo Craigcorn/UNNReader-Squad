@@ -35,10 +35,11 @@ from sqreader.sqrx import SqrxWriter                                  # noqa: E4
 _DDL = """
 CREATE TABLE matches (
   match_id TEXT PRIMARY KEY, server_id TEXT, status TEXT,
-  winner_team INTEGER, started_at INTEGER);
+  winner_team INTEGER, started_at INTEGER, end_state TEXT, end_reason TEXT);
 CREATE TABLE player_matches (
   match_id TEXT NOT NULL, eos_id TEXT NOT NULL, name TEXT,
-  kills INTEGER, score REAL, PRIMARY KEY (match_id, eos_id));
+  kills INTEGER, score REAL, elo_change INTEGER,
+  PRIMARY KEY (match_id, eos_id));
 CREATE TABLE players (eos_id TEXT PRIMARY KEY, last_name TEXT);
 CREATE TABLE player_elo (eos_id TEXT PRIMARY KEY, elo_rating INTEGER);
 CREATE TABLE kill_events (
@@ -73,17 +74,19 @@ def _pair(rows: dict[str, list[tuple]]):
 
 
 def _scope(matches=("M1",), players=(EOS_A,), elo_reason=None,
-           unscoped_matches=None):
+           unscoped_matches=None, endings_unrecorded=()):
     return sp.Scope(
         in_scope_matches=set(matches),
         unscoped_matches=dict(unscoped_matches or {}),
         in_scope_players=set(players),
-        elo_reason=elo_reason)
+        elo_reason=elo_reason,
+        endings_unrecorded=set(endings_unrecorded))
 
 
 _BASE = {
-    "matches": [("M1", "srv", "final", 1, 100)],
-    "player_matches": [("M1", EOS_A, "Alice", 7, 12.5)],
+    "matches": [("M1", "srv", "final", 1, 100, "finalized",
+                 "confirmed matchState='WaitingPostMatch'")],
+    "player_matches": [("M1", EOS_A, "Alice", 7, 12.5, 4)],
     "players": [(EOS_A, "Alice")],
 }
 
@@ -111,15 +114,13 @@ def test_rows_the_archive_cannot_reproduce_are_counted_not_failed():
     """A live DB legitimately holds matches recorded before the recorder was
     deployed. Those rows are history, not regressions."""
     live = _db({
-        "matches": [("M1", "srv", "final", 1, 100),
-                    ("OLD", "srv", "final", 2, 50)],
-        "player_matches": [("M1", EOS_A, "Alice", 7, 12.5),
-                           ("OLD", EOS_B, "Bob", 3, 4.0)],
+        "matches": _BASE["matches"] + [("OLD", "srv", "final", 2, 50,
+                                        "finalized", "confirmed")],
+        "player_matches": _BASE["player_matches"] + [
+            ("OLD", EOS_B, "Bob", 3, 4.0, -2)],
     })
-    replay = _db({
-        "matches": [("M1", "srv", "final", 1, 100)],
-        "player_matches": [("M1", EOS_A, "Alice", 7, 12.5)],
-    })
+    replay = _db({"matches": _BASE["matches"],
+                  "player_matches": _BASE["player_matches"]})
     scope = _scope(unscoped_matches={"OLD": "no recording in the archive"})
     report = sp.diff_databases(live, replay, scope)
     assert report.ok
@@ -235,6 +236,51 @@ def test_two_rows_under_one_key_are_reported():
     assert any(d.kind == "duplicate" for d in report.diffs)
 
 
+# -- the catalog of legitimate differences ------------------------------------
+
+def test_a_match_with_no_recorded_ending_forgives_only_the_ending():
+    """A recording made before the closing frames were kept cannot show the
+    match ending. What the match forgives is the ending — not the match."""
+    live, replay = _pair(_BASE)
+    replay.execute("UPDATE matches SET winner_team=NULL, end_state='unverified'")
+    replay.execute("UPDATE player_matches SET elo_change=NULL, kills=9")
+
+    scope = _scope(endings_unrecorded={"M1"})
+    diffs = sp.diff_databases(live, replay, scope).diffs
+    assert [(d.table, d.column) for d in diffs] == [("player_matches", "kills")]
+
+    # Same rows, a match whose ending IS in the archive: nothing is forgiven.
+    assert len(sp.diff_databases(live, replay, _scope()).diffs) == 4
+
+
+def test_the_reason_a_shutdown_gives_is_forgiven_only_when_nobody_saw_an_ending():
+    """`end_reason` is provenance about the writer, and on an unobserved ending
+    it describes the agent rather than the match. When an ending WAS observed it
+    names the frame the tickets came from, and that stays compared."""
+    live, replay = _pair(_BASE)
+    live.execute("UPDATE matches SET end_state='unverified', "
+                 "end_reason='startup sweep: left open by a hard kill'")
+    replay.execute("UPDATE matches SET end_state='unverified', "
+                   "end_reason='superseded: matchId changed'")
+    assert sp.diff_databases(live, replay, _scope()).ok
+
+    replay.execute("UPDATE matches SET end_state='finalized', "
+                   "end_reason='confirmed; tickets=last-active-frame'")
+    diffs = sp.diff_databases(live, replay, _scope()).diffs
+    assert {d.column for d in diffs} == {"end_state", "end_reason"}
+
+
+def test_the_report_says_how_many_values_each_exclusion_forgave():
+    """An exclusion that quietly starts forgiving hundreds of rows is how a
+    harness stops being one."""
+    live, replay = _pair(_BASE)
+    replay.execute("UPDATE matches SET winner_team=NULL, end_state='unverified'")
+    text = sp.render_text(sp.diff_databases(
+        live, replay, _scope(endings_unrecorded={"M1"})))
+    assert "forgave 2 value(s) on 1 match(es)" in text
+    assert "matches.end_reason — forgave 0 value(s)" in text
+
+
 def test_ratings_are_unscoped_whenever_any_match_is():
     """A rating moves against the other team's average, so one unreproducible
     match perturbs every rating downstream of it. There is no per-row rescue."""
@@ -251,11 +297,11 @@ def test_ratings_are_unscoped_whenever_any_match_is():
 
 def _live_scope_db(tmp_path: Path) -> sqlite3.Connection:
     conn = _db({
-        "matches": [("HAVE", "srv", "final", 1, 100),
-                    ("GONE", "srv", "final", 2, 50),
-                    ("OPEN", "srv", "open", None, 200)],
-        "player_matches": [("HAVE", EOS_A, "Alice", 1, 1.0),
-                           ("GONE", EOS_B, "Bob", 2, 2.0)],
+        "matches": [("HAVE", "srv", "final", 1, 100, "finalized", ""),
+                    ("GONE", "srv", "final", 2, 50, "finalized", ""),
+                    ("OPEN", "srv", "open", None, 200, None, None)],
+        "player_matches": [("HAVE", EOS_A, "Alice", 1, 1.0, 3),
+                           ("GONE", EOS_B, "Bob", 2, 2.0, -1)],
         "players": [(EOS_A, "Alice"), (EOS_B, "Bob")],
     })
     return conn
@@ -315,6 +361,38 @@ def test_the_archive_index_applies_the_same_rules_the_backfill_does(tmp_path):
     assert set(idx.eligible) == {"live", "seed"}
 
 
+def _recording(rec_dir: Path, name: str, states: list[str],
+               meta: dict | None = None) -> Path:
+    path = rec_dir / f"{name}.sqrx"
+    with SqrxWriter(path, server_id="t") as w:
+        for i, state in enumerate(states, 1):
+            w.write_line(json.dumps({
+                "tick": i, "timestamp": f"2026-07-15T12:00:{i:02d}+00:00",
+                "gameState": {"matchState": state, "matchId": name,
+                              "gameModeName": "RAAS"}}))
+    if meta is not None:
+        path.with_suffix(".meta.json").write_text(
+            json.dumps({"matchId": name, **meta}), encoding="utf-8")
+    return path
+
+
+def test_the_index_can_tell_whether_a_recording_holds_its_ending(tmp_path):
+    """Recordings written before the closing frames were kept cannot show a
+    match ending, and the ones written since can. The harness has to know which
+    it is looking at, or it forgives the wrong thing."""
+    rec = tmp_path / "recordings"
+    rec.mkdir()
+    _recording(rec, "old", ["InProgress"] * 3, meta={})
+    _recording(rec, "new", ["InProgress", "WaitingPostMatch"], meta={})
+    # A sidecar that carries the count answers without opening the file at all.
+    _recording(rec, "modern", ["InProgress"], meta={"endFrames": 0})
+
+    idx = sp.index_archive(rec, skip_newer_than=0.0,
+                           seeding_modes=frozenset(), seeding_layers=())
+    assert idx.endings_recorded == {"old": False, "new": True, "modern": True}
+    assert idx.scanned == 2                # "modern" was answered by its sidecar
+
+
 def test_a_recording_still_being_written_is_not_replayed(tmp_path):
     rec = tmp_path / "recordings"
     rec.mkdir()
@@ -352,14 +430,14 @@ def test_the_snapshot_is_a_copy_not_a_read_of_the_live_file(tmp_path):
     src = tmp_path / "live.db"
     conn = sqlite3.connect(str(src))
     conn.executescript(_DDL)
-    conn.execute("INSERT INTO matches VALUES ('M1','srv','final',1,100)")
+    conn.execute("INSERT INTO matches VALUES ('M1','srv','final',1,100,'f','')")
     conn.commit()
     dst = sp.snapshot_db(src, tmp_path / "work" / "snap.db")
     assert dst.exists()
     copy = sqlite3.connect(str(dst))
     assert copy.execute("SELECT COUNT(*) FROM matches").fetchone()[0] == 1
     # Still a live, writable original.
-    conn.execute("INSERT INTO matches VALUES ('M2','srv','final',2,200)")
+    conn.execute("INSERT INTO matches VALUES ('M2','srv','final',2,200,'f','')")
     conn.commit()
     assert copy.execute("SELECT COUNT(*) FROM matches").fetchone()[0] == 1
     conn.close()

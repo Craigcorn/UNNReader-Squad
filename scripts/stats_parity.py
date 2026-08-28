@@ -49,11 +49,13 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqreader.recording_lifecycle import is_excluded_match      # noqa: E402
+from sqreader.recording_lifecycle import (                      # noqa: E402
+    INACTIVE_MATCH_STATES, is_excluded_match,
+)
 from sqreader.sqrx import SqrxReader                            # noqa: E402
 
 # --------------------------------------------------------------------------
@@ -141,6 +143,56 @@ DEFAULT_FLOAT_REASON = (
     "same order, so any difference is a change in that order")
 
 
+# The catalog of legitimate differences.
+#
+# Every difference the harness meets gets exactly one of two fates: it is fixed,
+# or it is written down here with the reason. There is no third bucket and no
+# quietly widened tolerance. Each entry below is narrow on purpose — it forgives
+# one column under one stated condition — and the report counts how many rows it
+# actually forgave, so an exclusion cannot grow without somebody seeing it.
+
+@dataclass(frozen=True)
+class ColumnExclusion:
+    reason: str
+    # (live_row, replay_row) -> whether the reason applies to THIS pair. None
+    # means it always does.
+    when: Optional[Callable[[dict, dict], bool]] = None
+
+
+def _both_endings_unobserved(live: dict, replay: dict) -> bool:
+    return (live.get("end_state") == "unverified"
+            and replay.get("end_state") == "unverified")
+
+
+EXCLUDED_COLUMNS: dict[tuple[str, str], ColumnExclusion] = {
+    ("matches", "end_reason"): ColumnExclusion(
+        reason="only when BOTH sides agree the ending was never observed. The "
+               "reason then describes what happened to the AGENT, not to the "
+               "match — 'left open by a hard kill' is an event a recording "
+               "cannot contain, and the replay says 'superseded' because the "
+               "archive simply moved on. Deliberately conditional: when either "
+               "side did observe an ending the string carries which frame the "
+               "ticket counts came from, and that stays under comparison.",
+        when=_both_endings_unobserved),
+}
+
+
+# Columns whose value depends on having WATCHED the match end. A recording made
+# before the recorder wrote its closing frames cannot reproduce any of them —
+# the evidence is not in the file. This is a fact about specific files, not a
+# tolerance: it applies only to matches the harness can show have no ending
+# recorded, and it disappears on its own as the archive turns over.
+UNRECORDED_ENDING_COLUMNS: dict[str, tuple[str, ...]] = {
+    "matches": ("end_state", "end_reason", "winner_team"),
+    "player_matches": ("elo_change",),
+}
+UNRECORDED_ENDING_REASON = (
+    "the archive holds no frame showing this match end, so the replay cannot "
+    "confirm an ending the live writer watched happen. Recordings written "
+    "before the recorder started keeping its closing frames are all like this; "
+    "the exclusion expires by itself the moment a match is recorded with them")
+
+
 # --------------------------------------------------------------------------
 # Scope — which rows the archive is allowed to be asked about
 # --------------------------------------------------------------------------
@@ -158,6 +210,23 @@ class Scope:
     in_scope_players: set[str] = field(default_factory=set)
     unscoped_players: dict[str, str] = field(default_factory=dict)
     elo_reason: Optional[str] = None   # non-None means ratings are unscoped
+    # In-scope matches whose ENDING is not in the archive. Everything about how
+    # they were played is still compared; only the columns that describe the
+    # ending are forgiven. See UNRECORDED_ENDING_COLUMNS.
+    endings_unrecorded: set[str] = field(default_factory=set)
+
+    def forgives(self, table: str, column: str, spec: "TableSpec",
+                 live_row: dict, replay_row: dict) -> Optional[str]:
+        """The written reason this column may differ on this row, or None."""
+        if (spec.scope == SCOPE_MATCH
+                and column in UNRECORDED_ENDING_COLUMNS.get(table, ())
+                and str(live_row.get(spec.scope_col)) in self.endings_unrecorded):
+            return UNRECORDED_ENDING_REASON
+        rule = EXCLUDED_COLUMNS.get((table, column))
+        if rule is not None and (rule.when is None
+                                 or rule.when(live_row, replay_row)):
+            return rule.reason
+        return None
 
     def row_in_scope(self, spec: TableSpec, value: Any) -> tuple[bool, str]:
         """Whether a row with this scope-column value is in scope, and if not,
@@ -192,6 +261,10 @@ class ArchiveIndex:
     still_writing: dict[str, list[str]] = field(default_factory=dict)
     seeding_excluded: dict[str, list[str]] = field(default_factory=dict)
     unidentified: list[str] = field(default_factory=list)
+    # match id -> whether any of its recordings shows the match ending.
+    endings_recorded: dict[str, bool] = field(default_factory=dict)
+    # How many files had to be read end to end to answer that.
+    scanned: int = 0
 
     @property
     def file_count(self) -> int:
@@ -240,6 +313,39 @@ def _match_id_of(path: Path, meta: Optional[dict]) -> Optional[str]:
     return None
 
 
+def _records_the_ending(path: Path, meta: Optional[dict]) -> tuple[bool, bool]:
+    """Whether this recording could show its match ending, and whether the file
+    had to be read to find out.
+
+    The sidecar answers it for nothing when the recorder wrote one: `endFrames`
+    exists on every recording made since the closing frames started being kept,
+    so its mere PRESENCE says the file holds whatever evidence there was — zero
+    included, which honestly means "the agent never saw this match end either".
+
+    Only an older sidecar (or a missing one) needs the file opened, and then the
+    question is simply whether any frame carries a state that means "not
+    playing". That is the same evidence the stats writer confirms an ending
+    from, asked of the archive instead of the live reader.
+    """
+    if meta is not None and "endFrames" in meta:
+        return (True, False)
+    try:
+        with SqrxReader(path) as r:
+            for line in r:
+                try:
+                    snap = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(snap, dict) or snap.get("t") == "pos":
+                    continue
+                state = (snap.get("gameState") or {}).get("matchState")
+                if state in INACTIVE_MATCH_STATES:
+                    return (True, True)
+    except Exception:
+        return (False, True)
+    return (False, True)
+
+
 def index_archive(rec_dir: Path, *, skip_newer_than: float,
                   seeding_modes: frozenset[str],
                   seeding_layers: tuple[str, ...],
@@ -272,6 +378,9 @@ def index_archive(rec_dir: Path, *, skip_newer_than: float,
             idx.seeding_excluded.setdefault(mid, []).append(path.name)
             continue
         idx.eligible.setdefault(mid, []).append(path.name)
+        ends, scanned = _records_the_ending(path, meta)
+        idx.scanned += 1 if scanned else 0
+        idx.endings_recorded[mid] = idx.endings_recorded.get(mid, False) or ends
     return idx
 
 
@@ -313,6 +422,8 @@ def build_scope(live: sqlite3.Connection, idx: ArchiveIndex) -> Scope:
                 "the live row is still open — the match has not ended yet")
             continue
         scope.in_scope_matches.add(mid)
+        if not idx.endings_recorded.get(mid, False):
+            scope.endings_unrecorded.add(mid)
 
     # A player row aggregates every match that account ever played. It can only
     # be reproduced when all of them are in scope.
@@ -331,11 +442,13 @@ def build_scope(live: sqlite3.Connection, idx: ArchiveIndex) -> Scope:
     # against the OTHER team's average, so one unreproducible match perturbs
     # every player who met anyone who played it, and then everyone they met.
     # Either the archive covers the whole rated history or it covers none of it.
-    if scope.unscoped_matches:
+    blind = len(scope.unscoped_matches) + len(scope.endings_unrecorded)
+    if blind:
         scope.elo_reason = (
-            f"{len(scope.unscoped_matches)} match(es) are unscoped, and a "
-            "rating is computed against the opposing team's average — one "
-            "unreproducible match perturbs every rating downstream of it")
+            f"{blind} match(es) are either unscoped or have no recorded "
+            "ending, and an unended match is never rated. A rating is computed "
+            "against the opposing team's average, so one unreproducible match "
+            "perturbs every rating downstream of it")
     return scope
 
 
@@ -363,6 +476,12 @@ class TableReport:
     unscoped_rows: int = 0
     compared_columns: list[str] = field(default_factory=list)
     skipped_columns: dict[str, str] = field(default_factory=dict)
+    # (column, the written reason) -> how many values that reason forgave. Kept
+    # per reason, not per column, so two rules that can both reach the same
+    # column are never credited with each other's rows: an exclusion that
+    # forgives nothing costs nothing, and one that starts forgiving hundreds
+    # says so in its own line.
+    forgiven: dict[tuple[str, str], int] = field(default_factory=dict)
     diffs: list[Diff] = field(default_factory=list)
     excluded_reason: Optional[str] = None
 
@@ -562,10 +681,16 @@ def diff_databases(live: sqlite3.Connection, replay: sqlite3.Connection,
                 continue
             lrow, rrow = live_rows[k], replay_rows[k]
             for col in shared:
-                if not values_equal(table, col, lrow.get(col), rrow.get(col)):
-                    tr.diffs.append(Diff(
-                        table=table, kind="value", key=k, column=col,
-                        live=lrow.get(col), replay=rrow.get(col)))
+                if values_equal(table, col, lrow.get(col), rrow.get(col)):
+                    continue
+                forgiven = scope.forgives(table, col, spec, lrow, rrow)
+                if forgiven is not None:
+                    tr.forgiven[(col, forgiven)] = \
+                        tr.forgiven.get((col, forgiven), 0) + 1
+                    continue
+                tr.diffs.append(Diff(
+                    table=table, kind="value", key=k, column=col,
+                    live=lrow.get(col), replay=rrow.get(col)))
     return report
 
 
@@ -677,6 +802,13 @@ def render_text(report: ParityReport, *, max_diffs: int = 40) -> str:
     if scope.unscoped_players:
         w(f"  accounts unscoped  : {len(scope.unscoped_players)} "
           f"(they played an unscoped match)")
+    if scope.endings_unrecorded:
+        w(f"  endings not in the archive : {len(scope.endings_unrecorded)} "
+          f"in-scope match(es)")
+        for line in _wrap(UNRECORDED_ENDING_REASON, 62):
+            w(f"      {line}")
+        for mid in sorted(scope.endings_unrecorded):
+            w(f"      {mid}")
     if scope.elo_reason:
         w(f"  ratings unscoped   : {scope.elo_reason}")
     w("")
@@ -686,6 +818,17 @@ def render_text(report: ParityReport, *, max_diffs: int = 40) -> str:
         w(f"  {table}")
         for line in _wrap(why, 66):
             w(f"      {line}")
+    for (table, col), rule in sorted(EXCLUDED_COLUMNS.items()):
+        n = _forgiven_by(report, rule.reason, table=table, column=col)
+        w(f"  {table}.{col} — forgave {n} value(s)")
+        for line in _wrap(rule.reason, 66):
+            w(f"      {line}")
+    ending_rows = _forgiven_by(report, UNRECORDED_ENDING_REASON)
+    if ending_rows:
+        w(f"  end-of-match columns — forgave {ending_rows} value(s) on "
+          f"{len(scope.endings_unrecorded)} match(es) with no recorded ending: "
+          + ", ".join(f"{t}.{c}" for t, cols in
+                      sorted(UNRECORDED_ENDING_COLUMNS.items()) for c in cols))
     w("")
 
     w("tables")
@@ -742,6 +885,16 @@ def render_text(report: ParityReport, *, max_diffs: int = 40) -> str:
     return "\n".join(out) + "\n"
 
 
+def _forgiven_by(report: ParityReport, reason: str, *,
+                 table: Optional[str] = None,
+                 column: Optional[str] = None) -> int:
+    """How many values one written reason actually forgave."""
+    return sum(
+        n for t in report.tables if table in (None, t.table)
+        for (col, why), n in t.forgiven.items()
+        if why == reason and column in (None, col))
+
+
 def _wrap(text: str, width: int) -> list[str]:
     words, lines, cur = text.split(), [], ""
     for word in words:
@@ -764,8 +917,12 @@ def report_json(report: ParityReport) -> dict:
             "matchesUnscoped": report.scope.unscoped_matches,
             "accountsUnscoped": report.scope.unscoped_players,
             "ratingsUnscopedReason": report.scope.elo_reason,
+            "endingsUnrecorded": sorted(report.scope.endings_unrecorded),
+            "endingsUnrecordedReason": UNRECORDED_ENDING_REASON,
         },
         "excludedTables": EXCLUDED_TABLES,
+        "excludedColumns": {f"{t}.{c}": rule.reason
+                            for (t, c), rule in EXCLUDED_COLUMNS.items()},
         "floatTolerances": {
             f"{t}.{c}": {"tolerance": tol, "reason": why}
             for (t, c), (tol, why) in FLOAT_TOLERANCES.items()},
@@ -778,6 +935,8 @@ def report_json(report: ParityReport) -> dict:
              "unscopedRows": t.unscoped_rows,
              "comparedColumns": t.compared_columns,
              "skippedColumns": t.skipped_columns,
+             "forgiven": [{"column": c, "values": n, "reason": why}
+                          for (c, why), n in t.forgiven.items()],
              "excludedReason": t.excluded_reason,
              "diffs": [{"kind": d.kind, "key": [_json_safe(v) for v in d.key],
                         "column": d.column, "live": _json_safe(d.live),
@@ -906,6 +1065,10 @@ def _run(args: argparse.Namespace, work: Path, config: Any) -> int:
         f"seeding   : modes={sorted(seeding_modes) or '-'} "
         f"layers={list(seeding_layers) or '-'}",
     ]
+    if idx.scanned:
+        report.notes.append(
+            f"scanned {idx.scanned} recording(s) end to end for the frames "
+            f"that show a match ending — their sidecars predate `endFrames`")
     if idx.unidentified:
         report.notes.append(
             f"WARNING: {len(idx.unidentified)} recording(s) name no match id: "

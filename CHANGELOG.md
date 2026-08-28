@@ -21,7 +21,13 @@ follows [Semantic Versioning](https://semver.org/).
   empty database. Rows the archive cannot speak for - matches older than the
   recorder, matches retention swept, the one still being played - are counted
   and listed rather than failed, and the reasons are printed. Everything else
-  is either identical or a finding.
+  is either identical or a finding. The two differences that are facts about
+  the archive rather than bugs in the engine are written down in the tool,
+  each with its reason and each narrow enough to expire on its own: a match
+  recorded before the recorder kept its closing frames cannot show its own
+  ending, and a shutdown's `end_reason` describes what happened to the agent
+  rather than to the match. The report counts how many values each one
+  forgave, so an exclusion cannot quietly grow into a blind spot.
 
 - Four new cheat detectors, all shipped switched OFF. `stamina_hack` catches
   sprint-speed movement on a bar that never falls - sprinting drains stamina
