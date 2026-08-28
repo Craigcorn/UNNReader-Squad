@@ -534,6 +534,18 @@ def test_a_zero_stamina_max_is_not_divided_by():
     assert sink.rows == []
 
 
+def test_moving_faster_than_a_sprint_is_not_a_stamina_question():
+    """A stamina cheat lets you sprint indefinitely; it does not make you
+    faster than a sprint. Above the cap the explanation is a vehicle seat we
+    failed to resolve, a parachute, or a position leak — speedhack's business,
+    with speedhack's tuning history behind it. On a real archive this
+    detector's only alert was the same player, in the same moment, that
+    speedhack was already reporting."""
+    mgr, sink = _run(STAMINA_ON)
+    _sprint(mgr, ticks=20, stamina=100.0, speed_mps=18.4)
+    assert sink.rows == []
+
+
 def test_a_vehicle_occupant_never_flags_stamina():
     mgr, sink = _run(STAMINA_ON)
     _sprint(mgr, ticks=20, stamina=100.0,
@@ -673,6 +685,41 @@ def test_an_unattributed_projectile_accuses_nobody():
     assert sink.rows == []
 
 
+def test_a_bleed_out_kill_is_not_a_shot():
+    """The log emits a second event when a downed player dies, credited to
+    whatever downed them — which may have been minutes earlier and cost a
+    round then, not now. Four of those with the ammo sitting still is a
+    marksman waiting, not a cheat, and it was this detector's entire false
+    positive rate on a real archive."""
+    mgr, sink = _run(FIRE_ON)
+    for i in range(8):
+        ts = 2.0 * i
+        ev = _hit(1000.0 + ts)
+        ev["wounded"], ev["killed"] = 0, 1        # Die(), not Wound()
+        ev["victim"] = f"victim-{i}"
+        mgr.run_tick(_snap(
+            [_player(eos="eos-1", name="Alice", weapon="BP_M4A1_C",
+                     mags=[30])],
+            tick=i + 1, elapsed=ts, events=[ev]),
+            tick=i + 1, now=1000.0 + ts)
+    assert sink.rows == []
+
+
+def test_a_stale_soldier_read_is_not_a_frozen_ledger():
+    """A stale block repeats last tick's magazines, which is exactly what an
+    ammo cheat looks like. A stale read does not weaken the signal, it
+    manufactures it."""
+    mgr, sink = _run(FIRE_ON)
+    for i in range(8):
+        ts = 2.0 * i
+        p = _player(eos="eos-1", name="Alice", weapon="BP_M4A1_C", mags=[30],
+                    stale=True)
+        mgr.run_tick(_snap([p], tick=i + 1, elapsed=ts,
+                           events=[_hit(1000.0 + ts)]),
+                     tick=i + 1, now=1000.0 + ts)
+    assert sink.rows == []
+
+
 def test_the_fire_cooldown_suppresses_a_repeat():
     mgr, sink = _run(FIRE_ON)
     _shoot(mgr, mags=[30], ticks=40)
@@ -789,6 +836,21 @@ def test_a_slower_sampler_widens_the_launcher_allowance():
     _burn(mgr, mags=[[1, 1, 1, 1], [1, 1], [0, 0]], weapon="BP_M320_HE_C",
           tick_sec=7.0)
     assert sink.rows == []
+
+
+def test_a_pistol_firing_twice_in_two_seconds_is_not_impossible():
+    """The spacing rule says every shot mandates a reload, and that is true of
+    a one-round magazine and nothing else. A Makarov holds eight or nine, a
+    Mosin six, the QLZ-87 drum six or seven — all of them fire consecutive
+    rounds with no reload at all, and all three produced false accusations
+    when the threshold sat at a capacity of 10."""
+    for weapon, cap in (("BP_Makarov_C", 8), ("BP_Mosin_M1891_C", 6),
+                        ("BP_QLZ87_AGL_HEDP_IronSights_C", 6)):
+        mgr, sink = _run(NORELOAD_ON)
+        _burn(mgr, weapon=weapon,
+              mags=[[cap, cap], [cap - 2, cap], [cap - 5, cap],
+                    [cap - 6, cap], [0, cap]])
+        assert sink.rows == [], f"{weapon} was called impossible"
 
 
 def test_a_bayonet_can_never_arm_the_detector():

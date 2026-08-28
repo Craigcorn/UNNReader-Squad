@@ -107,9 +107,17 @@ def _resolve_player(by_eos: dict, by_name: dict, eos: Optional[str],
 
 
 def _held_weapon(p: dict) -> tuple[Optional[str], Optional[list]]:
-    """The class name and magazine list of the gun a player is holding now."""
+    """The class name and magazine list of the gun a player is holding now.
+
+    A stale soldier block is refused, for the same reason `_xy` refuses one: it
+    is last tick's reading, not this one's. It matters more here than it looks.
+    A frozen magazine list is exactly what an ammo cheat is supposed to look
+    like, so a stale read does not merely weaken the signal — it manufactures
+    it. Seen in the archive: a soldier goes stale, the pool sticks at
+    [30, 29, 30, 30, 30, 30] for a dozen ticks, and kills keep arriving.
+    """
     sol = p.get("soldier")
-    if not isinstance(sol, dict):
+    if not isinstance(sol, dict) or sol.get("stale"):
         return (None, None)
     wep = sol.get("weapon")
     if not isinstance(wep, dict):
@@ -285,8 +293,21 @@ class CheatDetect(Plugin):
         # OFF until it has been measured against recorded matches
         # (scripts/plugin_replay.py). Every detector here is an accusation
         # generator; this one has never run anywhere.
+        #
+        # There is an upper bound as well as a lower one, and it is not
+        # decoration. A stamina cheat lets you sprint indefinitely; it does not
+        # make you faster than a sprint. Above the cap the movement has some
+        # other explanation — a vehicle seat we failed to resolve, a parachute,
+        # the position leak that puts a mounted soldier where the helicopter
+        # was — and that is speedhack's business, with speedhack's tuning
+        # history behind it. On the reference archive this detector's only
+        # alert was at 18.4 m/s: the same player, in the same moment, that
+        # speedhack reported at 18.2. One phenomenon, two accusations, and only
+        # one of them was about stamina. 9.0 leaves the 7.8 cap a margin for
+        # slope and for the jitter a 1 Hz position sample carries.
         "detect_stamina_hack": False,
         "stamina_sprint_min_mps": 5.5,
+        "stamina_sprint_max_mps": 9.0,
         "stamina_full_fraction": 0.98,
         "stamina_sustained_seconds": 20.0,
 
@@ -357,7 +378,23 @@ class CheatDetect(Plugin):
         # closer together than one mandatory reload, which is mechanically
         # impossible. Capacity 0 (bayonets and binoculars present as [0] in real
         # data) arms neither path — they cannot fire at all.
-        "noreload_smallmag_capacity": 10,
+        #
+        # This was 10, and 10 was wrong. The spacing rule's premise is that
+        # EVERY shot is followed by a mandatory reload, and that holds only when
+        # a magazine holds exactly one round. Between 2 and 9 sit pistols
+        # (Makarov 8, TT-33 9), bolt-action rifles (Mosin 6, C14 6, TW-338 5)
+        # and the QLZ-87 automatic grenade launcher (6-7) — all of which fire
+        # consecutive rounds with no reload whatsoever. Every false positive
+        # this detector produced on the reference archive came from exactly
+        # those: two pistol rounds in two seconds, called impossible. At 2 the
+        # rule arms only for the one-round family it was written for — AT4,
+        # RPG, M320, the underbarrel launchers — 51 distinct weapons in that
+        # archive. Everything above falls to the windowed path, which stays
+        # silent for small pools because the 120-round floor is out of reach,
+        # and that silence is the honest answer: at a 1 Hz sample there is no
+        # spacing a six-round drum could show us that is mechanically
+        # impossible.
+        "noreload_smallmag_capacity": 2,
         "noreload_strikes": 2,
 
         # ---- remote mine (EXPERIMENTAL, off) ----
@@ -612,6 +649,7 @@ class CheatDetect(Plugin):
         streak instead of being assumed full: no reading, no accusation.
         """
         min_speed = float(self.config["stamina_sprint_min_mps"])
+        max_speed = float(self.config["stamina_sprint_max_mps"])
         full = float(self.config["stamina_full_fraction"])
         need = float(self.config["stamina_sustained_seconds"])
 
@@ -625,7 +663,7 @@ class CheatDetect(Plugin):
                 st.stamina_streak = 0.0      # torn read — measure nothing
                 continue
             frac = float(stam) / float(smax)
-            if speed >= min_speed and frac >= full:
+            if min_speed <= speed <= max_speed and frac >= full:
                 st.stamina_streak += dt
             else:
                 st.stamina_streak = 0.0
@@ -640,7 +678,7 @@ class CheatDetect(Plugin):
                         "speedMps": round(speed, 1),
                         "staminaFraction": round(frac, 3),
                         "sustainedSeconds": round(st.stamina_streak, 1),
-                        "sprintThresholdMps": min_speed,
+                        "sprintBandMps": [min_speed, max_speed],
                         "sprintCapMps": 7.8,
                     })
 
@@ -767,6 +805,17 @@ class CheatDetect(Plugin):
         # Shots this tick, per player. Two independent kinds of evidence.
         shots: dict[str, int] = {}
         for ev in events:
+            if not ev.get("wounded"):
+                # Only a WOUND is a shot. The kill that follows is emitted from
+                # the log's Die() line and credited to whatever downed the
+                # victim — which may have been minutes earlier, and cost a round
+                # then, not now. Counting those was this detector's whole false
+                # positive rate on the archive: a marksman downs three people,
+                # they bleed out over the next twenty seconds, and the ammo
+                # ledger sits perfectly still throughout because nothing was
+                # fired. Insta-kills are lost with them (they present the same
+                # way), which is the acceptable direction to be wrong in.
+                continue
             attacker = _resolve_player(by_eos, by_name,
                                        ev.get("attackerEosId"),
                                        ev.get("attacker"))
