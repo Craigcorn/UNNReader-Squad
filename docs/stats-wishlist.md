@@ -12,7 +12,8 @@ live-server session before its cost is known.
    already read (`snapshot.py:2839-2860`) and deployables already carry a
    verified `placer` (`snapshot.py:1772-1780`). `stamina_hack` and
    `remote_mine` can be built **today, retroactively, against banked
-   recordings** — only `no_reload` and `remote_shovel` still need new fields.
+   recordings** — and `no_reload` turns out to be derivable from existing
+   data too (see Tier 1), leaving only `remote_shovel` needing a new field.
 2. **Enrichment is cheaper than the plan assumed.** `.sqrx` stores raw
    snapshot NDJSON verbatim (`sqrx.py:79-81`), so a new snapshot key needs no
    container change, and the browser's key-diff decoder passes unknown scalar
@@ -47,6 +48,7 @@ computed retroactively. Additive migrations follow the existing template
 | Capture-zone participation: possession time, flips, contested seconds | `captureZones[]` (`snapshot.py:1891-1952`) | Answers the plan's open "capture-zone participation" item |
 | Deployables placed per player; FOB economy timeline (supply, siege, overrun) | `deployables[].placer` + FOB fields (`snapshot.py:1772-1819`) | Builder leaderboard + match-flow analytics; also the `remote_mine` detector |
 | `stamina_hack` detector + exhaustion profile | `soldier.stamina/staminaMax` | Blocked-detector #1, unblocked |
+| `no_reload` detector via **ammo-consumption rate** | `soldier.weapon.magazines` (`snapshot.py:2940`) | Sum of carried rounds falls on firing and not on reload (per-magazine system), so rounds-consumed-per-window is verified fire volume; a window exceeding any legit dump+reload cycle is the tell. Sustained-abuse only at tick rate; weapon-swap reset like `infinite_ammo`; resupply only masks toward false negatives. Replaces the `bFiring`/`bReloading` probing need |
 | Foot distance travelled / movement profile; stance profile | `soldier.position` per tick; `soldier.stance` | Accumulator already exists verbatim at `stats.py:1075-1082` |
 | Squad-level stats: per-squad K/D, SL identity, marker/command activity, rally uptime | `squads[]`, `markers[]`, `rallyPoints[]` | SL/squad leaderboards — community requested territory |
 | Vehicle crew: seat-time by seat, engine/component damage taken | `vehicles[].seats/engine/components/turrets` | Extends existing `vehicle_session` |
@@ -73,13 +75,13 @@ instead of reading junk.
 ## Tier 3 — needs one live session on the test server before costing
 
 Run `scripts/dump_struct_layout.py --name SQSoldier` on the `squad` box and
-grep for `bFiring` / `bReloading` / `ShovelAction`:
+grep for `ShovelAction` (and `bFiring`/`bReloading` as an optional refinement
+of the Tier 1 ammo-rate `no_reload`):
 
-- Present as reflected properties → both remaining detectors
-  (`no_reload_sustained`, `remote_shovel`) collapse to Tier 2 cost.
-- Absent → each needs a value-correlated memory probe (~a day per field, like
-  the deployable-placer discovery, `snapshot.py:1005-1011`). Decide then
-  whether they're worth it.
+- Present as a reflected property → `remote_shovel` collapses to Tier 2 cost.
+- Absent → it needs a value-correlated memory probe (~a day, like the
+  deployable-placer discovery, `snapshot.py:1005-1011`). Only worth it if
+  remote digging is a cheat class UNN actually observes.
 
 Also probe on that session: real `SquadGame.log` line shapes for
 connect/disconnect/admin actions (no fixtures exist for them in this repo —
