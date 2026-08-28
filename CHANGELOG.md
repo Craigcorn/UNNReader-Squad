@@ -7,6 +7,25 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Three new cheat detectors, all shipped switched OFF. `stamina_hack` catches
+  sprint-speed movement on a bar that never falls - sprinting drains stamina
+  in Squad without exception, so neither half of that is suspicious alone and
+  the pair is. `no_reload` reads the magazine pool: firing drains the summed
+  total and reloading does not, so a drop is verified fire volume, and the
+  ceiling is derived from the mandatory dump-then-reload cycle rather than
+  being a flat multiple of the magazine - a flat one would have accused a
+  good machine-gunner. Launchers get a separate spacing rule, because a
+  one-round magazine can never reach a rounds-per-window threshold.
+  `remote_mine` watches for a mine appearing somewhere its placer's body is
+  not; placement is arm's reach, so 50 m of budget covers the drift between
+  the placement and the tick that sampled it. `fire_no_ammo` joins them:
+  where `infinite_ammo` assumes a cheater's ammo stops falling, this one
+  counts verified shots first and asks about the ledger second, taking no
+  position on a premise nobody has confirmed. Off is deliberate and not
+  temporary politeness - a detector is an accusation generator, and none of
+  these has been measured against a real archive yet. Run
+  `scripts/plugin_replay.py` over your recordings before switching any of
+  them on.
 - Seeding matches are no longer recorded at all - no replay, no stats row,
   nothing queued for upload. A seed session is two people shooting a wall for
   six hours, and it arrived in the archive dressed as a match: a 40 MB file

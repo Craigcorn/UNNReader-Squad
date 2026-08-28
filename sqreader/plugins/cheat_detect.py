@@ -63,6 +63,65 @@ _MELEE_KEYWORDS: tuple[str, ...] = ("knife", "bayonet", "baton", "machete")
 _CM_PER_M = 100.0
 
 
+def _resolve_player(by_eos: dict, by_name: dict, eos: Optional[str],
+                    name: Optional[str]) -> Optional[dict]:
+    """The player an event names — by account id first, by name second.
+
+    Both lookups are needed, and the fallback is not a nicety. The kill feed's
+    ids come from the server LOG, which names players by their EOS account id;
+    the snapshot's come from memory. On a licensed server those agree. On a real
+    archive of four 100-player matches they did not: every log id was a 32-hex
+    EOS id and every snapshot id a UUID, so an id-only lookup resolved 0 of the
+    789 damage events that carried a causer, while the name resolved 780.
+
+    The old code took the id branch whenever an id was present and never fell
+    back, so on that server every damage-event detector here was inert — not
+    quiet, inert. Ids stay first because a name is only unique by convention;
+    the fallback runs exactly when the id fails.
+    """
+    if eos:
+        hit = by_eos.get(eos)
+        if hit is not None:
+            return hit
+    return by_name.get(name) if name else None
+
+
+def _held_weapon(p: dict) -> tuple[Optional[str], Optional[list]]:
+    """The class name and magazine list of the gun a player is holding now."""
+    sol = p.get("soldier")
+    if not isinstance(sol, dict):
+        return (None, None)
+    wep = sol.get("weapon")
+    if not isinstance(wep, dict):
+        return (None, None)
+    cls = wep.get("className")
+    mags = wep.get("magazines")
+    return (cls if isinstance(cls, str) and cls else None,
+            mags if isinstance(mags, list) else None)
+
+
+def _mag_sum(mags: list) -> int:
+    return sum(m for m in mags if isinstance(m, int) and not isinstance(m, bool))
+
+
+def _mag_max(mags: list) -> int:
+    return max((m for m in mags if isinstance(m, int)
+                and not isinstance(m, bool)), default=0)
+
+
+def _entity_xy(e: dict) -> Optional[tuple[float, float]]:
+    """A world entity's (x, y) in cm, or None if it has no real position."""
+    pos = e.get("position")
+    if not isinstance(pos, dict):
+        return None
+    x, y = pos.get("x"), pos.get("y")
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return None
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return None
+    return (float(x), float(y))
+
+
 def _angle_diff_deg(yaw_deg: float, dx: float, dy: float) -> float:
     """Smallest angle (0..180) between a yaw and the direction (dx, dy).
 
@@ -92,29 +151,6 @@ def _dist_m(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1]) / _CM_PER_M
 
 
-def _resolve_player(by_eos: dict, by_name: dict, eos: Optional[str],
-                    name: Optional[str]) -> Optional[dict]:
-    """The player an event names — by account id first, by name second.
-
-    Both lookups are needed, and the fallback is not a nicety. The kill feed's
-    ids come from the server LOG, which names players by their EOS account id;
-    the snapshot's come from memory. On a licensed server those agree. On a real
-    archive of four 100-player matches they did not: every log id was a 32-hex
-    EOS id and every snapshot id a UUID, so an id-only lookup resolved 0 of the
-    789 damage events that carried a causer, while the name resolved 780.
-
-    The old code took the id branch whenever an id was present and never fell
-    back, so on that server every damage-event detector here was inert — not
-    quiet, inert. Ids stay first because a name is only unique by convention;
-    the fallback runs exactly when the id fails.
-    """
-    if eos:
-        hit = by_eos.get(eos)
-        if hit is not None:
-            return hit
-    return by_name.get(name) if name else None
-
-
 def _occupied_eos(snapshot: dict) -> set[str]:
     """Everyone sitting in a vehicle seat this tick.
 
@@ -135,7 +171,8 @@ class _PlayerState:
     """Per-player rolling state. Lives as long as the plugin does."""
 
     __slots__ = ("last_xy", "last_elapsed", "last_soldier_addr", "speed_streak",
-                 "ammo", "magic_streak", "last_report")
+                 "ammo", "magic_streak", "last_report", "stamina_streak",
+                 "shots", "rounds")
 
     def __init__(self) -> None:
         self.last_xy: Optional[tuple[float, float]] = None
@@ -147,6 +184,16 @@ class _PlayerState:
         self.magic_streak: int = 0
         # (alert_type) -> last emit ts
         self.last_report: dict[str, float] = {}
+        # Game-clock seconds spent moving at sprint speed on a full bar.
+        self.stamina_streak: float = 0.0
+        # HELD weapon class -> {"shots": n, "first_ts": t, "last_ts": t,
+        #                       "ammo": n} — the fire_no_ammo ledger. Keyed on
+        # the gun whose magazines we can see, not on what an event called it.
+        self.shots: dict[str, dict] = {}
+        # The no_reload ledger: one slot for the currently held weapon.
+        # {"weapon": cls, "cap": n, "sum": n, "elapsed": t, "addr": a,
+        #  "window": [(ts, rounds), ...], "strikes": n}
+        self.rounds: Optional[dict] = None
 
 
 @register
@@ -200,6 +247,111 @@ class CheatDetect(Plugin):
         # those two apart.
         "inf_ammo_stale_seconds": 15.0,
 
+        # ---- stamina hack (EXPERIMENTAL, off) ----
+        # Sprinting drains stamina in Squad, universally: there is no kit, role
+        # or state in which a soldier runs at sprint speed on a bar that does
+        # not move. So the tell is neither the speed nor the stamina but the two
+        # together, held long enough that no amount of stop-start could produce
+        # it.
+        #
+        # 5.5 m/s sits between the walk (~4.0) and the sprint cap (~7.8): above
+        # it a soldier is sprinting whatever else is true, and the margin below
+        # the cap absorbs the position jitter a 1 Hz sample carries. 0.98 of the
+        # bar counts as "not draining" — the field is a float read live and the
+        # last percent is noise. Twenty seconds is roughly two full
+        # sprint-to-empty cycles, so a legitimate player who sprints, stops and
+        # sprints again never accumulates it.
+        #
+        # OFF until it has been measured against recorded matches
+        # (scripts/plugin_replay.py). Every detector here is an accusation
+        # generator; this one has never run anywhere.
+        "detect_stamina_hack": False,
+        "stamina_sprint_min_mps": 5.5,
+        "stamina_full_fraction": 0.98,
+        "stamina_sustained_seconds": 20.0,
+
+        # ---- firing with a frozen ammo ledger (EXPERIMENTAL, off) ----
+        # `infinite_ammo` above assumes a cheater's carried ammo stops falling.
+        # That is unconfirmed and quite possibly backwards: Squad's client holds
+        # enough authority over the firing path for these cheats to exist at
+        # all, so the server's copy may well keep decrementing while the client
+        # fires anyway. This detector therefore takes no position on it — it
+        # counts VERIFIED SHOTS and only then asks whether the ledger moved.
+        #
+        # A shot is verified two ways: a damage event whose causer is exactly
+        # the gun the player is holding, and a projectile spawned this tick
+        # whose firer the reader resolved from memory. The second path needs no
+        # damage at all, which is the point — spraying a treeline produces no
+        # events and plenty of rounds.
+        #
+        # Four shots inside ten seconds is a burst nobody fires by accident,
+        # and ten seconds is short enough that a reload would have had to land
+        # inside it. An ammo sum that RISES is a resupply and resets the
+        # observation; one that FALLS is a player spending rounds like everyone
+        # else and also resets. Only a ledger that sits perfectly still while
+        # shots land is evidence.
+        "detect_fire_no_ammo": False,
+        "fire_no_ammo_min_shots": 4,
+        "fire_no_ammo_min_window_seconds": 10.0,
+
+        # ---- no-reload / impossible consumption (EXPERIMENTAL, off) ----
+        # The other half of the ammo question: the variant that removes the
+        # reload timer but leaves the accounting honest. Squad is a per-magazine
+        # system — firing drains the summed total, reloading does not (the
+        # partial magazine goes back in the pool) — so a tick-over-tick DROP in
+        # the sum is verified fire volume, with no inference anywhere.
+        #
+        # The ceiling has to scale with the magazine rather than multiply it.
+        # A flat "3x capacity" was considered and rejected: a legitimate rifle
+        # player mag-dumping at robot speed reaches ~150 rounds in 30 s, which
+        # would have crossed a flat 120 — a false accusation waiting for a
+        # good machine-gunner. So the legit ceiling is derived from the
+        # mandatory dump-then-reload cycle:
+        #
+        #   cycle_min = capacity / MAX_RPS + RELOAD_MIN
+        #   ceiling   = capacity * (window / cycle_min + 1)   # +1: partial mag
+        #
+        # 17 rounds/s is ~1000 rpm, faster than any infantry weapon in the
+        # game; 3 s is faster than any real reload. Both are deliberately
+        # unreachable rather than typical — the threshold is a physical limit
+        # with margin on top, not an average.
+        #
+        # Worked, with these defaults: a 30-round rifle gives cycle_min 4.8 s,
+        # ceiling ~219, x1.5 = ~328, against a cheater's continuous 350-500 in
+        # 30 s — detectable. A 200-round belt box gives ceiling ~606, x1.5 =
+        # ~909, so a no-reload MG at ~300 is invisible. That is accepted: belt
+        # weapons reload so rarely that removing the timer barely helps, and
+        # the detector's value is on magazine weapons where reloads are
+        # constant. The 120-round floor guards the windowed path against a
+        # capacity estimate that has not settled yet.
+        "detect_no_reload": False,
+        "noreload_window_seconds": 30.0,
+        "noreload_max_rps": 17.0,
+        "noreload_reload_min_seconds": 3.0,
+        "noreload_margin": 1.5,
+        "noreload_min_rounds": 120,
+        # Below this observed capacity the windowed model is structurally blind
+        # — a grenade launcher holds one round, the whole pool is a handful, and
+        # the 120-round floor can never be reached. Under it the rule becomes
+        # shot SPACING: two rounds gone inside one tick interval means two shots
+        # closer together than one mandatory reload, which is mechanically
+        # impossible. Capacity 0 (bayonets and binoculars present as [0] in real
+        # data) arms neither path — they cannot fire at all.
+        "noreload_smallmag_capacity": 10,
+        "noreload_strikes": 2,
+
+        # ---- remote mine (EXPERIMENTAL, off) ----
+        # A mine that materializes far from the body that placed it. Legitimate
+        # placement is arm's reach, so the budget only has to absorb the drift
+        # between the placement and the tick that samples it: a sprinting player
+        # covers ~16 m in two 1 s ticks, and 50 m clears that with room while
+        # real remote placement is hundreds of metres. The placer link is
+        # memory-verified; without it there is nobody to accuse and nothing is
+        # raised, exactly as remote_melee does with an unplaceable victim.
+        "detect_remote_mine": False,
+        "mine_class_keywords": ["mine", "ied"],
+        "remote_mine_max_dist_m": 50.0,
+
         # ---- remote melee ----
         # Squad melee reach is ~1 m. At a 2 s tick a sprinting attacker drifts
         # up to 7.8 x 2 = ~16 m between the shot and the sample, so 25 m clears
@@ -227,6 +379,13 @@ class CheatDetect(Plugin):
         self._players: dict[str, _PlayerState] = {}
         self._seen_events: set[tuple] = set()
         self._last_cache_resets: Optional[int] = None
+        # World-object ids carried over from the previous tick. `None` means
+        # "we have not seen a previous tick yet" — distinct from an empty set,
+        # because on the first tick after attaching, every object in the world
+        # is new to US and none of it is new to the WORLD. Diffing against an
+        # empty set there would accuse everyone who had ever placed a mine.
+        self._prev_deployables: Optional[set[str]] = None
+        self._prev_projectiles: Optional[set[str]] = None
 
     # -- helpers -----------------------------------------------------------
     def _state(self, eos: str) -> _PlayerState:
@@ -251,6 +410,8 @@ class CheatDetect(Plugin):
             # rather than reason about it.
             self._players.clear()
             self._seen_events.clear()
+            self._prev_deployables = None
+            self._prev_projectiles = None
             return
 
         # A cache reset makes the reader re-read every object, and positions can
@@ -279,8 +440,17 @@ class CheatDetect(Plugin):
 
         in_vehicle = _occupied_eos(ctx.snapshot)
 
+        # One motion pass feeds every detector that needs a speed. It also owns
+        # the per-player position bookkeeping, so two detectors cannot consume
+        # each other's previous sample.
+        motion: dict[str, tuple[float, float]] = {}
+        if (self.config.get("detect_speedhack")
+                or self.config.get("detect_stamina_hack")):
+            motion = self._motion(by_eos, in_vehicle, elapsed_f, cache_reset)
         if self.config.get("detect_speedhack"):
-            self._speedhack(ctx, by_eos, in_vehicle, elapsed_f, cache_reset)
+            self._speedhack(ctx, by_eos, motion)
+        if self.config.get("detect_stamina_hack"):
+            self._stamina_hack(ctx, by_eos, motion)
 
         events = self._fresh_events(ctx)
         if events:
@@ -290,6 +460,20 @@ class CheatDetect(Plugin):
                 self._remote_melee(ctx, events, by_eos, by_name)
             if self.config.get("detect_magic_bullet"):
                 self._magic_bullet(ctx, events, by_eos, by_name)
+
+        # Projectile spawns are a shot record in their own right, so the diff
+        # runs whenever anything consumes it — and is maintained even when
+        # nothing does, so switching a detector on mid-match does not hand it a
+        # world full of "new" objects.
+        new_projectiles = self._new_projectiles(ctx, cache_reset)
+        if self.config.get("detect_fire_no_ammo"):
+            self._fire_no_ammo(ctx, events, new_projectiles, by_eos, by_name,
+                               in_vehicle, elapsed_f)
+        if self.config.get("detect_no_reload"):
+            self._no_reload(ctx, by_eos, in_vehicle, elapsed_f, cache_reset)
+        new_deployables = self._new_deployables(ctx, cache_reset)
+        if self.config.get("detect_remote_mine"):
+            self._remote_mine(ctx, new_deployables, by_eos, by_name)
 
         # Forget players who left, so state cannot grow without bound across a
         # long-running server.
@@ -318,12 +502,18 @@ class CheatDetect(Plugin):
             self._seen_events.clear()   # bounded; a match is over long before this
         return out
 
-    # -- detectors ---------------------------------------------------------
-    def _speedhack(self, ctx: TickContext, by_eos: dict, in_vehicle: set,
-                   elapsed: Optional[float], cache_reset: bool) -> None:
-        limit = float(self.config["speed_max_foot_mps"])
-        need = float(self.config["speed_sustained_seconds"])
+    # -- shared measurement ------------------------------------------------
+    def _motion(self, by_eos: dict, in_vehicle: set,
+                elapsed: Optional[float],
+                cache_reset: bool) -> dict[str, tuple[float, float]]:
+        """Foot speed and the game-clock interval it was measured over.
 
+        Only players whose two samples are genuinely comparable appear in the
+        result. Everyone else is re-anchored here and their streaks dropped, so
+        no detector downstream has to know what a respawn or a cache reset looks
+        like.
+        """
+        out: dict[str, tuple[float, float]] = {}
         for eos, p in by_eos.items():
             st = self._state(eos)
             sol = p.get("soldier") or {}
@@ -339,9 +529,10 @@ class CheatDetect(Plugin):
 
             # Any of these means the previous sample is not comparable to this
             # one: a new pawn (respawn), a context change, a cache reset. Drop
-            # the streak and re-anchor rather than measure across the gap.
+            # the streaks and re-anchor rather than measure across the gap.
             if not on_foot or cache_reset or addr != st.last_soldier_addr:
                 st.speed_streak = 0.0
+                st.stamina_streak = 0.0
                 st.last_xy = xy
                 st.last_elapsed = elapsed
                 st.last_soldier_addr = addr
@@ -358,7 +549,17 @@ class CheatDetect(Plugin):
             speed = _dist_m(st.last_xy, xy) / dt
             st.last_xy = xy
             st.last_elapsed = elapsed
+            out[eos] = (speed, dt)
+        return out
 
+    # -- detectors ---------------------------------------------------------
+    def _speedhack(self, ctx: TickContext, by_eos: dict,
+                   motion: dict[str, tuple[float, float]]) -> None:
+        limit = float(self.config["speed_max_foot_mps"])
+        need = float(self.config["speed_sustained_seconds"])
+
+        for eos, (speed, dt) in motion.items():
+            st = self._state(eos)
             if speed > limit:
                 # Accumulate the game's own seconds rather than counting
                 # samples: a sample is worth 2 s on one deployment and 0.33 s
@@ -373,12 +574,53 @@ class CheatDetect(Plugin):
                     st, "speedhack", ctx.now):
                 self.alert(
                     ctx, alert_type="speedhack", eos_id=eos,
-                    player_name=p.get("name"),
+                    player_name=(by_eos.get(eos) or {}).get("name"),
                     confidence=min(1.0, speed / (limit * 2.0)),
                     details={
                         "speedMps": round(speed, 1),
                         "limitMps": limit,
                         "sustainedSeconds": round(st.speed_streak, 1),
+                        "sprintCapMps": 7.8,
+                    })
+
+    def _stamina_hack(self, ctx: TickContext, by_eos: dict,
+                      motion: dict[str, tuple[float, float]]) -> None:
+        """Sprint-class movement on a bar that never falls.
+
+        Sprinting drains stamina in Squad without exception, so the pair is the
+        signal — neither half is suspicious alone. An unreadable bar breaks the
+        streak instead of being assumed full: no reading, no accusation.
+        """
+        min_speed = float(self.config["stamina_sprint_min_mps"])
+        full = float(self.config["stamina_full_fraction"])
+        need = float(self.config["stamina_sustained_seconds"])
+
+        for eos, (speed, dt) in motion.items():
+            st = self._state(eos)
+            p = by_eos.get(eos) or {}
+            sol = p.get("soldier") or {}
+            stam, smax = sol.get("stamina"), sol.get("staminaMax")
+            if (not isinstance(stam, (int, float))
+                    or not isinstance(smax, (int, float)) or smax <= 0):
+                st.stamina_streak = 0.0      # torn read — measure nothing
+                continue
+            frac = float(stam) / float(smax)
+            if speed >= min_speed and frac >= full:
+                st.stamina_streak += dt
+            else:
+                st.stamina_streak = 0.0
+                continue
+
+            if st.stamina_streak >= need and self._cooled_down(
+                    st, "stamina_hack", ctx.now):
+                self.alert(
+                    ctx, alert_type="stamina_hack", eos_id=eos,
+                    player_name=p.get("name"), confidence=0.7,
+                    details={
+                        "speedMps": round(speed, 1),
+                        "staminaFraction": round(frac, 3),
+                        "sustainedSeconds": round(st.stamina_streak, 1),
+                        "sprintThresholdMps": min_speed,
                         "sprintCapMps": 7.8,
                     })
 
@@ -398,11 +640,8 @@ class CheatDetect(Plugin):
             if not eos or eos in in_vehicle:
                 continue  # vehicle ammo has its own resupply path — not our call
             weapon = ev.get("causerWeapon")
-            sol = attacker.get("soldier") or {}
-            wep = sol.get("weapon") or {}
-            held = wep.get("className")
-            mags = wep.get("magazines")
-            if not weapon or not held or not isinstance(mags, list) or not mags:
+            held, mags = _held_weapon(attacker)
+            if not weapon or not held or not mags:
                 continue
             # The event must be about the gun they are actually holding — after a
             # weapon swap the ammo we can see is a different gun's. Matched
@@ -416,7 +655,7 @@ class CheatDetect(Plugin):
             if weapon != held:
                 continue
 
-            ammo = sum(int(m) for m in mags if isinstance(m, int))
+            ammo = _mag_sum(mags)
             st = self._state(eos)
             slot = st.ammo.get(weapon)
             ts = float(ev.get("ts") or ctx.now)
@@ -449,6 +688,288 @@ class CheatDetect(Plugin):
                         "ammoUnchangedAt": slot["ammo"],
                     })
                 st.ammo.pop(weapon, None)
+
+    # -- world-object diffs -------------------------------------------------
+    def _diff_new(self, entities: list, prev: Optional[set[str]],
+                  cache_reset: bool) -> tuple[list[dict], set[str]]:
+        """Entities that appeared THIS tick, and the id set to carry forward.
+
+        The first tick after attaching — and the first after a cache reset,
+        which makes the reader re-read the world from scratch — reports nothing
+        new. Everything visible then is new to us and old to the world, and a
+        reader restarting mid-match must not accuse every player who has ever
+        placed a mine or fired a rocket.
+        """
+        ids: set[str] = set()
+        fresh: list[dict] = []
+        for e in entities:
+            if not isinstance(e, dict):
+                continue
+            eid = e.get("id")
+            if not isinstance(eid, str) or not eid:
+                continue      # no stable identity — cannot say it is new
+            ids.add(eid)
+            if prev is not None and not cache_reset and eid not in prev:
+                fresh.append(e)
+        return (fresh, ids)
+
+    def _new_projectiles(self, ctx: TickContext,
+                         cache_reset: bool) -> list[dict]:
+        fresh, ids = self._diff_new(ctx.snapshot.get("projectiles") or [],
+                                    self._prev_projectiles, cache_reset)
+        self._prev_projectiles = ids
+        return fresh
+
+    def _new_deployables(self, ctx: TickContext,
+                         cache_reset: bool) -> list[dict]:
+        fresh, ids = self._diff_new(ctx.snapshot.get("deployables") or [],
+                                    self._prev_deployables, cache_reset)
+        self._prev_deployables = ids
+        return fresh
+
+    def _fire_no_ammo(self, ctx: TickContext, events: list[dict],
+                      new_projectiles: list[dict], by_eos: dict,
+                      by_name: dict, in_vehicle: set,
+                      elapsed: Optional[float]) -> None:
+        """Verified shots landing against an ammo ledger that never moves.
+
+        Counts shots first and asks about ammo second, which is the whole
+        difference from `infinite_ammo`: it makes no assumption about whether a
+        cheater's server-side ammo falls. A ledger that RISES is a resupply and
+        a ledger that FALLS is an ordinary player; only one that sits perfectly
+        still while shots land is evidence.
+        """
+        min_shots = int(self.config["fire_no_ammo_min_shots"])
+        min_window = float(self.config["fire_no_ammo_min_window_seconds"])
+        stale_after = float(self.config["inf_ammo_stale_seconds"])
+        now_ts = float(elapsed) if elapsed is not None else float(ctx.now)
+
+        # Shots this tick, per player. Two independent kinds of evidence.
+        shots: dict[str, int] = {}
+        for ev in events:
+            attacker = _resolve_player(by_eos, by_name,
+                                       ev.get("attackerEosId"),
+                                       ev.get("attacker"))
+            if attacker is None:
+                continue
+            eos = attacker.get("eosId")
+            held, _mags = _held_weapon(attacker)
+            if not eos or not held:
+                continue
+            # Only an event naming the gun we can read the magazines of counts.
+            # An explosive names its projectile and a vehicle weapon names the
+            # vehicle; pairing either with an infantry magazine count would be
+            # a guess, and mapping one to the other needs a lookup table this
+            # project will not build.
+            if ev.get("causerWeapon") != held:
+                continue
+            shots[eos] = shots.get(eos, 0) + 1
+        for pr in new_projectiles:
+            firer = pr.get("firer")
+            if not isinstance(firer, str) or not firer:
+                # The memory-verified firer link. On the reference corpus it
+                # resolved for 0 of 95 494 projectile observations, so this
+                # path contributes nothing there and the detector rests on
+                # damage events alone. It is kept, guarded, because the link
+                # exists in the reader and an offset fix would light it up —
+                # and because a launcher fired at a treeline produces rounds
+                # and no damage events at all.
+                continue
+            p = by_name.get(firer)
+            eos = p.get("eosId") if p else None
+            if not eos:
+                continue
+            shots[eos] = shots.get(eos, 0) + 1
+
+        for eos, n in shots.items():
+            if eos in in_vehicle:
+                continue      # vehicle ammo has its own resupply path
+            p = by_eos.get(eos)
+            if p is None:
+                continue
+            held, mags = _held_weapon(p)
+            if not held or not mags:
+                continue
+            ammo = _mag_sum(mags)
+            st = self._state(eos)
+            slot = st.shots.get(held)
+            if (slot is None or ammo != slot["ammo"]
+                    or (now_ts - slot["last_ts"]) > stale_after):
+                # First sighting, ammo moved in either direction, or the run
+                # went stale. Re-anchor: only an unbroken run counts.
+                st.shots = {held: {"shots": n, "first_ts": now_ts,
+                                   "last_ts": now_ts, "ammo": ammo}}
+                continue
+            slot["shots"] += n
+            slot["last_ts"] = now_ts
+            window = now_ts - slot["first_ts"]
+            if (slot["shots"] >= min_shots and window >= min_window
+                    and self._cooled_down(st, "fire_no_ammo", ctx.now)):
+                self.alert(
+                    ctx, alert_type="fire_no_ammo", eos_id=eos,
+                    player_name=p.get("name"), confidence=0.8,
+                    details={
+                        "weapon": held,
+                        "verifiedShots": slot["shots"],
+                        "windowSec": round(window, 1),
+                        "ammoUnchangedAt": ammo,
+                        "magazines": list(mags),
+                    })
+                st.shots.pop(held, None)
+
+    def _no_reload(self, ctx: TickContext, by_eos: dict, in_vehicle: set,
+                   elapsed: Optional[float], cache_reset: bool) -> None:
+        """Rounds leaving the pool faster than reloading could allow.
+
+        Squad is a per-magazine system: firing drains the summed total and
+        reloading does not, because the partial magazine goes back in the pool.
+        A drop is therefore verified fire volume with nothing inferred. A rise
+        is a resupply, which can only hide consumption — the error direction is
+        towards missing a cheater, and that is the one to prefer.
+        """
+        window_s = float(self.config["noreload_window_seconds"])
+        max_rps = float(self.config["noreload_max_rps"])
+        reload_min = float(self.config["noreload_reload_min_seconds"])
+        margin = float(self.config["noreload_margin"])
+        min_rounds = int(self.config["noreload_min_rounds"])
+        small_cap = int(self.config["noreload_smallmag_capacity"])
+        need_strikes = int(self.config["noreload_strikes"])
+        if elapsed is None or max_rps <= 0 or reload_min <= 0:
+            return                       # no game clock, nothing to measure
+
+        for eos, p in by_eos.items():
+            st = self._state(eos)
+            sol = p.get("soldier") or {}
+            addr = sol.get("addr")
+            held, mags = _held_weapon(p)
+            if not held or mags is None:
+                continue                 # nothing readable — measure nothing
+            slot = st.rounds
+            # A different gun's pool, a different body, a seat, or a reader
+            # that just re-read the world: none of those are comparable to the
+            # previous sample.
+            if (slot is None or slot["weapon"] != held or slot["addr"] != addr
+                    or eos in in_vehicle or cache_reset):
+                st.rounds = {"weapon": held, "addr": addr,
+                             "cap": _mag_max(mags), "sum": _mag_sum(mags),
+                             "elapsed": float(elapsed), "window": [],
+                             "strikes": 0}
+                continue
+
+            cap = max(int(slot["cap"]), _mag_max(mags))
+            slot["cap"] = cap
+            total = _mag_sum(mags)
+            dt = float(elapsed) - float(slot["elapsed"])
+            drop = int(slot["sum"]) - total
+            slot["sum"] = total
+            slot["elapsed"] = float(elapsed)
+            if dt <= 0 or drop <= 0 or cap < 1:
+                # cap 0 is a bayonet or a pair of binoculars — they present as
+                # [0] magazines in real data and can never fire.
+                continue
+
+            if cap < small_cap:
+                # Single-shot path: launchers and grenade launchers, where the
+                # windowed model is structurally blind. Two rounds gone inside
+                # one tick interval means two shots closer together than one
+                # mandatory reload, and the allowance grows with the interval
+                # so a slow sampler cannot manufacture a strike.
+                allowed = 2 + int(dt // reload_min)
+                if drop < allowed:
+                    continue
+                slot["strikes"] = int(slot["strikes"]) + 1
+                if slot["strikes"] < need_strikes:
+                    continue
+                if self._cooled_down(st, "no_reload", ctx.now):
+                    self.alert(
+                        ctx, alert_type="no_reload", eos_id=eos,
+                        player_name=p.get("name"), confidence=0.7,
+                        details={
+                            "weapon": held,
+                            "path": "single-shot spacing",
+                            "roundsConsumed": drop,
+                            "dtSec": round(dt, 2),
+                            "capacityEstimate": cap,
+                            "minRoundsForStrike": allowed,
+                            "strikes": slot["strikes"],
+                            "reloadMinSec": reload_min,
+                        })
+                slot["strikes"] = 0
+                continue
+
+            # Windowed path: magazine weapons, where reloads are constant and
+            # removing the timer is worth something.
+            win = slot["window"]
+            win.append((float(elapsed), drop))
+            cutoff = float(elapsed) - window_s
+            while win and win[0][0] < cutoff:
+                win.pop(0)
+            consumed = sum(d for _t, d in win)
+            cycle_min = cap / max_rps + reload_min
+            ceiling = cap * (window_s / cycle_min + 1.0)
+            if consumed < min_rounds or consumed <= ceiling * margin:
+                continue
+            if self._cooled_down(st, "no_reload", ctx.now):
+                self.alert(
+                    ctx, alert_type="no_reload", eos_id=eos,
+                    player_name=p.get("name"), confidence=0.7,
+                    details={
+                        "weapon": held,
+                        "path": "rolling window",
+                        "roundsConsumed": consumed,
+                        "windowSec": window_s,
+                        "capacityEstimate": cap,
+                        "ceiling": round(ceiling, 1),
+                        "threshold": round(ceiling * margin, 1),
+                        "cycleMinSec": round(cycle_min, 2),
+                    })
+            slot["window"] = []
+
+    def _remote_mine(self, ctx: TickContext, new_deployables: list[dict],
+                     by_eos: dict, by_name: dict) -> None:
+        """A mine that appears somewhere its placer's body is not.
+
+        Placement is arm's reach in Squad, so the only thing the budget has to
+        absorb is the drift between the placement and the tick that samples it.
+        Both positions are taken from the SAME tick; an unresolvable placer or a
+        missing position raises nothing, which is the rule `remote_melee` has
+        always applied to an unplaceable victim.
+        """
+        keywords = tuple(k.lower() for k in self.config["mine_class_keywords"]
+                         if isinstance(k, str) and k)
+        max_d = float(self.config["remote_mine_max_dist_m"])
+        if not keywords:
+            return
+        for d in new_deployables:
+            cls = d.get("classShort")
+            if not isinstance(cls, str) or not cls:
+                continue
+            low = cls.lower()
+            if not any(k in low for k in keywords):
+                continue
+            placer = _resolve_player(by_eos, by_name, d.get("placerEosId"),
+                                     d.get("placer"))
+            if placer is None:
+                continue              # nobody to accuse
+            eos = placer.get("eosId")
+            d_xy, p_xy = _entity_xy(d), _xy(placer)
+            if not eos or d_xy is None or p_xy is None:
+                continue              # no distance, no accusation
+            dist = _dist_m(p_xy, d_xy)
+            if dist <= max_d:
+                continue
+            st = self._state(eos)
+            if self._cooled_down(st, "remote_mine", ctx.now):
+                self.alert(
+                    ctx, alert_type="remote_mine", eos_id=eos,
+                    player_name=placer.get("name"), confidence=0.85,
+                    details={
+                        "deployable": cls,
+                        "distanceM": round(dist, 1),
+                        "driftBudgetM": max_d,
+                        "placerXY": [round(p_xy[0], 1), round(p_xy[1], 1)],
+                        "deployableXY": [round(d_xy[0], 1), round(d_xy[1], 1)],
+                    })
 
     def _remote_melee(self, ctx: TickContext, events: list[dict],
                       by_eos: dict, by_name: dict) -> None:
