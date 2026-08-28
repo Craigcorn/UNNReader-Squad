@@ -10,7 +10,7 @@ items were derived and approved in discussion), and skim
 untouched by this plan. Changelog entries go under `[Unreleased]` in the
 house narrative voice.
 
-**In scope:** Workstreams A–D below.
+**In scope:** Workstreams A–E below.
 **Explicitly out of scope:** the parity harness (own plan, next), all Tier 1/2
 wishlist *stats* persistence (awaiting team reaction), the seek index and any
 wire-format change, `remote_shovel` (needs a live probing session first),
@@ -205,12 +205,14 @@ plumbing, same default-off posture):
 1. **Baseline legit fire on the test server** — a player firing normally
    while snapshots are watched: confirm the server-side ammo sum decrements
    per shot, and record how a reload refill presents at 1 Hz sampling.
-2. **Labeled cheater data — the decisive test.** Craig to identify past
-   matches with known/banned or credibly reported cheaters (names + rough
-   dates) available in the archive or the production export; run both models
-   over those recordings. This is the only way to learn how real cheats
-   present server-side — ammo static (primary fires), ammo honest (secondary
-   fires), or both — and no threshold is trusted before it.
+2. **Labeled cheater data: none exists.** Craig confirms no cheaters have
+   been observed since sqreader was deployed, so the archive is presumed
+   clean. Validation therefore means **false-positive cleanliness**: both
+   models run over the clean archive and must produce zero accusations.
+   Detection efficacy — including the open question of whether a real
+   cheater's server-side ammo moves — stays unproven until the first live
+   incident, which (with alerts wired) becomes the first labeled recording;
+   revisit thresholds and the primary/secondary split on that day.
 3. **Launcher mechanics:** how launcher magazines present in real data (list
    shape for 1-round weapons); whether disposable tubes (AT4-style) despawn
    as a weapon swap after firing; which projectile classes `read_projectile`
@@ -261,13 +263,14 @@ different tick rates to prove the game-clock scaling.
 Ops, over SSH (`ssh squad`), after A+B land on the branch. The unit currently
 passes `--hz 0.5` and no `--record-hz`, so recordings have `positionFrames: 0`.
 
-1. **First, resolve the dirty working tree** at
-   `/home/ubuntu/UNNReader-Squad`: `sqreader/httpsrv.py` carries an
-   uncommitted hot-patch (backup `httpsrv.py.bak-http11`). Diff it against
-   HEAD; if it is a real fix, commit it to the fork in house style (its own
-   commit, before anything else); if obsolete, restore the file and delete
-   the backup. **Do not pull over it.** Git commands on that clone run as
-   `sudo -u ubuntu git -C /home/ubuntu/UNNReader-Squad …`.
+1. **First, clear the working tree** at `/home/ubuntu/UNNReader-Squad`. The
+   dirty `sqreader/httpsrv.py` is the intentional HTTP/1.1 chunked-transfer
+   fix, now committed to this branch as `25467d8` (see CHANGELOG) — the
+   hot-patch is superseded. At deploy: `sudo -u ubuntu git -C
+   /home/ubuntu/UNNReader-Squad checkout -- sqreader/httpsrv.py`, delete
+   `sqreader/httpsrv.py.bak-http11`, then fetch/checkout the branch; the
+   committed fix takes over. Validate afterwards that a replay still plays
+   through the traefik route (the bug this fix exists for).
 2. Deploy the branch: fetch + checkout `Replay-Improvements`, `pip install
    -e .` in `.venv` (idempotent), edit the systemd unit's ExecStart to
    `--hz 1 --record-hz 4`, `daemon-reload`, restart `sqreader-prod`.
@@ -295,6 +298,31 @@ passes `--hz 0.5` and no `--record-hz`, so recordings have `positionFrames: 0`.
 
 ---
 
+## Workstream E — Squad 10.5.x collector fields + serving fixes
+
+Context (from the deployment findings of 2026-08-27): the test server runs
+**Squad v10.5.3** against offsets derived for v10.4.1. `sqreader doctor`
+passes every core check — anchors, reflection layouts, SQ-class offsets,
+lane graph, markers — the self-healing design working as intended. But the
+six ODK stats-collector field checks fail even with a player online:
+`captures`, `defenses`, `fobsBuilt`, `fobsDestroyed`, `vehicleDamage`,
+`suppliesDelivered` ("no player carried it — offset drift?").
+
+1. **Event-gated or drifted?** Inspect the archive recordings and stats DB
+   for any historical nonzero value of the six (the box lacks the sqlite3
+   CLI — use the venv Python). If none: run or wait for a real round
+   containing a capture, a FOB build, and a supply run, then rerun `doctor`.
+2. **If drifted:** re-derive the six offsets with
+   `scripts/dump_struct_layout.py` against the live process, update the
+   offset table + `doctor` entries. These feed leaderboard aggregates
+   (kills/deaths are unaffected — log + reflection paths pass), and the
+   wishlist's Tier 1 depends on several of them being real.
+3. **SPA deep links 404** on hard reload: only `/`, `/viewer`,
+   `/viewer.html`, `/viewer-next` map to `index.html`. Add a catch-all →
+   index for non-API GET paths. Upstream-offerable, like the HTTP/1.1 fix.
+
+---
+
 ## Definition of done
 
 - All A/B tests green; full gate passes; changelog updated.
@@ -303,5 +331,7 @@ passes `--hz 0.5` and no `--record-hz`, so recordings have `positionFrames: 0`.
 - Three detectors exist, default-off, each with tests at two tick rates.
 - Test server records two-tier (`positionFrames > 0`) from the branch build.
 - Validation report from D delivered for the enable/no-enable decision.
+- E resolved: the six collector fields either confirmed event-gated or
+  re-derived for 10.5.x; deep links survive a hard reload.
 - Commits are clean, self-contained, house-voiced; the B4 docstring fix and
   anything generic is shaped to be upstream-offerable.
