@@ -80,6 +80,8 @@ built-in default**, so every value can also be passed on the command line.
 | `squad_binary_pattern` | `/home/.*/serverfiles/.*SquadGameServer` | pgrep pattern to pick the right instance on a multi-instance box |
 | `squad_log_glob` | `/home/*/serverfiles/…/SquadGame.log` | server log the kill-feed reads |
 | `server_id` | `squad` | label written into each snapshot and used as the stats-DB partition key |
+| `seeding_game_modes` | `["Seed"]` | modes never recorded — no replay, no stats row, no upload. Matched exactly (case-insensitively) against the mode the game reports; `[]` records everything |
+| `seeding_layer_patterns` | `[]` | override hatch for scrims/events: case-insensitive globs against the layer name (map name if no layer resolved), e.g. `["*Skirmish*"]` |
 
 Output directories are `serve`/`record` flags (`--recordings-dir`, `--stats-db`,
 `--icons-dir`, `--sqmaps-dir`, `--frontend-dir`) and default next to the repo.

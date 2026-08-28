@@ -13,6 +13,24 @@
   "squad_log_glob": "/home/*/serverfiles/SquadGame/Saved/Logs/SquadGame.log",
   "server_id": "squad",
 
+  "_seeding_comment": [
+    "Matches the game names with one of these modes are never recorded: no",
+    ".sqrx, no stats row, no upload. Seeding is what this is for - a two-",
+    "player six-hour warm-up arrives in the archive dressed as a match and",
+    "drags every average it touches down with it. Matched EXACTLY and case-",
+    "insensitively against the mode the game reports; set to [] on a box whose",
+    "whole purpose is testing against seed layers.",
+    "seeding_layer_patterns is the override hatch for matches whose mode is a",
+    "normal one but which are still not real play - scrims, events, training.",
+    "Case-insensitive fnmatch globs against the layer name (map name if no",
+    "layer resolved), e.g. [\"*Skirmish*\"]. Empty by default: a pattern that is",
+    "too broad loses real matches, and silently.",
+    "Cheat detection is deliberately NOT gated on this - plugins keep running",
+    "through a seed session, because that is when a bored cheater tries things."
+  ],
+  "seeding_game_modes": ["Seed"],
+  "seeding_layer_patterns": [],
+
   "_plugins_comment": [
     "Plugins are off unless a config path is given. --plugins-config wins;",
     "this key is the fallback for deployments whose start command is not",

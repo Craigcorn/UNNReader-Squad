@@ -298,6 +298,25 @@ def _scanner_suspect(snap: dict) -> bool:
     return alive < total * 0.20
 
 
+def _str_tuple(value: Any) -> tuple[str, ...]:
+    """Config list → tuple of non-empty strings. A malformed value reads as
+    empty rather than raising: a typo in the config must not stop the reader,
+    and empty means 'exclude nothing', which is the safe direction."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(v.strip() for v in value if isinstance(v, str) and v.strip())
+
+
+def _seeding_game_modes() -> frozenset[str]:
+    return frozenset(_str_tuple(config.get("seeding_game_modes")))
+
+
+def _seeding_layer_patterns() -> tuple[str, ...]:
+    return _str_tuple(config.get("seeding_layer_patterns"))
+
+
 # ----- subcommands -----------------------------------------------------------
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
@@ -855,11 +874,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
         except Exception as _ue:
             print(f"[update] {_ue!r}", file=sys.stderr)
 
+    # Seeding exclusion, resolved once and shared by the recorder and the stats
+    # store so the two cannot disagree about what a real match is.
+    seeding_modes = _seeding_game_modes()
+    seeding_layers = _seeding_layer_patterns()
+    if seeding_modes or seeding_layers:
+        print(f"seeding exclusion: modes={sorted(seeding_modes) or '-'} "
+              f"layers={list(seeding_layers) or '-'}", file=sys.stderr)
     if stats_db_path:
         try:
             from .stats import StatsStore
             stats_store = StatsStore(
                 stats_db_path, server_id=args.server_id,
+                seeding_game_modes=tuple(sorted(seeding_modes)),
+                seeding_layer_patterns=seeding_layers,
                 on_finalize=_enqueue_push if push_active else None)
         except Exception as _se:
             print(f"stats store disabled (init failed): {_se!r}",
@@ -1043,6 +1071,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         "last_tick": None,
         "tick_sequence_required": True,
         "missing_tick_warned": False,
+        "excluded_match_ids": {},
     }
     record_filename_buffer: list = []
     # Scanner-health streak counter. STABILITY-FIRST: a genuine suspicion
@@ -1105,6 +1134,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     server_id=args.server_id,
                     min_ticks=0,
                     filename_buffer=record_filename_buffer,
+                    excluded_game_modes=seeding_modes,
+                    excluded_layer_patterns=seeding_layers,
                 )
             except Exception as _rec_e:
                 print(f"[tick {tick}] recorder error: {_rec_e!r}",
@@ -1356,6 +1387,7 @@ def cmd_stats_backfill(args: argparse.Namespace) -> int:
     recording still being written (the live match)."""
     import glob
     import json as _json
+    from .recording_lifecycle import is_excluded_match
     from .stats import StatsStore
     from .sqrx import SqrxReader
 
@@ -1392,14 +1424,38 @@ def cmd_stats_backfill(args: argparse.Namespace) -> int:
         if push_backlog is not None:
             ingest_client.enqueue(push_backlog, match_id)
 
+    seeding_modes = _seeding_game_modes()
+    seeding_layers = _seeding_layer_patterns()
     store = StatsStore(stats_db, server_id=args.server_id,
+                       seeding_game_modes=tuple(sorted(seeding_modes)),
+                       seeding_layer_patterns=seeding_layers,
                        on_finalize=_enqueue if push_backlog is not None else None)
     print(f"backfilling {len(eligible)} matches from {rec_dir} "
           f"-> {args.stats_db}", file=sys.stderr)
     t0 = time.time()
     done = 0
+    skipped = 0
     for i, f in enumerate(eligible, 1):
         base = os.path.basename(f)
+        # The archive predates the exclusion, so it still holds seed sessions —
+        # the six-hour two-player Fallujah file among them. Judge from the
+        # sidecar rather than the stream: it names the mode of the whole match,
+        # and reading it costs nothing next to decompressing 40 MB. An
+        # unreadable or absent sidecar backfills as before (fail open).
+        if seeding_modes or seeding_layers:
+            meta_path = Path(f).with_suffix(".meta.json")
+            try:
+                meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                meta = None
+            if isinstance(meta, dict) and is_excluded_match(
+                    meta, game_modes=seeding_modes,
+                    layer_patterns=seeding_layers):
+                skipped += 1
+                print(f"  [{i}/{len(eligible)}] skipped {base} "
+                      f"(excluded mode {meta.get('gameMode')!r})",
+                      file=sys.stderr)
+                continue
         try:
             with SqrxReader(f) as r:
                 for line in r:
@@ -1425,7 +1481,8 @@ def cmd_stats_backfill(args: argparse.Namespace) -> int:
         print(f"push: sent={res['sent']} pending={res['pending']} "
               f"errors={res['errors']}", file=sys.stderr)
     print(f"backfill complete: {done}/{len(eligible)} matches in "
-          f"{time.time() - t0:.0f}s", file=sys.stderr)
+          f"{time.time() - t0:.0f}s"
+          + (f" ({skipped} excluded)" if skipped else ""), file=sys.stderr)
     print("note: run `sqreader stats-elo-recalc --stats-db ...` afterwards — "
           "backfilling can raise the stats of matches that were already rated, "
           "and only a chronological replay can fix that.", file=sys.stderr)

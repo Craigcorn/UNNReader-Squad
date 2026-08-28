@@ -80,6 +80,20 @@ DEFAULTS: dict[str, Any] = {
     # boot. See sqreader/updater.py.
     "update_enabled": True,
 
+    # --- seeding exclusion -------------------------------------------------
+    # Matches whose mode the game names here are never recorded: no .sqrx, no
+    # stats row, no upload. A seed session is a two-player six-hour warm-up that
+    # arrives in the archive dressed as a match and drags every average it
+    # touches down with it. Exact, case-insensitive; set to [] on a box whose
+    # whole purpose is testing against seed layers.
+    "seeding_game_modes": ["Seed"],
+    # Override hatch for matches whose MODE is a normal one but which are still
+    # not the server's real play: scrims, events, a training layer. Case-
+    # insensitive fnmatch globs against the layer name (falling back to the map
+    # name), e.g. ["*Skirmish*"]. Empty by default — the mode field is enough
+    # for seeding, and a pattern that is too broad silently loses real matches.
+    "seeding_layer_patterns": [],
+
     # Path to plugins_config.json, for deployments whose start command is not
     # ours to edit - a container entrypoint baked into an image, a unit file
     # someone else manages. `--plugins-config` still wins when it is given.

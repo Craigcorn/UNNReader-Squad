@@ -36,7 +36,12 @@ from . import elo as elo_mod
 from .recording_lifecycle import (
     INACTIVE_MATCH_STATES,
     MATCH_TRANSITION_CONFIRM_TICKS,
+    is_excluded_match,
 )
+
+# How many decided-against match ids to remember; see `_note_excluded`. A bound
+# rather than a working size — a server turns over a handful of matches a day.
+_EXCLUDED_ID_MEMORY = 64
 
 # --------------------------------------------------------------------------
 # Schema
@@ -575,8 +580,20 @@ class StatsStore:
                  elo_min_players: int = elo_mod.MIN_PLAYERS,
                  elo_min_duration: int = elo_mod.MIN_DURATION_SEC,
                  elo_min_playtime: int = elo_mod.MIN_PLAYTIME_SEC,
+                 seeding_game_modes: tuple[str, ...] = (),
+                 seeding_layer_patterns: tuple[str, ...] = (),
                  on_finalize: Optional[Callable[[str], None]] = None) -> None:
         self.server_id = server_id
+        # Seeding exclusion — the SAME predicate the recorder gates on, from the
+        # same module, for the same reason the end-of-match policy is imported
+        # rather than restated: two answers to "is this a real match?" is one
+        # answer too many. Empty by default so a caller that does not configure
+        # it keeps recording everything.
+        self._seeding_modes = frozenset(seeding_game_modes or ())
+        self._seeding_layers = tuple(seeding_layer_patterns or ())
+        # Match ids decided against, so the decision is made once per match and
+        # a mid-match flap in the mode field cannot revisit it.
+        self._excluded_match_ids: dict[str, bool] = {}
         # Fired (post-commit) with each match_id the moment it finalizes. The
         # serve loop uses it to enqueue a central push; kept as an injected
         # callback so stats.py never imports the push client (clean layering).
@@ -648,6 +665,14 @@ class StatsStore:
         # open, changing nothing.
         is_known_inactive = (isinstance(match_state, str)
                              and match_state in INACTIVE_MATCH_STATES)
+        if match_id is not None and match_id in self._excluded_match_ids:
+            # Decided against on the tick this match first wanted a row. An
+            # InProgress tick is still not evidence that anything ENDED, so the
+            # end-confirmation run is broken here exactly as it would be for a
+            # match we were keeping.
+            self._inactive_ticks = 0
+            self._end_snap = None
+            return
         if match_id is not None:
             self._inactive_ticks = 0
             self._end_snap = None
@@ -680,6 +705,7 @@ class StatsStore:
         # Match ids finalized in THIS transaction — the hook fires only after
         # commit, so a rolled-back tick never signals a false finalize.
         finalized: list[str] = []
+        excluded = False
 
         with self.conn:
             cur = self.conn.cursor()
@@ -703,23 +729,44 @@ class StatsStore:
                     self._flush_vehicle_sessions(cur)   # belong to the old match
                     open_id = None
                 if open_id is None:
-                    self._open_match(cur, gs, now)
-                self._update_match_running(cur, match_id, snap, gs, now)
-                idx = self._upsert_players(cur, snap, match_id, now)
-                self._insert_kill_events(cur, snap, match_id, snap.get("tick"),
-                                         idx)
-                self._track_vehicle_sessions(cur, snap, match_id, now)
-                new_open = match_id
+                    # The seeding decision, at the one instant a row would be
+                    # created — and only then, so a match already being counted
+                    # is never re-judged halfway through. The previous match (if
+                    # any) has already been finalized above, so declining here
+                    # cannot strand it open.
+                    excluded = is_excluded_match(
+                        snap, game_modes=self._seeding_modes,
+                        layer_patterns=self._seeding_layers)
+                    if excluded:
+                        self._note_excluded(match_id)
+                    else:
+                        self._open_match(cur, gs, now)
+                if not excluded:
+                    self._update_match_running(cur, match_id, snap, gs, now)
+                    idx = self._upsert_players(cur, snap, match_id, now)
+                    self._insert_kill_events(cur, snap, match_id,
+                                             snap.get("tick"), idx)
+                    self._track_vehicle_sessions(cur, snap, match_id, now)
+                new_open = None if excluded else match_id
 
         # Commit succeeded — advance in-memory state atomically with the DB.
         self._open_match_id = new_open
-        if match_id is not None:
+        if match_id is not None and not excluded:
             self._last_snap = snap
         else:
+            # An excluded match's snapshot must never become the "last snap"
+            # some other match is finalized from.
             self._last_snap = None
             self._inactive_ticks = 0
             self._end_snap = None
         self._fire_finalize(finalized)
+
+    def _note_excluded(self, match_id: str) -> None:
+        """Remember a match we are not recording, so we decide only once."""
+        self._excluded_match_ids[match_id] = True
+        while len(self._excluded_match_ids) > _EXCLUDED_ID_MEMORY:
+            self._excluded_match_ids.pop(
+                next(iter(self._excluded_match_ids)))   # insertion-ordered FIFO
 
     def finalize_open_match(self, *, reason: str, confirmed: bool = False) -> None:
         """Close whatever is open. Defaults to UNVERIFIED: the callers are

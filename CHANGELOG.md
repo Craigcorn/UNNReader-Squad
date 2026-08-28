@@ -6,6 +6,22 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Seeding matches are no longer recorded at all - no replay, no stats row,
+  nothing queued for upload. A seed session is two people shooting a wall for
+  six hours, and it arrived in the archive dressed as a match: a 40 MB file
+  nobody will ever watch, a row that drags every average it touches, and an
+  upload nobody asked for. The game names the mode itself, so the decision is
+  read rather than guessed - `seeding_game_modes` defaults to `["Seed"]`, and
+  `seeding_layer_patterns` is the override hatch for scrims and events whose
+  mode is a perfectly normal one. Anything unreadable records: a torn tick is
+  not evidence of a seed session, and a recording cannot be got back
+  afterwards. The decision is taken once, where the file would have been
+  created, so a mode field that flaps during a map load can neither start a
+  recording halfway through nor cut a real match in half. Cheat detection is
+  deliberately left running through seeding - that is when a bored cheater
+  tries things.
+
 ### Fixed
 - Replays failed to load behind a spec-strict reverse proxy. The server spoke
   HTTP/1.0 - the stdlib default - while streaming recordings with

@@ -32,6 +32,7 @@ from .recording_lifecycle import (
     RECORDING_STATE_ACTIVE,
     RECORDING_STATE_FINALIZED,
     RECORDING_STATE_UNVERIFIED,
+    is_excluded_match,
 )
 from .sqrx import SqrxReader, SqrxWriter
 
@@ -45,6 +46,11 @@ _FILENAME_BUFFER_LIMIT = 10
 # the ~1 Hz full-frame rate that is under a minute — early enough to notice
 # during the match, not hours later from a gap in the archive.
 _OPEN_STALL_WARN_TICKS = 30
+# How many decided-and-skipped match ids to remember. The set only exists so a
+# mid-match flap in the mode field cannot re-open a decision, and a box turns
+# over a handful of matches a day, so this is generous by orders of magnitude —
+# it is a bound, not a working size.
+_EXCLUDED_ID_MEMORY = 64
 
 # Persistent recording lifecycle written into every metadata sidecar.
 #
@@ -346,6 +352,32 @@ def _meta_field(snap: Optional[dict], *keys: str):
 
 # ---------- main loop -------------------------------------------------------
 
+def _is_excluded_id(state_box: dict, match_id: Optional[str]) -> bool:
+    """Whether this match was already decided against — see `_note_excluded`."""
+    if match_id is None:
+        return False
+    seen = state_box.get("excluded_match_ids")
+    return isinstance(seen, dict) and match_id in seen
+
+
+def _note_excluded(state_box: dict, match_id: str) -> None:
+    """Remember a match we decided not to record, so we decide only once.
+
+    Stickiness is the whole point: the mode field can flap across a map load,
+    and a decision that changed with it would produce half a recording of a seed
+    session, or — worse in the other direction — drop the second half of a real
+    match. One decision per match id, at the moment the writer would have
+    opened, and never revisited.
+    """
+    seen = state_box.get("excluded_match_ids")
+    if not isinstance(seen, dict):
+        seen = {}
+        state_box["excluded_match_ids"] = seen
+    seen[match_id] = True
+    while len(seen) > _EXCLUDED_ID_MEMORY:
+        seen.pop(next(iter(seen)))      # dicts keep insertion order: FIFO
+
+
 def _handle_snap(
     *,
     snap: dict,
@@ -355,11 +387,19 @@ def _handle_snap(
     server_id: str,
     min_ticks: int,
     filename_buffer: list,
+    excluded_game_modes: frozenset[str] = frozenset(),
+    excluded_layer_patterns: tuple[str, ...] = (),
 ) -> None:
     """
     State-machine step: takes one snap, updates/creates/closes the
     current recording as needed. `state_box['current']` holds the
     `RecordingState | None`.
+
+    `excluded_game_modes` / `excluded_layer_patterns` are the seeding-exclusion
+    config (see `recording_lifecycle.is_excluded_match`). They default to empty
+    — a caller that does not pass them records everything, which is the safe
+    direction to fail in: too many recordings costs disk, too few costs a match
+    nobody can get back.
     """
     gs = snap.get("gameState") or {}
     match_state = gs.get("matchState")
@@ -519,6 +559,13 @@ def _handle_snap(
 
     # Need to (re)open writer.
     if current is None:
+        # Already decided against (seeding). Nothing to buffer, nothing to warn
+        # about, and the 4 Hz position frames go nowhere either because
+        # write_position_frame is inert with no writer open.
+        if _is_excluded_id(state_box, match_id):
+            filename_buffer.clear()
+            state_box["open_stall_ticks"] = 0
+            return
         # Discard buffered ticks that belong to a superseded match — a match
         # can start buffering pre-open and then be replaced directly by a new
         # matchId without ever going inactive; without this the old match's
@@ -556,6 +603,22 @@ def _handle_snap(
             # match through, and `is_active` requires a non-empty id. Kept as a
             # hard stop because a recording opened with a null id would key its
             # sidecar — and therefore the live-access gate — off nothing.
+            return
+        # The seeding decision, made once, here: this is the instant a file
+        # would appear on disk, and it is the first tick whose match id has been
+        # confirmed stable. Deciding earlier would let a single flapping tick
+        # during a map load speak for a whole match.
+        if is_excluded_match(latest, game_modes=excluded_game_modes,
+                             layer_patterns=excluded_layer_patterns):
+            _note_excluded(state_box, match_id)
+            gs_l = latest.get("gameState") or {}
+            log.info("not recording match %s: excluded mode/layer "
+                     "(gameMode=%r, layer=%r)", match_id,
+                     gs_l.get("gameModeName") or gs_l.get("gameModeId"),
+                     (gs_l.get("layer") or {}).get("name")
+                     or gs_l.get("mapName"))
+            filename_buffer.clear()
+            state_box["last_state"] = "InProgress"
             return
         started_at = _utc_now()
         filename = compute_filename(latest, started_at)
@@ -611,7 +674,9 @@ def write_position_frame(state_box: dict, pos_line: str) -> int:
     `tick_count` / `peak_players` / timestamps (full frames own those, so
     `ticks` and `has_replay` stay full-frame-based and backward-compatible).
     Returns bytes written, or 0 when no recording is open (the sampler ran
-    between matches — the frame is simply dropped)."""
+    between matches, or the match was excluded as seeding — either way the
+    frame is simply dropped, with no second copy of the exclusion rule here to
+    drift out of step with the one in `_handle_snap`)."""
     state: Optional[RecordingState] = state_box.get("current")
     if state is None:
         return 0
