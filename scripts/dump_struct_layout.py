@@ -8,29 +8,14 @@ from __future__ import annotations
 
 import argparse
 import struct
-import subprocess
 import sys
 
+from sqreader import addrcache
+from sqreader.cli import _resolve_fname_pool, _resolve_gobjects
+from sqreader.config import find_squad_server_pid
 from sqreader.mem import ProcessMemory
-from sqreader.ue.fname import FNameEntryAllocator, KNOWN_ALLOCATOR_ADDR_V10_4_1
 from sqreader.ue.reflection import describe_class
-from sqreader.ue.uobject import (
-    GUObjectArray, KNOWN_GOBJECTS_ADDR_V10_4_1,
-    UOBJ_CLASS_PRIVATE, UOBJ_NAME_PRIVATE,
-)
-
-
-def find_squad_pid() -> int:
-    for s in subprocess.check_output(
-        ["pgrep", "-f", "/home/.*/serverfiles/.*SquadGameServer"],
-        text=True,
-    ).strip().splitlines():
-        try:
-            if "Port=" in open(f"/proc/{s}/cmdline").read():
-                return int(s)
-        except FileNotFoundError:
-            pass
-    raise SystemExit("no squad server")
+from sqreader.ue.uobject import UOBJ_CLASS_PRIVATE, UOBJ_NAME_PRIVATE
 
 
 def main() -> int:
@@ -42,9 +27,16 @@ def main() -> int:
                     help="name to look up in GUObjectArray (any class)")
     args = ap.parse_args()
 
-    pm = ProcessMemory(args.pid or find_squad_pid())
-    arr = GUObjectArray(pm, KNOWN_GOBJECTS_ADDR_V10_4_1)
-    alloc = FNameEntryAllocator(pm, KNOWN_ALLOCATOR_ADDR_V10_4_1)
+    # Anchors come from the same cache -> known-addr -> discovery chain the
+    # agent itself uses. The previous hardcoded 10.4.1 constants read the
+    # wrong memory on any later Squad build, so --name silently found
+    # nothing; and the old pgrep pattern assumed one particular filesystem
+    # layout, so the config-aware pid finder replaces it.
+    pid = args.pid or find_squad_server_pid()
+    pm = ProcessMemory(pid)
+    binary_id = addrcache.binary_identity(pid)
+    arr = _resolve_gobjects(pm, binary_id)
+    alloc = _resolve_fname_pool(pm, binary_id)
 
     if args.addr:
         addr = args.addr
