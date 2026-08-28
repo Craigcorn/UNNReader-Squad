@@ -27,18 +27,33 @@ What is NOT here, and exactly why
 ---------------------------------
 The no-guess rule applies to detection as hard as it applies to display: a
 detector that infers a signal sqreader cannot read would be an accusation built
-on a guess. These four are dropped until the reader exposes what they need:
+on a guess. This section is the record of that boundary — where it is, and what
+moved it.
 
-  stamina_hack        needs the sprint-stamina float on SQSoldier. The snapshot
-                      only carries `breathHoldStamina` (scope steadiness), which
-                      is a different field and does not move when you sprint.
-                      Prerequisite: probe SQSoldier for the sprint stamina
-                      FloatProperty, add it to `soldier_offsets` + `_read_soldier`.
+Three of the four entries that used to sit here have been built, because the
+reader grew the fields they were waiting on:
 
-  no_reload_sustained needs bFiring / bReloading. Both are FBoolProperty bitfield
-                      bools; `bool_property_mask` in ue/reflection.py already
-                      knows how to resolve those masks — the fields just are not
-                      read yet.
+  stamina_hack        was blocked on the sprint-stamina float; the snapshot only
+                      carried `breathHoldStamina`, which is scope steadiness and
+                      does not move when you sprint. `soldier.stamina` /
+                      `staminaMax` are now read through the SoldierMovement
+                      component, so the detector exists.
+
+  no_reload           was written as `no_reload_sustained` and blocked on
+                      bFiring / bReloading. It turned out not to need either:
+                      Squad is a per-magazine system, so the summed magazine
+                      count falls when a player fires and does NOT fall when
+                      they reload. Consumption is therefore measurable directly,
+                      and the flags would only have said what the numbers
+                      already do.
+
+  remote_mine         was blocked on the mine's placer — `read_deployable`
+                      emitted OwningFob and nobody to accuse. It now resolves
+                      the placer PlayerState (with a sticky cache, because the
+                      link nulls out when the placer disconnects), so a mine
+                      carries the name and account id of whoever put it there.
+
+One entry is still genuinely blocked, and one caveat is worth keeping:
 
   remote_shovel       needs SQSoldier.ShovelAction (a replicated enum). We can
                       see who holds a shovel from the weapon className, but not
@@ -46,8 +61,13 @@ on a guess. These four are dropped until the reader exposes what they need:
                       damaged FOB" is exactly the kind of proximity guess this
                       project refuses to make.
 
-  remote_mine         needs the mine's placer. `read_deployable` emits OwningFob
-                      but no OwnerPlayerState, so there is nobody to accuse.
+  projectile firers   `read_projectile` resolves a firer through the instigator
+                      controller, and on a four-match reference archive that
+                      link produced a name for none of 95494 projectiles. The
+                      code path in `fire_no_ammo` that counts a projectile spawn
+                      as a shot is therefore correct and currently inert. It is
+                      kept, guarded on a real name, rather than replaced by a
+                      guess about who was nearby.
 """
 from __future__ import annotations
 
