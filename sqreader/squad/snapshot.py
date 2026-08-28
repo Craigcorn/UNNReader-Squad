@@ -1578,6 +1578,14 @@ def read_projectile(pm: ProcessMemory, alloc: FNameEntryAllocator,
         if ps:
             out["firer"] = read_fstring(
                 pm, ps + paths.ps_offsets["PlayerNamePrivate"]) or None
+            # The firer's team, off the same verified PlayerState — the viewer
+            # has carried an empty `team` slot for this since the Projectile
+            # type was written ("team enables firer-colour tint"). Gated to
+            # Squad's two real teams; anything else stays null, no guess.
+            if "TeamId" in paths.ps_offsets:
+                t = _safe(lambda: pm.read_i32(
+                    ps + paths.ps_offsets["TeamId"]))
+                out["team"] = t if t in (1, 2) else None
 
     # World position via the projectile's RootComponent → ComponentToWorld
     root = _safe(lambda: pm.read_u64(p_addr + paths.actor_root_component_off))

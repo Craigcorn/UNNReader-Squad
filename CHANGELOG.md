@@ -67,6 +67,13 @@ follows [Semantic Versioning](https://semver.org/).
   deliberately left running through seeding - that is when a bored cheater
   tries things.
 
+- A projectile now carries its firer's team, read off the same verified
+  player state that already names the firer. The viewer was built for it all
+  along - the Projectile type, the info panel's TEAM row, and the
+  firer-colour tint all existed and sat empty because the reader never sent
+  the field. Gated to the two real teams; anything else stays null.
+  Recordings made before this carry no team and never will.
+
 ### Fixed
 - Backfilling a two-tier recording handed the stats writer its 4 Hz position
   frames. A position frame is not a snapshot - it is a side channel to the
