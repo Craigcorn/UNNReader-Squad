@@ -62,6 +62,17 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- Backfilling a two-tier recording handed the stats writer its 4 Hz position
+  frames. A position frame is not a snapshot - it is a side channel to the
+  recorder, and the live reader never gives one to the stats writer - so
+  passing one along does not do nothing, it does damage: with no game state
+  in it, the writer reads it as an unreadable tick, and an unreadable tick
+  breaks a match-end confirmation in progress. Those frames sit between the
+  confirming ticks, so the confirmation could never complete and every
+  replayed match came out `unverified`, with no winner and no rating, however
+  complete the recording was. The backfill now skips them, the same rule the
+  metadata rescan and the plugin replayer already applied.
+
 - Every recording stopped one frame before the end of its match. The frames
   that prove a match ended - three consecutive not-playing ticks, the same
   evidence the live writer requires - were counted and thrown away, so a

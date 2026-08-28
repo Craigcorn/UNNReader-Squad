@@ -1531,6 +1531,20 @@ def cmd_stats_backfill(args: argparse.Namespace) -> int:
                         snap = _json.loads(line)
                     except Exception:
                         continue
+                    if not isinstance(snap, dict) or snap.get("t") == "pos":
+                        # A 4 Hz position frame is not a snapshot. The live
+                        # reader never hands one to the stats writer — it is a
+                        # side channel to the recorder — and handing one over
+                        # here does real damage rather than nothing: to
+                        # `record_tick` it reads as a tick with no game state,
+                        # which is ambiguous, which breaks any end-of-match
+                        # confirmation run in progress. On a two-tier recording
+                        # those frames sit BETWEEN the confirming ticks, so the
+                        # run could never complete and every replayed match
+                        # finalized as `unverified`. Same rule the metadata
+                        # rescan and the plugin replayer apply, for the same
+                        # reason.
+                        continue
                     store.record_tick(snap)
         except Exception as e:
             print(f"  [{i}/{len(eligible)}] ERROR {base}: {e!r}", file=sys.stderr)
