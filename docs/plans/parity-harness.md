@@ -1,6 +1,6 @@
 # Implementation plan: the stats parity harness
 
-Status: **awaiting Craig's approval** · drafted 2026-08-28 · target branch: `Replay-Improvements`
+Status: **approved 2026-08-28 — in implementation** · target branch: `Replay-Improvements`
 
 Read first: `CLAUDE.md` (hard rules), `docs/replay-pipeline-plan.md` (this is
 Phase 1's core deliverable), and `docs/plans/detectors-and-seeding.md` for the
