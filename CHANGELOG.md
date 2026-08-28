@@ -7,6 +7,22 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `scripts/stats_parity.py` measures the claim the whole recording pipeline
+  rests on: that a `.sqrx` file alone reproduces the statistics the agent
+  computed while the match was being played. It replays an entire archive, in
+  order, through the real `stats-backfill` path into a fresh database, and
+  diffs that against a consistent snapshot of the live one - table by table,
+  row by the key that identifies the thing rather than the write, column by
+  column. The columns come from the live schema itself, so a stat added next
+  month is compared the day it lands and this file does not change; a column
+  that turns up on only one side is a loud failure rather than a quiet gap.
+  It compares whole archives and not single matches, because a rating earned
+  against earlier opponents cannot be reproduced by replaying one game into an
+  empty database. Rows the archive cannot speak for - matches older than the
+  recorder, matches retention swept, the one still being played - are counted
+  and listed rather than failed, and the reasons are printed. Everything else
+  is either identical or a finding.
+
 - Four new cheat detectors, all shipped switched OFF. `stamina_hack` catches
   sprint-speed movement on a bar that never falls - sprinting drains stamina
   in Squad without exception, so neither half of that is suspicious alone and
