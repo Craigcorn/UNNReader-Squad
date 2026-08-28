@@ -59,6 +59,13 @@ CLI subcommands (`cli.py`): `serve` (production), `snapshot`, `summary`,
 path**), `stats-elo-recalc`, `doctor`, `retention`, `enroll`, `build-worker`,
 `profile-build`, `version`, `selftest`, `apply-staged-update`.
 
+`scripts/stats_parity.py` is the proof that those two paths agree: it replays a
+whole archive through `stats-backfill` into an empty DB and diffs the result
+against a backup-API snapshot of the live one, schema-driven and keyed on what
+identifies a row rather than on autoincrement ids. Non-zero exit means they
+disagree; CLAUDE.md makes it a gate for anything touching the engine, the
+recorder or the format.
+
 ## Viewer (`frontend/`)
 
 React 18 + zustand + Vite, TypeScript strict. Tests are plain node scripts

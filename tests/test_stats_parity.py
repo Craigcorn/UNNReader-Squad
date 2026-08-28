@@ -188,6 +188,24 @@ def test_a_column_on_only_one_side_is_a_loud_finding_not_a_crash():
     assert "medic_score" not in pm.compared_columns
 
 
+def test_losing_a_key_column_stops_that_table_instead_of_crashing(tmp_path):
+    """Without the columns that identify a row there is nothing to compare, and
+    reading on would only raise from SQLite. Say so and move to the next table."""
+    ev = ("M1", "Bob", "Alice", 1000.0, 1, 0, "BP_L85A2_C")
+    live, replay = _pair(_BASE)
+    for conn in (live, replay):
+        conn.execute("INSERT INTO kill_events VALUES (?,?,?,?,?,?,?,?)",
+                     (1, *ev))
+    replay.execute("ALTER TABLE kill_events DROP COLUMN victim_name")
+    report = sp.diff_databases(live, replay, _scope())
+    ke = [d for d in report.diffs if d.table == "kill_events"]
+    assert [(d.kind, d.column) for d in ke] == [
+        ("schema", "victim_name"), ("schema", "victim_name")]
+    # ... and the other tables were still compared.
+    matches = next(t for t in report.tables if t.table == "matches")
+    assert matches.scoped_rows == 1
+
+
 def test_a_table_on_only_one_side_is_a_loud_finding():
     live, replay = _pair(_BASE)
     live.executescript("CREATE TABLE squad_scores (match_id TEXT)")

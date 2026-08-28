@@ -635,12 +635,20 @@ def diff_databases(live: sqlite3.Connection, replay: sqlite3.Connection,
                 note=f"column exists only in the {side} database"))
 
         tr.skipped_columns = _surrogate_columns(live_cols, spec.key)
-        missing_key = [c for c in spec.key if c not in live_names]
+        # A key column missing on EITHER side stops the table dead: without it
+        # there is no way to say which row is which, and reading on would only
+        # raise from SQLite. Both sides are checked because the drift can go
+        # either way, and the crash would be the same either way.
+        missing_key = [c for c in spec.key
+                       if c not in live_names or c not in replay_names]
         if missing_key:
+            tr.live_rows = _count(live, table)
+            tr.replay_rows = _count(replay, table)
             tr.diffs.append(Diff(
                 table=table, kind="schema", key=(), column=",".join(missing_key),
                 live=None, replay=None,
-                note="the semantic key names columns this table does not have"))
+                note="the semantic key names columns one side of this table "
+                     "does not have, so its rows cannot be identified at all"))
             continue
 
         shared = [c for c in live_names
