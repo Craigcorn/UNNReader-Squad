@@ -95,14 +95,19 @@ follows [Semantic Versioning](https://semver.org/).
   it actually saw, because one is not three and a replay has to be able to
   tell the difference.
 
-- Every projectile's firer read as nobody. The field moved eight bytes in a
-  Squad update and two bools took its old place, so the reader interpreted a
-  bool and its padding as a pointer and came back empty - 95 494 out of
-  95 494 projectiles in four real matches, and failing safe meant nobody was
-  told for an entire version cycle. The offset is now taken from the game's
-  own reflection data, like the fields around it, with the corrected constant
-  kept only as the fallback - so the next time Squad moves it, the read heals
-  itself instead of going quiet.
+- Every projectile's firer read as nobody, and it took two findings to fix.
+  First, the field the reader targeted had moved eight bytes in a Squad
+  update, leaving two bools where it used to be - so a bool and its padding
+  were being read as a pointer, 95 494 times out of 95 494 in four real
+  matches, and failing safe meant nobody was told for a version cycle.
+  Second, correcting that offset changed nothing, because live fire showed
+  the field itself - DamageInstigatorController, despite the name - is never
+  populated when a round spawns. What Squad actually stamps on a projectile
+  is the engine's own Instigator, the firing pawn: a memory probe against
+  freshly fired rockets and smoke hit the pawn 178 times out of 178 and the
+  controller zero. The firer now follows the pawn to its player state, both
+  offsets taken from reflection so they heal across Squad updates, with the
+  controller chain kept only as a fallback for whatever context does fill it.
 - On a two-tier replay the viewer's tick counter seesawed by about a thousand
   and the Hz readout jittered between 3 and 4.5. Both are the same mistake
   read twice. A position frame carries two counters - the 4 Hz sampler's own

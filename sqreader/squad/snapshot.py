@@ -1552,19 +1552,32 @@ def read_projectile(pm: ProcessMemory, alloc: FNameEntryAllocator,
             out[fk] = v if -1e9 <= v <= 1e9 else None
         else:
             out[fk] = None
-    # Firer — who launched this round. Instigator controller → PlayerState →
-    # name. Every step is null-guarded: a wrong instigator offset (Squad patch)
-    # or a projectile with no instigator (world-spawned) leaves firer null, no
-    # guess. Reuses the reflection-derived PC.PlayerState offset.
+    # Firer — who launched this round. Live-fire verified: the engine's own
+    # Actor.Instigator (the firing PAWN) is what Squad populates at spawn;
+    # SQProjectile.DamageInstigatorController — despite the obvious name —
+    # reads null at spawn (probe: 178/178 hits on the pawn, 0 on the
+    # controller), so the controller chain is kept only as a fallback. Every
+    # step is null-guarded: a projectile with no instigator (world-spawned)
+    # leaves firer null, no guess.
     out["firer"] = None
-    if paths.pc_playerstate_off is not None and "PlayerNamePrivate" in paths.ps_offsets:
-        ctrl = _safe(lambda: pm.read_u64(
-            p_addr + paths.projectile_instigator_off))
-        if ctrl:
-            ps = _safe(lambda: pm.read_u64(ctrl + paths.pc_playerstate_off))
-            if ps:
-                out["firer"] = read_fstring(
-                    pm, ps + paths.ps_offsets["PlayerNamePrivate"]) or None
+    if "PlayerNamePrivate" in paths.ps_offsets:
+        ps = 0
+        if (paths.actor_instigator_off is not None
+                and paths.pawn_playerstate_off is not None):
+            pawn = _safe(lambda: pm.read_u64(
+                p_addr + paths.actor_instigator_off))
+            if pawn:
+                ps = _safe(lambda: pm.read_u64(
+                    pawn + paths.pawn_playerstate_off)) or 0
+        if not ps and paths.pc_playerstate_off is not None:
+            ctrl = _safe(lambda: pm.read_u64(
+                p_addr + paths.projectile_instigator_off))
+            if ctrl:
+                ps = _safe(lambda: pm.read_u64(
+                    ctrl + paths.pc_playerstate_off)) or 0
+        if ps:
+            out["firer"] = read_fstring(
+                pm, ps + paths.ps_offsets["PlayerNamePrivate"]) or None
 
     # World position via the projectile's RootComponent → ComponentToWorld
     root = _safe(lambda: pm.read_u64(p_addr + paths.actor_root_component_off))
