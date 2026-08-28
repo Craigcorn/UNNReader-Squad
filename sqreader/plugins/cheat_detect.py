@@ -92,6 +92,29 @@ def _dist_m(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1]) / _CM_PER_M
 
 
+def _resolve_player(by_eos: dict, by_name: dict, eos: Optional[str],
+                    name: Optional[str]) -> Optional[dict]:
+    """The player an event names — by account id first, by name second.
+
+    Both lookups are needed, and the fallback is not a nicety. The kill feed's
+    ids come from the server LOG, which names players by their EOS account id;
+    the snapshot's come from memory. On a licensed server those agree. On a real
+    archive of four 100-player matches they did not: every log id was a 32-hex
+    EOS id and every snapshot id a UUID, so an id-only lookup resolved 0 of the
+    789 damage events that carried a causer, while the name resolved 780.
+
+    The old code took the id branch whenever an id was present and never fell
+    back, so on that server every damage-event detector here was inert — not
+    quiet, inert. Ids stay first because a name is only unique by convention;
+    the fallback runs exactly when the id fails.
+    """
+    if eos:
+        hit = by_eos.get(eos)
+        if hit is not None:
+            return hit
+    return by_name.get(name) if name else None
+
+
 def _occupied_eos(snapshot: dict) -> set[str]:
     """Everyone sitting in a vehicle seat this tick.
 
@@ -366,8 +389,9 @@ class CheatDetect(Plugin):
         stale_after = float(self.config["inf_ammo_stale_seconds"])
 
         for ev in events:
-            eos = ev.get("attackerEosId")
-            attacker = by_eos.get(eos) if eos else by_name.get(ev.get("attacker"))
+            attacker = _resolve_player(by_eos, by_name,
+                                       ev.get("attackerEosId"),
+                                       ev.get("attacker"))
             if attacker is None:
                 continue
             eos = attacker.get("eosId")
@@ -381,8 +405,15 @@ class CheatDetect(Plugin):
             if not weapon or not held or not isinstance(mags, list) or not mags:
                 continue
             # The event must be about the gun they are actually holding — after a
-            # weapon swap the ammo we can see is a different gun's.
-            if weapon not in held and held not in weapon:
+            # weapon swap the ammo we can see is a different gun's. Matched
+            # EXACTLY: this was a substring test, and across 2499 comparable
+            # events in a four-match archive it never once paired anything
+            # exact equality missed, while a substring rule can pair two
+            # unrelated class names by accident. What the loose test does let
+            # through is what it should not: an explosive names its projectile
+            # and a vehicle weapon names the vehicle, and neither is the gun
+            # whose magazines we are reading.
+            if weapon != held:
                 continue
 
             ammo = sum(int(m) for m in mags if isinstance(m, int))
@@ -428,8 +459,9 @@ class CheatDetect(Plugin):
             weapon = (ev.get("causerWeapon") or "").lower()
             if not any(k in weapon for k in _MELEE_KEYWORDS):
                 continue
-            eos = ev.get("attackerEosId")
-            attacker = by_eos.get(eos) if eos else by_name.get(ev.get("attacker"))
+            attacker = _resolve_player(by_eos, by_name,
+                                       ev.get("attackerEosId"),
+                                       ev.get("attacker"))
             victim = by_name.get(ev.get("victim"))
             if attacker is None or victim is None:
                 continue          # cannot place one of them — no accusation
@@ -463,8 +495,9 @@ class CheatDetect(Plugin):
         max_age = float(self.config["magic_bullet_max_event_age_sec"])
 
         for ev in events:
-            eos = ev.get("attackerEosId")
-            attacker = by_eos.get(eos) if eos else by_name.get(ev.get("attacker"))
+            attacker = _resolve_player(by_eos, by_name,
+                                       ev.get("attackerEosId"),
+                                       ev.get("attacker"))
             victim = by_name.get(ev.get("victim"))
             if attacker is None or victim is None:
                 continue

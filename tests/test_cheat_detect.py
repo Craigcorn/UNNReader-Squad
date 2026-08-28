@@ -274,6 +274,39 @@ def test_an_unplaceable_victim_is_not_accused():
     assert sink.rows == []
 
 
+def test_an_event_whose_id_matches_nobody_is_resolved_by_name():
+    """The kill feed's ids come from the server LOG and the snapshot's from
+    memory. On a real four-match archive those were different namespaces
+    entirely — 32-hex EOS ids against UUIDs — and the id branch short-circuited
+    the name lookup, so every damage-event detector here resolved 0 of 789
+    events and sat silently inert."""
+    mgr, sink = _run()
+    ev = _melee()
+    ev["attackerEosId"] = "00025f4fea4f4aa1a920a4cfb5163f10"   # not in memory
+    mgr.run_tick(_snap(
+        [_player(eos="b31cc43e-44f7-47c9-9057-d283e7eaad0b", name="Alice",
+                 x=0.0),
+         _player(eos="eos-2", name="Bob", x=20_000.0, addr="0xB")],
+        events=[ev]), tick=1)
+    assert sink.types() == ["remote_melee"]
+    assert sink.rows[0]["eos_id"] == "b31cc43e-44f7-47c9-9057-d283e7eaad0b"
+
+
+def test_a_causer_naming_a_projectile_is_not_the_gun_being_held():
+    """Explosives name their projectile and vehicle weapons name the vehicle.
+    Neither is the gun whose magazines we are reading, so neither may be
+    checked against them."""
+    mgr, sink = _run()
+    for i, ts in enumerate([0.0, 10.0, 20.0, 30.0, 40.0]):
+        mgr.run_tick(_snap(
+            [_player(eos="eos-1", name="Alice",
+                     weapon="BP_AK74GP25_EXPS_UGL_HE_10Rnds_C", mags=[1]),
+             _player(eos="eos-2", name="Bob", x=5000.0, addr="0xB")],
+            tick=i + 1, events=[_hit(ts, "BP_40MM_VOG_Proj2_C")]),
+            tick=i + 1, now=ts)
+    assert sink.rows == []
+
+
 def test_the_same_event_seen_twice_only_counts_once():
     mgr, sink = _run()
     players = [_player(eos="eos-1", name="Alice", x=0.0),

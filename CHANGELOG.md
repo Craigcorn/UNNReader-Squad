@@ -23,6 +23,19 @@ follows [Semantic Versioning](https://semver.org/).
   tries things.
 
 ### Fixed
+- Every detector that reads the kill feed was silently doing nothing. The
+  attacker on a damage event is looked up by account id, and the lookup gave
+  up rather than falling back to the name when that id matched nobody - which
+  is what happens whenever the log and the game's memory number players
+  differently. Measured against four real matches: 0 of 789 events with a
+  weapon on them resolved an attacker, against 780 by name. So
+  `infinite_ammo`, `remote_melee` and `magic_bullet` were not quiet, they were
+  inert, and had been since they were switched on. The id is still tried
+  first, because a name is unique only by convention. The same measurement
+  retired a substring comparison between the event's weapon and the gun the
+  player is holding: exact equality matched every one of the 2499 comparable
+  pairs the loose test did, and a substring rule can pair two unrelated class
+  names by accident.
 - Replays failed to load behind a spec-strict reverse proxy. The server spoke
   HTTP/1.0 - the stdlib default - while streaming recordings with
   Transfer-Encoding: chunked, which does not exist in HTTP/1.0. Lenient
