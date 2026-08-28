@@ -118,7 +118,36 @@ directly (read-only — never mutate the snapshot).
   occupants (`_occupied_eos`); reset on the same events as speedhack.
 - **Details payload:** speed, stamina fraction, sustained seconds, sprint cap.
 
-### B2. `no_reload` via ammo-consumption rate
+### B2. Firing without ammo accounting — primary and secondary models
+
+**The premise question (Craig's challenge — settle it in D before trusting
+either model).** Whether a cheater's *server-side* ammo falls at all is
+unconfirmed and probably not: Squad's client holds enough authority over the
+firing path for these cheats to exist at all, and the inherited
+`infinite_ammo` detector's own design — damage keeps landing while "their
+carried ammo never went down" — documents that in the cheats it was tuned
+against, the server's copy did **not** fall. Consequence: the primary signal
+must not depend on ammo moving; the consumption models are kept only as a
+secondary net for the variant that removes the reload timer while leaving
+ammo accounting honest.
+
+**B2-primary — verified shots vs a static ledger.** Implement as an upgrade
+to the existing `infinite_ammo` (keep its cooldown/staleness machinery —
+that's where the tuning history lives). Shot evidence, no ammo dependence:
+(a) **launchers** — `projectiles[]` spawns carry a memory-verified `firer`
+(`read_projectile`, snapshot.py:1531-1543); diff by projectile id per tick,
+with the same restart-flood guard as B3; works with zero damage events
+(spraying a treeline). (b) **bullets** — damage events, **after fixing
+causer matching**: the log likely names the projectile/round class rather
+than the gun, which would mean launcher and possibly other events have been
+silently discarded by the substring check all along (verify real
+`causerWeapon` strings in D). Alert when `fire_no_ammo_min_shots` (default
+4) verified shots span `fire_no_ammo_min_window_seconds` (default 10) while
+the held weapon's summed ammo never decreases; any sum *increase* (resupply)
+resets the observation. Config flag `detect_fire_no_ammo: False` until D.
+
+**B2-secondary — consumption anomalies** (the models below; same ledger
+plumbing, same default-off posture):
 
 - **Signal:** `soldier.weapon.magazines` (list of current round counts for
   the held weapon) — no new fields. Squad is a per-magazine system: firing
@@ -171,27 +200,23 @@ directly (read-only — never mutate the snapshot).
 - **Details payload:** weapon, path taken, rounds consumed, dt/window,
   capacity estimate, ceiling or strike count.
 
-### B2b. `infinite_ammo` extension for launchers (projectile-corroborated)
+**D verification items for B2 (gate both models on these):**
 
-The existing `infinite_ammo` matches the damage event's `causerWeapon`
-against the held weapon's class by substring — and for explosives the log's
-causer is expected to be the **projectile** class, not the launcher, so
-launcher events are likely discarded silently (verify against archive
-`causerWeapon` strings in D). The verified route that avoids the problem:
-`projectiles[]` entries carry a memory-verified `firer`
-(`read_projectile`, snapshot.py:1531-1543). New default-off variant
-(`detect_infinite_ammo_launcher: False`): count projectile spawns attributed
-to a player (diff `projectiles[]` by id per tick, same restart-flood guard
-as B3) while their held launcher's ammo sum never decreases across
-`inf_ammo_launcher_min_shots: 3` verified launches → alert. Works with zero
-damage events (spraying a treeline) and never guesses attribution.
-
-**D verification items for B2/B2b:** how launcher magazines present in real
-data (list shape for 1-round weapons); whether disposable tubes (AT4-style)
-despawn as a weapon swap after firing; which projectile classes
-`read_projectile` actually tracks (if 40 mm GL rounds are absent from
-`projectiles[]`, the GL case falls back to the damage-event route with
-corrected causer matching).
+1. **Baseline legit fire on the test server** — a player firing normally
+   while snapshots are watched: confirm the server-side ammo sum decrements
+   per shot, and record how a reload refill presents at 1 Hz sampling.
+2. **Labeled cheater data — the decisive test.** Craig to identify past
+   matches with known/banned or credibly reported cheaters (names + rough
+   dates) available in the archive or the production export; run both models
+   over those recordings. This is the only way to learn how real cheats
+   present server-side — ammo static (primary fires), ammo honest (secondary
+   fires), or both — and no threshold is trusted before it.
+3. **Launcher mechanics:** how launcher magazines present in real data (list
+   shape for 1-round weapons); whether disposable tubes (AT4-style) despawn
+   as a weapon swap after firing; which projectile classes `read_projectile`
+   actually tracks (if 40 mm GL rounds are absent from `projectiles[]`, the
+   GL case falls back to the damage-event route with corrected causer
+   matching); real `causerWeapon` strings for explosive damage events.
 
 ### B3. `remote_mine`
 
