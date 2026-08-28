@@ -61,13 +61,18 @@ One entry is still genuinely blocked, and one caveat is worth keeping:
                       damaged FOB" is exactly the kind of proximity guess this
                       project refuses to make.
 
-  projectile firers   `read_projectile` resolves a firer through the instigator
-                      controller, and on a four-match reference archive that
-                      link produced a name for none of 95494 projectiles. The
-                      code path in `fire_no_ammo` that counts a projectile spawn
-                      as a shot is therefore correct and currently inert. It is
-                      kept, guarded on a real name, rather than replaced by a
-                      guess about who was nearby.
+  projectile firers   RESOLVED. `read_projectile` originally chased an
+                      instigator-controller field that produced a name for
+                      none of 95494 projectiles in a four-match archive; a
+                      live-fire probe then showed Squad stamps the engine's
+                      own Instigator pawn instead, and the reader now follows
+                      pawn -> player state (both offsets from reflection).
+                      Live verification: 94 of 94 rocket and smoke sightings
+                      named their firer. The `fire_no_ammo` projectile path
+                      is live from that fix onward — but note the reference
+                      corpus predates it, so the launcher path's
+                      false-positive behaviour is unproven until
+                      plugin_replay runs over post-fix recordings.
 """
 from __future__ import annotations
 
@@ -836,13 +841,12 @@ class CheatDetect(Plugin):
         for pr in new_projectiles:
             firer = pr.get("firer")
             if not isinstance(firer, str) or not firer:
-                # The memory-verified firer link. On the reference corpus it
-                # resolved for 0 of 95 494 projectile observations, so this
-                # path contributes nothing there and the detector rests on
-                # damage events alone. It is kept, guarded, because the link
-                # exists in the reader and an offset fix would light it up —
-                # and because a launcher fired at a treeline produces rounds
-                # and no damage events at all.
+                # The memory-verified firer link — live since the reader
+                # switched to the Instigator-pawn chain (94/94 sightings
+                # named in live fire). Rounds recorded before that fix carry
+                # no name and are skipped, never guessed; a launcher fired at
+                # a treeline produces rounds and no damage events, which is
+                # why this path exists at all.
                 continue
             p = by_name.get(firer)
             eos = p.get("eosId") if p else None
