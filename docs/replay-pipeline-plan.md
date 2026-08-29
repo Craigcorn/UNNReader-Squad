@@ -42,6 +42,14 @@ changelog's `[Unreleased]`; reports naming players live in
   consequence: stats vehicle boards accrue emplacement seat-time from the
   fix onward. Gun exists only while fully built (partial dig-down
   despawns it).
+- Emplacement ammo + aim capture (2026-08-29, verified by aim-diffing and
+  firing a manned TOW/L16 mortar/M2): the gun is its own seat pawn, so the
+  tank-turret ammo chain (inventory → CurrentWeapon → Magazines) enters at
+  the actor; aim lives on SwivelMeshComponent (traverse yaw, root-relative
+  like hull+turret) and GunMountComponent (elevation pitch; mortars mirror
+  it into CachedTubePitch). Recorded in the existing `turrets` shape plus
+  an optional `pitch`. Viewer surfacing of ammo/aim/health-join polish is
+  deferred at Craig's request ("UI later").
 
 **Open decisions (owner: Craig unless noted):**
 
