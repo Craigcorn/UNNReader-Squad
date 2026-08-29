@@ -72,6 +72,8 @@ instead of reading junk.
 | Named seat roles (driver/gunner, not index) | `SEAT_CONFIG` offset declared (`:258`), never read |
 | Suppression rounds; logi drop rate/quantity | declared offsets `:233`, `:421-425` |
 
+| **4 Hz ammo sampling**: held-weapon magazine sum added to the position frame | `possample` + one int per player per sample | Shrinks the ammo-observation window from ~2 s to 0.25 s, which is what the no-reload blind spot (pistols, bolt-actions, small drums) is made of: two bolt-action rounds in a quarter-second is impossible with no metadata table at all. Sharpens every ammo detector, retroactively analyzable on recordings made after it lands. Cost to measure with `profile-build` first |
+
 ## Tier 3 — needs one live session on the test server before costing
 
 Run `scripts/dump_struct_layout.py --name SQSoldier` on the `squad` box and
