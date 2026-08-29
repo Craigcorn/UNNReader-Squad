@@ -42,7 +42,7 @@ changelog's `[Unreleased]`; reports naming players live in
 | Discord alert webhook + delivery path (direct vs platform) | deferred by choice |
 | Replay retention policy | team discussion pending |
 | Main-server stats DB export (cross-version parity corpus 2) | offered, not yet provided |
-| speedhack 18.0 borderline | decided: leave; revisit at 20.0 only with wider-archive measurement |
+| speedhack 18.0 borderline | **resolved 2026-08-29: proven false positive** — a BMP-1 passenger the reader failed to seat (per-blueprint seat gap; BMP-1/BTR-4 rear seats never resolve, BMP-2 and trucks do). Threshold stays 18.0; chips filed for vehicle-correlation suppression and the seat-offset probe. Evidence: Misc/speedhack-borderline-verdict.md |
 | Production rollout path for the fork | Phase 2/3 decision (see open question 4) |
 | HEAD-request support | task chip pending |
 
