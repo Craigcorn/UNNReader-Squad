@@ -230,6 +230,20 @@ follows [Semantic Versioning](https://semver.org/).
   draws, precomputed so the pair stream never stalls. Works on every
   recording ever made, single-tier production files included, and costs
   the recording nothing.
+- A guided missile's trail now starts at the launcher, and every shell
+  points where it is going. The trail's first point was the round's
+  first recorded sample, ~70-90 m downrange (the distance covered before
+  the first build catches it) - the firer's name is on the round and the
+  launcher has that player in a seat, so the trail anchors to that
+  recorded position when one sits within 500 m, an honest join of two
+  recorded facts. And the projectile icon derived its heading from
+  per-frame deltas: at 60 fps a TOW moves about a metre per frame
+  (jittery heading) and a near-vertical mortar shell moves centimetres
+  on the map (heading never computed at all, so the shell icon pointed
+  wherever it spawned). Heading now comes from accumulated displacement
+  - an anchor that re-plants every 3 m of travel - which gives every
+  round a stable, correct direction of travel however slowly it crosses
+  the map.
 - A mortar round detonated at the mortar pit seconds after launch - in
   the viewer only, and only since the frozen-ghost rule landed. The rule
   tested movement in X and Y with a metre of tolerance, but a round

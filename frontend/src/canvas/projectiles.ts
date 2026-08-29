@@ -84,7 +84,18 @@ const DEATH_FADE_MS    = 2_500;                          // whole-trail fade aft
 const TRAIL_SPACING_UE = 2_500;                          // ≥25 m between trail points
 const TRAIL_SPACING_SQ = TRAIL_SPACING_UE * TRAIL_SPACING_UE;
 const TRAIL_MAX_POINTS = 256;                            // per-track backstop
-const HEADING_MIN_SQ   = 10_000;                         // ignore <1 m for heading
+// Heading is measured from an ANCHOR that only moves when the round has
+// travelled this far from it — not from per-frame deltas. At 60 fps a
+// TOW moves ~1 m per frame (jittery heading) and a near-vertical mortar
+// moves centimetres in XY (heading never updated at all, so the shell
+// icon pointed wherever it spawned). Accumulated displacement gives
+// both a stable, correct direction of travel.
+const HEADING_ANCHOR_UE = 300;                           // 3 m
+const HEADING_ANCHOR_SQ = HEADING_ANCHOR_UE * HEADING_ANCHOR_UE;
+// The launcher a guided round's trail is anchored to must be plausibly
+// at the launch site — a seat-name match alone could pick up stale data.
+const LAUNCHER_MAX_UE  = 50_000;                         // 500 m
+const LAUNCHER_MAX_SQ  = LAUNCHER_MAX_UE * LAUNCHER_MAX_UE;
 const FROZEN_DEAD_TICKS = 2;   // identical position across N tick advances
 const VANISH_DEAD_TICKS = 2;   // absent across N tick advances
 // A between-frame jump beyond this is a seek/teleport, not flight.
@@ -103,6 +114,8 @@ interface Track {
   x: number;                // last displayed position (world units)
   y: number;
   z: number | null;         // for the freeze test — see below
+  hx: number;               // heading anchor — see HEADING_ANCHOR_UE
+  hy: number;
   heading: number | null;   // screen-space radians, +x axis baseline
   lastSeenAt: number;       // wall-clock ms
   lastSeenTick: number | null;  // snap.tick when last present
@@ -218,11 +231,29 @@ export function drawProjectilesAndImpacts(
     const track: Track = prev ?? {
       cls: r.classShort ?? null,
       x: r.position.x, y: r.position.y, z: r.position.z ?? null,
+      hx: r.position.x, hy: r.position.y,
       heading: null, lastSeenAt: now, lastSeenTick: tick, kind,
       team: r.team ?? null, path: [], lastTick: tick, frozenTicks: 0,
       dead: false, diedAt: 0,
     };
     tracks.set(sig, track);
+    // A newborn guided track gets its trail anchored to the LAUNCHER:
+    // the firer's name is on the round, and whichever vehicle (an
+    // emplacement gun or an ATGM truck) has that player in a seat within
+    // sight of the first sample is where the wire physically starts.
+    // Recorded data joined at display time — nothing invented; when no
+    // seat matches, the trail honestly starts at the first sample.
+    if (!prev && isGuided(r) && r.firer) {
+      for (const v of snap.vehicles ?? []) {
+        if (!v.position || !v.seats) continue;
+        if (!v.seats.some((st) => st.occupantName === r.firer)) continue;
+        const dx = v.position.x - r.position.x;
+        const dy = v.position.y - r.position.y;
+        if (dx * dx + dy * dy > LAUNCHER_MAX_SQ) continue;
+        track.path.push({ x: v.position.x, y: v.position.y });
+        break;
+      }
+    }
 
     const dxU = r.position.x - track.x;
     const dyU = r.position.y - track.y;
@@ -242,13 +273,21 @@ export function drawProjectilesAndImpacts(
       // A seek, not flight — restart history at the new spot.
       track.path.length = 0;
       track.heading = null;
-    } else if (prev && movedSq > HEADING_MIN_SQ) {
-      // Heading from the displayed motion, in screen space (handles the
-      // map projection correctly).
-      const [psx, psy] = worldToScreen(view, cs, track.x, track.y);
-      const [csx, csy] = worldToScreen(view, cs,
-        r.position.x, r.position.y);
-      track.heading = Math.atan2(csy - psy, csx - psx);
+      track.hx = r.position.x;
+      track.hy = r.position.y;
+    } else {
+      // Heading from accumulated displacement since the anchor, in
+      // screen space (handles the map projection correctly).
+      const ax = r.position.x - track.hx;
+      const ay = r.position.y - track.hy;
+      if (ax * ax + ay * ay >= HEADING_ANCHOR_SQ) {
+        const [psx, psy] = worldToScreen(view, cs, track.hx, track.hy);
+        const [csx, csy] = worldToScreen(view, cs,
+          r.position.x, r.position.y);
+        track.heading = Math.atan2(csy - psy, csx - psx);
+        track.hx = r.position.x;
+        track.hy = r.position.y;
+      }
     }
     // First-tick fallback when backend emits velocity (Phase B+).
     if (track.heading == null && r.velocity
