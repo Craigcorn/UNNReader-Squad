@@ -165,6 +165,26 @@ follows [Semantic Versioning](https://semver.org/).
   an explosive, unimpacted projectile frozen across two tick-advancing
   frames is treated as dead: ring at the true death point, icon off,
   trail left to fade.
+- A killed missile came back from the dead every twelve seconds. On a
+  recording that still carries the ghost records, the viewer's freeze
+  rule rightly killed the icon at the true death point - and then
+  garbage-collected the dead tracker once its trail faded, while the
+  ghost records were still streaming. The next frame met an unknown
+  projectile, drew it standing mid-air, killed it again two ticks later,
+  rang again - a resurrection loop dressed up as a mid-flight explosion.
+  A dead tracker is now pinned for as long as its actor is still in the
+  snapshot; per the first viewer's report, the trail also stopped aging
+  out mid-flight - a guided missile now draws its WHOLE path, launch to
+  warhead, for as long as it flies, and the complete trail fades out as
+  one when it dies. And the stutter got its real fix: projectile motion
+  is dead-reckoned in the tracker from raw samples (velocity from the
+  last two, capped, halted the moment the freeze rule starts counting),
+  replacing the frame-pair lerp that two-tier reconstruction quietly
+  defeated - reconstructed frames repeat the base frame's projectiles by
+  reference, so the old lerp glided one span in four and froze the rest.
+  A fixed-trajectory round cannot change course between samples, so
+  extrapolation is exactly its truth; for a steered missile the
+  between-sample estimate is the accepted price of motion that moves.
 
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
