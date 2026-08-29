@@ -1,6 +1,9 @@
 # Implementation plan: the stats parity harness
 
-Status: **approved 2026-08-28 — in implementation** · target branch: `Replay-Improvements`
+Status: **complete 2026-08-28** — corpus 1 green (exit 0) after fixing two
+real engine bugs (recordings missing their ending frames; backfill fed
+position frames to the stats writer); the harness is a standing CLAUDE.md
+push-gate. Corpus 2 still pending the main-server stats DB export.
 
 Read first: `CLAUDE.md` (hard rules), `docs/replay-pipeline-plan.md` (this is
 Phase 1's core deliverable), and `docs/plans/detectors-and-seeding.md` for the

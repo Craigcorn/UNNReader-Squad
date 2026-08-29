@@ -1,6 +1,55 @@
 # The Replay Pipeline — plan (UNN)
 
-Status: phase 1 ready · stats wishlist under exploration · drafted 2026-08-28
+Status: phase 1 largely delivered · stats wishlist awaiting team reaction ·
+drafted 2026-08-28 · **read "Program state" below first when resuming**
+
+## Program state — as of 2026-08-29
+
+Everything here is on `Replay-Improvements` (through `870328b`) and deployed
+to the test box unless noted. Detail lives in each plan doc and the
+changelog's `[Unreleased]`; reports naming players live in
+`C:\Users\CRAIG\Documents\UNN\Misc\` (never the repo).
+
+**Shipped and verified:**
+
+- Seeding exclusion (gameMode-keyed; test box opts out via its config).
+- Two-tier recording live and validated end to end (`--hz 1 --record-hz 4`);
+  recordings carry `endFrames` (match endings) since the parity fix.
+- The parity harness (`scripts/stats_parity.py`) — green on the box corpus
+  and a standing CLAUDE.md push-gate. It found and fixed two engine bugs:
+  recordings missing their endings, backfill fed position frames.
+- Projectile `firer` (Instigator-pawn chain, live-verified 94/94) and
+  projectile `team`.
+- Attribution repairs: 330 s wound-correlation TTL; killerEos resolved in
+  the log's own id namespace; viewer one-tick hold + death-frame evidence
+  outranking stale survived wounds (13 phantom kills corrected across five
+  real matches, evidence reviewed and accepted); two-tier tick/Hz display.
+- Kill-feed suicide labeling; HTTP/1.1 chunked fix; SPA deep links; doctor's
+  collector checks (event-gated verdict, not drift — offsets fine at 10.5.3).
+- **Detectors ENABLED on the test box** (2026-08-29, `plugins_config.json`):
+  stamina_hack, no_reload (windowed + single-shot rate + midcap
+  double-magazine w/ class census), fire_no_ammo (launch billed only to a
+  held one-round weapon), remote_mine — plus the default three. Validated:
+  zero false accusations over 24 recordings. Alerts are **DB-only**
+  (`alert_webhook: null`) until Discord is set up.
+
+**Open decisions (owner: Craig unless noted):**
+
+| Decision | State |
+|---|---|
+| Stats wishlist reaction (`docs/stats-wishlist.md`) | awaiting team — gates the rest of Phase 1 |
+| Shared community-wide ELO | still Recommended, never finally confirmed |
+| Discord alert webhook + delivery path (direct vs platform) | deferred by choice |
+| Replay retention policy | team discussion pending |
+| Main-server stats DB export (cross-version parity corpus 2) | offered, not yet provided |
+| speedhack 18.0 borderline | decided: leave; revisit at 20.0 only with wider-archive measurement |
+| Production rollout path for the fork | Phase 2/3 decision (see open question 4) |
+| HEAD-request support | task chip pending |
+
+**Efficacy caveat that must survive every summary:** detector validation
+proves no false accusations; it proves nothing about catching cheaters until
+the first real incident — which becomes the first labeled recording and the
+day thresholds are reviewed against a true positive.
 
 Make the `.sqrx` recording the single source of truth for every Squad match,
 move stats and replay serving onto UNN's community platform (SquidHub, private

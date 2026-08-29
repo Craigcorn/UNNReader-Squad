@@ -1,6 +1,13 @@
 # Implementation plan: the two remaining attribution repairs
 
-Status: **approved 2026-08-29 — in implementation** · target branch: `Replay-Improvements`
+Status: **complete 2026-08-29** — both repairs shipped and deployed. The
+validation surfaced a third difference class the plan under-enumerated
+(named → a different name, from the game's own late killed event); both such
+rows were traced to raw frames, reviewed by Craig with the full 13-case
+evidence file, and accepted. Revive-clearing was dropped via the escape
+hatch for a measured reason (respawns dominate wounded→healthy transitions
+1384:584 and the discriminating field isn't in the viewer type); precedence
+alone closes the mislabel.
 
 Read first: `CLAUDE.md` (hard rules and gates), and the execution-convention
 sections of `docs/plans/detectors-and-seeding.md` (house voice, the local
