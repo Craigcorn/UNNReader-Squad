@@ -3874,13 +3874,30 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     # rendering anyway, but they pollute the snapshot list AND confuse
     # the "attached" hiding logic for any player whose soldier addr
     # still references a freed vehicle.
+    #
+    # Also dropped: emplacement staging actors. Squad pre-spawns one
+    # instance of each emplacement gun class the match's factions could
+    # build (ZiS-3, emplaced ZU-23, M2 tripod, …) and parks it at the
+    # exact world origin — team 0, full health, no seat components,
+    # never visible to a player. World origin sits INSIDE the play area
+    # on most maps, so recording these painted a stack of phantom icons
+    # mid-map. A physics-settled vehicle never rests at exactly (0,0,0);
+    # the check is per-tick and keeps any occupied actor, so the moment
+    # one is genuinely deployed (moves, or somehow seats a player while
+    # still at origin) it enters the snapshot like any other vehicle.
     def _is_junk_vehicle(v: dict[str, Any]) -> bool:
         if not v.get("classShort"):
             return True
         mh = v.get("maxHealth")
         if mh is None or mh <= 0 or mh > 1e6:
             return True
-        if not v.get("position"):
+        pos = v.get("position")
+        if not pos:
+            return True
+        if (pos.get("x") == 0.0 and pos.get("y") == 0.0
+                and pos.get("z") == 0.0
+                and not any(st.get("occupantName")
+                            for st in v.get("seats") or [])):
             return True
         return False
     vehicles = [v for v in vehicles if not _is_junk_vehicle(v)]

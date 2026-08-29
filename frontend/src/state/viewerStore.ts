@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { DEFAULT_VIEW } from "./types";
 import { patchSnapshot, resetCarryOver } from "./carryOver";
 import { replayLoad } from "./replayLoad";
+import { stripStagingGhosts } from "./stagingGhosts";
 import { advanceTickRate } from "./tickRate";
 import type {
   ConnStatus, KillFeedEntry, Mode, RecordingMeta, Snapshot, TeamState, ViewState,
@@ -315,13 +316,17 @@ export const useViewerStore = create<Store>((set) => ({
   ingestLive(snap) {
     set((s) => {
       const now = performance.now();
+      // Drop the origin-parked emplacement staging actors BOTH modes carry:
+      // old recordings are immutable and older live backends don't filter
+      // them yet — see stagingGhosts.ts. Same-reference when clean.
+      const cleaned = stripStagingGhosts(snap);
       // Repair transient gaps (missing players / null positions from
       // one-tick backend read failures) before the snap becomes
       // renderer-visible — see carryOver.ts. LIVE ONLY: replay frames are
       // the ground truth, and the wall-clock TTL is decoupled from replay
       // time, so running it in replay re-injects end-of-match ghosts when
       // you seek backward. Pass replay frames through untouched.
-      const patched = s.mode === "replay" ? snap : patchSnapshot(snap, now);
+      const patched = s.mode === "replay" ? cleaned : patchSnapshot(cleaned, now);
       // The Hz readout times TICK ADVANCES, not arrivals: a two-tier stream
       // hands us three position frames per snapshot, and timing those reported
       // the sampler's cadence in a field labelled as the reader's. tickRate.ts

@@ -251,6 +251,19 @@ follows [Semantic Versioning](https://semver.org/).
   framing as body bytes, and the viewer reported "Recording failed to load".
   The server now speaks HTTP/1.1 and closes each connection explicitly,
   keeping the one-request-per-connection lifecycle it always had.
+- Three vehicles nobody could ever ride were recorded in every frame of some
+  matches. Squad pre-spawns one instance of each emplacement gun its factions
+  could build - a ZiS-3, an emplaced ZU-23, an M2 tripod - and parks it at
+  the exact world origin until somebody builds one. The reader faithfully
+  recorded these staging actors as vehicles: team 0, full health, no seats,
+  sitting at (0,0,0) from the first frame to the last. World origin is inside
+  the play area on most maps, so the viewer drew them as a stack of phantom
+  icons mid-map. The snapshot now drops an unmanned vehicle parked at the
+  exact origin - a physics-settled vehicle never rests there, and the check
+  is per-tick, so the moment one is genuinely deployed it appears like any
+  other. Recordings already written are immutable and keep their ghosts, so
+  the viewer applies the same rule as frames enter its store - which cleans
+  the old replays and streams from older backends in the same stroke.
 
 ## [1.4.4] - 2026-08-19
 
