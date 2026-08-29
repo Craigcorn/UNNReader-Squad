@@ -38,11 +38,6 @@ class SampledEntities:
     full_tick: int
     players: tuple[tuple[int, str], ...]     # (ps_addr, key)
     vehicles: tuple[tuple[int, str], ...]    # (vh_addr, id_hex)
-    # Tracked in-flight projectiles (mortar/guided/smoke). Without these
-    # a missile's position only ever changed on full frames, so replay
-    # motion for the one entity class that moves the fastest stepped at
-    # the SLOWEST cadence while soldiers around it glided at 4 Hz.
-    projectiles: tuple[tuple[int, str], ...] = ()   # (p_addr, id_hex)
 
     @classmethod
     def from_snapshot(cls, snap: dict[str, Any]) -> SampledEntities:
@@ -58,15 +53,8 @@ class SampledEntities:
             addr = _hex_to_int(vid)
             if addr and vid:
                 vehicles.append((addr, str(vid)))
-        projectiles: list[tuple[int, str]] = []
-        for pr in snap.get("projectiles") or []:
-            pid = pr.get("id")
-            addr = _hex_to_int(pid)
-            if addr and pid:
-                projectiles.append((addr, str(pid)))
         return cls(full_tick=int(snap.get("tick") or 0),
-                   players=tuple(players), vehicles=tuple(vehicles),
-                   projectiles=tuple(projectiles))
+                   players=tuple(players), vehicles=tuple(vehicles))
 
 
 def _hex_to_int(h: Any) -> int | None:
@@ -190,22 +178,14 @@ def sample_positions(pm: ProcessMemory, paths: SnapshotPaths,
                 rec["team"] = tb[0]
         vehicles_out.append(rec)
 
-    # Projectiles: position only — no health, no yaw (the viewer derives
-    # a heading from motion). Same gates as vehicles: ClassPrivate must
-    # still resolve (the actor lives) and the position must be sane. A
-    # round that impacted or was freed between fulls simply drops out of
-    # the frame; the next full corrects the set.
-    projectiles_out: list[dict[str, Any]] = []
-    for p_addr, pid in entities.projectiles:
-        if not _class_ok(pm, p_addr):
-            continue
-        rpy = read_root_pos_yaw(pm, p_addr, paths)
-        pos = _sane_pos(rpy.get("position"))
-        if pos is None:
-            continue
-        projectiles_out.append({"id": pid, "x": pos["x"], "y": pos["y"],
-                                "z": pos.get("z")})
-
+    # Projectiles are deliberately NOT sampled. It was tried: on real
+    # 100-player matches 90-180 rounds are airborne at barrage peaks, so
+    # sampling them cost 2-7% of file size and out-read the entire player
+    # roster at exactly the busiest moments — and the server-side flight
+    # path of the one round whose steering would justify it (the wire-
+    # guided TOW) diverges from the firer's client anyway. The viewer
+    # smooths projectile motion between full frames instead
+    # (frontend replayReconstruct: interpolateProjectilesBetweenFulls).
     return {
         "t": "pos",
         "tick": tick,
@@ -213,5 +193,4 @@ def sample_positions(pm: ProcessMemory, paths: SnapshotPaths,
         "fullTick": entities.full_tick,
         "players": players_out,
         "vehicles": vehicles_out,
-        "projectiles": projectiles_out,
     }

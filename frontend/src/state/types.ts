@@ -474,6 +474,10 @@ export interface Snapshot {
   teams: TeamState[];
   squads: SquadState[];
   players: Player[];
+  // Set by the replay reconstructor on frames it builds from position
+  // lines (never present on the wire) — the load-time projectile
+  // smoothing pass uses it to tell synthesized frames from real fulls.
+  reconstructed?: boolean;
   vehicles: Vehicle[];
   captureZones: CaptureZone[];
   markers: Marker[];

@@ -1,6 +1,7 @@
 // Standalone unit test for two-tier replay reconstruction. Bundled with
 // esbuild + run under node — no framework (matches diff.test.mts).
 import {
+  interpolateProjectilesBetweenFulls,
   ReplayReconstructor,
   reconstructFromPosition,
   isPositionFrame,
@@ -194,6 +195,59 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
   const rec2: any = r.push(withoutPr);
   ok(rec2.projectiles === base.projectiles,
      "an old recording without the key shares the whole base array");
+}
+
+// Load-time projectile smoothing: reconstructed frames between two fulls
+// get positions interpolated on their own timestamps; a genuinely
+// sampled entry survives; a round absent from the next full holds; and
+// a single-tier stream (no reconstructed frames) is a no-op.
+{
+  const r = new ReplayReconstructor();
+  const a: any = full(1);   // ts ...:01
+  a.projectiles = [
+    { id: "0x9000", classShort: "BP_TOW_Proj_C",
+      position: { x: 0, y: 0, z: 0 } },
+    { id: "0x9001", classShort: "BP_Mortarround4_C",
+      position: { x: 500, y: 500, z: 500 } },   // absent from B — dies
+  ];
+  const frames: any[] = [];
+  frames.push(r.push(a));
+  frames.push(r.push(pos(2, [])));              // ts ...:02.5 — recon
+  const b: any = full(4);   // ts ...:04
+  b.projectiles = [
+    { id: "0x9000", classShort: "BP_TOW_Proj_C",
+      position: { x: 3000, y: 0, z: 300 } },
+  ];
+  frames.push(r.push(b));
+  interpolateProjectilesBetweenFulls(frames);
+  const rec = frames[1];
+  // (2.5 - 1) / (4 - 1) = 0.5
+  eq(rec.projectiles[0].position.x, 1500,
+     "recon projectile interpolated between the bracketing fulls");
+  eq(rec.projectiles[0].position.z, 150, "z interpolates too");
+  eq(rec.projectiles[1].position.x, 500,
+     "a round absent from the next full holds its last position");
+  ok(frames[0].projectiles[0].position.x === 0
+     && frames[2].projectiles[0].position.x === 3000,
+     "the fulls themselves are untouched");
+}
+{
+  // Real sampled data (a spliced, non-shared entry) wins over the pass.
+  const r = new ReplayReconstructor();
+  const a: any = full(1);
+  a.projectiles = [{ id: "0x9000", classShort: "BP_TOW_Proj_C",
+                     position: { x: 0, y: 0, z: 0 } }];
+  const frames: any[] = [r.push(a)];
+  const withPr: any = pos(2, []);
+  withPr.projectiles = [{ id: "0x9000", x: 42, y: 42, z: 42 }];
+  frames.push(r.push(withPr));
+  const b: any = full(4);
+  b.projectiles = [{ id: "0x9000", classShort: "BP_TOW_Proj_C",
+                     position: { x: 3000, y: 0, z: 300 } }];
+  frames.push(r.push(b));
+  interpolateProjectilesBetweenFulls(frames);
+  eq(frames[1].projectiles[0].position.x, 42,
+     "a genuinely sampled position is never overwritten");
 }
 
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);

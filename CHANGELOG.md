@@ -214,12 +214,32 @@ follows [Semantic Versioning](https://semver.org/).
   the tracker owns identity, trails and death, and motion belongs to the
   interpolator. The trail now spaces its points at least 25 m apart so a
   whole flight fits its buffer at any frame rate. What remained of the
-  original stutter had a data cause, not a viewer cause: position frames
-  carried players and vehicles but never projectiles, so a missile's
-  position only changed on full frames and the lerp had nothing to move
-  it between - the 4 Hz sampler now samples projectiles too, and
-  reconstruction splices them like everything else, so a missile flies
-  as smoothly as the soldier who fired it.
+  original stutter had a data cause: position frames carry players and
+  vehicles but not projectiles, so every reconstructed frame repeated
+  its base full's projectile positions and the render lerp stalled at
+  each one - a hitch at the position-frame cadence. Sampling projectiles
+  at 4 Hz was tried and REVERTED after measuring it against real
+  100-player recordings: 90-180 rounds airborne at barrage peaks cost
+  2-7% of file size and out-read the entire player roster at exactly the
+  busiest moments, for a round (the wire-guided TOW) whose server-side
+  path diverges from its firer anyway. The fix lives in the viewer
+  instead: once a replay is fully loaded, the bracketing full for every
+  reconstructed frame is known, so a load-time pass fills their
+  projectile positions by interpolating between the fulls on each
+  frame's own timestamp - the same straight segment the renderer already
+  draws, precomputed so the pair stream never stalls. Works on every
+  recording ever made, single-tier production files included, and costs
+  the recording nothing.
+- A mortar round detonated at the mortar pit seconds after launch - in
+  the viewer only, and only since the frozen-ghost rule landed. The rule
+  tested movement in X and Y with a metre of tolerance, but a round
+  fired near maximum elevation climbs almost vertically: under a metre
+  of drift per frame on the map while Z screams upward, so two frames in
+  a row read as "frozen" and the round was declared dead at the top of
+  its first second. Death is now what the recorder's own rule always
+  said: a BIT-IDENTICAL position in all three axes - a stopped actor
+  repeats its transform exactly, and a live round always differs
+  somewhere, if only in height.
 - A mortar round could steal a flying TOW's tracker - and with six rounds
   in the air beside one missile, they took turns. The tracker's
   nearest-neighbour fallback, inherited from the original module, matched

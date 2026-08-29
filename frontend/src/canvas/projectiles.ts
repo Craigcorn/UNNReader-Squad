@@ -102,6 +102,7 @@ interface Track {
   cls: string | null;       // classShort — NN may only pair like classes
   x: number;                // last displayed position (world units)
   y: number;
+  z: number | null;         // for the freeze test — see below
   heading: number | null;   // screen-space radians, +x axis baseline
   lastSeenAt: number;       // wall-clock ms
   lastSeenTick: number | null;  // snap.tick when last present
@@ -216,7 +217,7 @@ export function drawProjectilesAndImpacts(
     const kind = r.kind ?? "mortar";
     const track: Track = prev ?? {
       cls: r.classShort ?? null,
-      x: r.position.x, y: r.position.y,
+      x: r.position.x, y: r.position.y, z: r.position.z ?? null,
       heading: null, lastSeenAt: now, lastSeenTick: tick, kind,
       team: r.team ?? null, path: [], lastTick: tick, frozenTicks: 0,
       dead: false, diedAt: 0,
@@ -226,6 +227,16 @@ export function drawProjectilesAndImpacts(
     const dxU = r.position.x - track.x;
     const dyU = r.position.y - track.y;
     const movedSq = prev ? dxU * dxU + dyU * dyU : Infinity;
+    // Death is BIT-IDENTICAL position in all three axes — a stopped
+    // actor repeats its transform exactly. Anything looser misreads a
+    // live round: a mortar fired near max elevation climbs almost
+    // vertically, moving well under a metre in XY between frames while
+    // Z screams upward — a 2-D metre threshold declared those dead
+    // seconds after launch and rang the impact at the mortar pit.
+    const identical = prev
+      && r.position.x === track.x
+      && r.position.y === track.y
+      && (r.position.z ?? null) === track.z;
 
     if (prev && movedSq > SAMPLE_JUMP_SQ) {
       // A seek, not flight — restart history at the new spot.
@@ -250,18 +261,15 @@ export function drawProjectilesAndImpacts(
     }
 
     // Frozen-ghost detection — only when the tick actually advanced.
-    // The interpolated stream moves every rAF while the round flies, so
-    // an advance with sub-metre movement means the underlying frames
-    // hold an identical position: the actor stopped simulating.
     const advanced = tick != null
       && (track.lastTick == null || tick > track.lastTick);
     if (prev && advanced) {
-      if (movedSq <= HEADING_MIN_SQ && r.isExplosive && !r.hasImpacted) {
+      if (identical && r.isExplosive && !r.hasImpacted) {
         track.frozenTicks += 1;
         if (track.frozenTicks >= FROZEN_DEAD_TICKS) {
           markDead(sig, track, r.position.x, r.position.y, now);
         }
-      } else if (movedSq > HEADING_MIN_SQ) {
+      } else if (!identical) {
         track.frozenTicks = 0;
       }
     }
@@ -284,6 +292,7 @@ export function drawProjectilesAndImpacts(
 
     track.x = r.position.x;
     track.y = r.position.y;
+    track.z = r.position.z ?? null;
     track.lastSeenAt = now;
     if (r.team != null) track.team = r.team;
 

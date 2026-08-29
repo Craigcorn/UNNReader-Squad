@@ -1,7 +1,11 @@
 // Thin fetch helpers for /api/recordings + /api/recording/<id>.
 
 import type { RecordingMeta, Snapshot } from "../state/types";
-import { ReplayReconstructor, type RecordingLine } from "../state/replayReconstruct";
+import {
+  interpolateProjectilesBetweenFulls,
+  ReplayReconstructor,
+  type RecordingLine,
+} from "../state/replayReconstruct";
 import {
   isPackedHeader,
   REPLAY_FORMAT_VERSION,
@@ -73,6 +77,7 @@ export async function fetchRecordingFrames(
   if (!reader) {
     // No streaming support — fall back to a single blocking read.
     for (const line of (await r.text()).split("\n")) pushLine(line);
+    interpolateProjectilesBetweenFulls(out);
     onProgress?.(out.length);
     return out;
   }
@@ -97,6 +102,10 @@ export async function fetchRecordingFrames(
   }
   buf += decoder.decode();
   pushLine(buf.trim());
+  // With the whole timeline loaded, the bracketing full for every
+  // reconstructed frame is known — fill in projectile motion so the
+  // pair stream never stalls at position-frame boundaries.
+  interpolateProjectilesBetweenFulls(out);
   onProgress?.(out.length);
   return out;
 }
