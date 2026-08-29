@@ -872,7 +872,9 @@ class CheatDetect(Plugin):
                 # why this path exists at all.
                 continue
             p = by_name.get(firer)
-            eos = p.get("eosId") if p else None
+            if not p:
+                continue
+            eos = p.get("eosId")
             if not eos:
                 continue
             held, hmags = _held_weapon(p)
