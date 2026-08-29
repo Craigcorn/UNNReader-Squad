@@ -192,6 +192,22 @@ UNRECORDED_ENDING_REASON = (
     "before the recorder started keeping its closing frames are all like this; "
     "the exclusion expires by itself the moment a match is recorded with them")
 
+# A match whose archive holds MORE THAN ONE recording was interrupted by an
+# agent restart mid-match. A seat session open across that seam cannot come out
+# the same on both sides: the live writer's open session died with the old
+# process (its beginning was never flushed) and the fresh process opened a new
+# one at its own first tick — while the replay, reading both recordings as one
+# stream, reconstructs the stint from its true entry frame. The rows disagree
+# because live LOST data at the seam; the replay's answer is the more complete
+# one. Forgiven only for vehicle_session rows, only in seamed matches, and the
+# report counts every row it forgives.
+SEAM_REASON = (
+    "this match's archive is split across more than one recording — the agent "
+    "restarted mid-match — and a seat session open across that seam is lost "
+    "territory for the live writer (its open session died unflushed with the "
+    "old process) while the replay reconstructs the stint whole from both "
+    "files. The replay's row is the more complete answer, not a bug")
+
 
 # --------------------------------------------------------------------------
 # Scope — which rows the archive is allowed to be asked about
@@ -214,6 +230,10 @@ class Scope:
     # they were played is still compared; only the columns that describe the
     # ending are forgiven. See UNRECORDED_ENDING_COLUMNS.
     endings_unrecorded: set[str] = field(default_factory=set)
+    # In-scope matches whose archive holds more than one recording — an agent
+    # restart split them mid-match. Seat sessions spanning the seam are
+    # forgiven (rows, not columns). See SEAM_REASON.
+    seamed_matches: set[str] = field(default_factory=set)
 
     def forgives(self, table: str, column: str, spec: "TableSpec",
                  live_row: dict, replay_row: dict) -> Optional[str]:
@@ -424,6 +444,8 @@ def build_scope(live: sqlite3.Connection, idx: ArchiveIndex) -> Scope:
         scope.in_scope_matches.add(mid)
         if not idx.endings_recorded.get(mid, False):
             scope.endings_unrecorded.add(mid)
+        if len(idx.eligible.get(mid, [])) > 1:
+            scope.seamed_matches.add(mid)
 
     # A player row aggregates every match that account ever played. It can only
     # be reproduced when all of them are in scope.
@@ -675,6 +697,16 @@ def diff_databases(live: sqlite3.Connection, replay: sqlite3.Connection,
                 tr.unscoped_rows += 1
                 continue
             tr.scoped_rows += 1
+            if k not in replay_rows or k not in live_rows:
+                # Seat sessions in a seamed match: the live writer lost the
+                # open session at the restart, the replay reconstructed it
+                # whole — a row-level fact about the seam, not a bug.
+                if (table == "vehicle_session"
+                        and str(row.get(spec.scope_col))
+                        in scope.seamed_matches):
+                    tr.forgiven[("rows", SEAM_REASON)] = \
+                        tr.forgiven.get(("rows", SEAM_REASON), 0) + 1
+                    continue
             if k not in replay_rows:
                 tr.diffs.append(Diff(
                     table=table, kind="missing", key=k, column=None,
@@ -837,6 +869,13 @@ def render_text(report: ParityReport, *, max_diffs: int = 40) -> str:
           f"{len(scope.endings_unrecorded)} match(es) with no recorded ending: "
           + ", ".join(f"{t}.{c}" for t, cols in
                       sorted(UNRECORDED_ENDING_COLUMNS.items()) for c in cols))
+    seam_rows = _forgiven_by(report, SEAM_REASON)
+    if seam_rows:
+        w(f"  vehicle_session rows — forgave {seam_rows} row(s) across "
+          f"{len(scope.seamed_matches)} match(es) split by a mid-match "
+          f"agent restart")
+        for line in _wrap(SEAM_REASON, 62):
+            w(f"      {line}")
     w("")
 
     w("tables")
