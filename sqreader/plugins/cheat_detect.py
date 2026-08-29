@@ -401,6 +401,17 @@ class CheatDetect(Plugin):
         # impossible.
         "noreload_smallmag_capacity": 2,
         "noreload_strikes": 2,
+        # Midcap instant rule: for weapons whose CLASS-WIDE observed capacity
+        # sits between smallmag and this (pistols, bolt-actions, the QLZ-87
+        # drum), two full magazines gone inside one interval shorter than a
+        # reload is impossible — it requires a mid-interval reload plus
+        # continued fire in less time than the reload takes. Class-wide,
+        # because one player's low-ammo reading must never reclassify a rifle
+        # as a small weapon: the census takes the maximum magazine any player
+        # has shown for the class, and the rule stays disarmed until the class
+        # has been seen enough times for that maximum to be trusted.
+        "noreload_midcap_max": 9,
+        "noreload_class_census_min_samples": 10,
 
         # ---- remote mine (EXPERIMENTAL, off) ----
         # A mine that materializes far from the body that placed it. Legitimate
@@ -441,6 +452,14 @@ class CheatDetect(Plugin):
         self._players: dict[str, _PlayerState] = {}
         self._seen_events: set[tuple] = set()
         self._last_cache_resets: Optional[int] = None
+        # Weapon-class capacity census: class -> (max single-magazine value
+        # ever observed on ANY player, samples seen). One player reading low
+        # on ammo must never reclassify a rifle as a small weapon, so capacity
+        # classification for the midcap rule uses the class-wide maximum, and
+        # only once the class has been sampled enough to trust it. Weapon
+        # classes are game-static, so this survives match transitions;
+        # bounded below against pathological class churn.
+        self._class_cap: dict[str, tuple[int, int]] = {}
         # World-object ids carried over from the previous tick. `None` means
         # "we have not seen a previous tick yet" — distinct from an empty set,
         # because on the first tick after attaching, every object in the world
@@ -907,6 +926,8 @@ class CheatDetect(Plugin):
         min_rounds = int(self.config["noreload_min_rounds"])
         small_cap = int(self.config["noreload_smallmag_capacity"])
         need_strikes = int(self.config["noreload_strikes"])
+        midcap_max = int(self.config["noreload_midcap_max"])
+        census_min = int(self.config["noreload_class_census_min_samples"])
         if elapsed is None or max_rps <= 0 or reload_min <= 0:
             return                       # no game clock, nothing to measure
 
@@ -917,6 +938,14 @@ class CheatDetect(Plugin):
             held, mags = _held_weapon(p)
             if not held or mags is None:
                 continue                 # nothing readable — measure nothing
+            # Class-wide capacity census (see __init__): the midcap rule must
+            # classify a weapon by the biggest magazine ANY player has shown
+            # for its class, never by one player's possibly-low reading.
+            mm = _mag_max(mags)
+            ccap, cn = self._class_cap.get(held, (0, 0))
+            self._class_cap[held] = (max(ccap, mm), cn + 1)
+            if len(self._class_cap) > 512:
+                self._class_cap.clear()
             slot = st.rounds
             # A different gun's pool, a different body, a seat, or a reader
             # that just re-read the world: none of those are comparable to the
@@ -943,10 +972,47 @@ class CheatDetect(Plugin):
 
             if cap < small_cap:
                 # Single-shot path: launchers and grenade launchers, where the
-                # windowed model is structurally blind. Two rounds gone inside
-                # one tick interval means two shots closer together than one
-                # mandatory reload, and the allowance grows with the interval
-                # so a slow sampler cannot manufacture a strike.
+                # windowed model is structurally blind. Two complementary
+                # rules, both resting on the same fact — every round costs a
+                # full reload:
+                #
+                #   RATE: a paced cheater (a rocket every 2-3 s) never shows
+                #   two rounds in one interval at a 1 Hz sample — one per
+                #   interval, every interval — so the rolling window judges
+                #   the rate instead. The legal ceiling over any window is
+                #   1 + window/reload, and NO margin multiplier is stacked on
+                #   top: the 3 s reload floor is itself the margin, real
+                #   launcher reloads running 5-8 s, so the ceiling already
+                #   sits near double what honest play can reach.
+                #
+                #   SPACING: the flagrant case — two rounds gone inside one
+                #   interval shorter than a reload; the allowance grows with
+                #   the interval so a slow sampler cannot manufacture a
+                #   strike.
+                win = slot["window"]
+                win.append((float(elapsed), drop))
+                cutoff = float(elapsed) - window_s
+                while win and win[0][0] < cutoff:
+                    win.pop(0)
+                consumed = sum(d for _t, d in win)
+                rate_ceiling = 1.0 + window_s / reload_min
+                if consumed > rate_ceiling:
+                    if self._cooled_down(st, "no_reload", ctx.now):
+                        self.alert(
+                            ctx, alert_type="no_reload", eos_id=eos,
+                            player_name=p.get("name"), confidence=0.7,
+                            details={
+                                "weapon": held,
+                                "path": "single-shot rate",
+                                "roundsConsumed": consumed,
+                                "windowSec": window_s,
+                                "ceiling": round(rate_ceiling, 1),
+                                "capacityEstimate": cap,
+                                "reloadMinSec": reload_min,
+                            })
+                    slot["window"] = []
+                    slot["strikes"] = 0
+                    continue
                 allowed = 2 + int(dt // reload_min)
                 if drop < allowed:
                     continue
@@ -968,6 +1034,37 @@ class CheatDetect(Plugin):
                             "reloadMinSec": reload_min,
                         })
                 slot["strikes"] = 0
+                continue
+
+            # Midcap instant rule: pistols, bolt-actions and small drums —
+            # capacities the windowed ceiling cannot reach and the spacing
+            # premise does not fit. What IS impossible for them: two full
+            # magazines gone inside one interval shorter than a reload, which
+            # would require a mid-interval reload plus continued fire in less
+            # time than the reload takes. Capacity comes from the CLASS
+            # census, never this player's own reading — one rifle read at low
+            # ammo must not be reclassified as a pistol — and the rule stays
+            # disarmed until the class has been sampled enough for its
+            # maximum to be trusted.
+            ccap, cn = self._class_cap.get(held, (0, 0))
+            if small_cap <= ccap <= midcap_max and cn >= census_min:
+                if dt <= reload_min and drop >= 2 * ccap:
+                    slot["strikes"] = int(slot["strikes"]) + 1
+                    if slot["strikes"] >= need_strikes:
+                        if self._cooled_down(st, "no_reload", ctx.now):
+                            self.alert(
+                                ctx, alert_type="no_reload", eos_id=eos,
+                                player_name=p.get("name"), confidence=0.7,
+                                details={
+                                    "weapon": held,
+                                    "path": "double-magazine interval",
+                                    "roundsConsumed": drop,
+                                    "dtSec": round(dt, 2),
+                                    "classCapacity": ccap,
+                                    "strikes": slot["strikes"],
+                                    "reloadMinSec": reload_min,
+                                })
+                        slot["strikes"] = 0
                 continue
 
             # Windowed path: magazine weapons, where reloads are constant and

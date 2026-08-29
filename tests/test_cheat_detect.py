@@ -829,6 +829,69 @@ def test_one_launcher_round_at_a_time_never_flags():
     assert sink.rows == []
 
 
+def test_a_paced_launcher_cheater_is_caught_by_the_rate_window():
+    """One rocket per tick: never two in one interval, so spacing is blind —
+    the exact miss Craig predicted at 1 Hz. Against the rolling ceiling of
+    1 + 30/3 = 11 rounds per 30 s, a round every tick crosses within half a
+    minute at either tick rate."""
+    for tick_sec in (2.0, 1.0):
+        n = int(round(32.0 / tick_sec))
+        mgr, sink = _run(NORELOAD_ON)
+        mags = [[1] * max(0, n - i) for i in range(n)]
+        _burn(mgr, mags=mags, weapon="BP_M320_HE_C", tick_sec=tick_sec)
+        assert sink.types() == ["no_reload"], \
+            f"paced cheater slipped a {tick_sec:.0f}s tick"
+        d = sink.rows[0]["details"]
+        assert d["path"] == "single-shot rate"
+        assert d["roundsConsumed"] > d["ceiling"]
+
+
+def test_a_launcher_at_real_reload_pace_never_flags():
+    """A round every 6 s — brisk, honest play against a real 5-8 s reload —
+    lands at ~6 rounds per 30 s window, far under the ceiling of 11. The 3 s
+    reload floor doubles as the margin; no multiplier is stacked on it."""
+    mgr, sink = _run(NORELOAD_ON)
+    mags, total = [], 12
+    for i in range(18):                     # 36 s at 2 s ticks
+        if i and i % 3 == 0:
+            total -= 1
+        mags.append([1] * total)
+    _burn(mgr, mags=mags, weapon="BP_M320_HE_C")
+    assert sink.rows == []
+
+
+def test_a_pistol_emptying_two_magazines_in_one_breath_flags():
+    """Midcap instant rule: class capacity 8 with a matured census, then 16
+    rounds inside one 2 s interval, twice — each needing a mid-interval
+    reload plus continued fire in under 3 s."""
+    mgr, sink = _run(NORELOAD_ON)
+    pools = [[8, 8, 8, 8, 8, 8]] * 12       # census matures; no firing
+    pools += [[8, 8, 8, 8], [8, 8, 8, 8], [8, 8]]
+    _burn(mgr, mags=pools, weapon="BP_Makarov_C")
+    assert sink.types() == ["no_reload"]
+    d = sink.rows[0]["details"]
+    assert d["path"] == "double-magazine interval"
+    assert d["classCapacity"] == 8
+
+
+def test_the_class_census_disarms_midcap_for_rifles():
+    """Bob's full M4 teaches the census the class holds 30. Alice, same
+    class, reads low on ammo ([5, 3, 2]) and then burns all 10 in one tick —
+    ordinary automatic fire, but 10 >= 2x her own low reading. The class-wide
+    census is what keeps her from being judged as a pistol."""
+    mgr, sink = _run(NORELOAD_ON)
+    for i in range(14):
+        alice = [5, 3, 2] if i < 12 else [0, 0, 0]
+        mgr.run_tick(_snap(
+            [_player(eos="eos-1", name="Alice", weapon="BP_M4A1_C",
+                     mags=alice, addr="0xA"),
+             _player(eos="eos-2", name="Bob", weapon="BP_M4A1_C",
+                     mags=[30, 30, 30], addr="0xB")],
+            tick=1 + i, elapsed=2.0 * i, vehicles=(), cache_resets=0),
+            tick=1 + i, now=1000.0 + 2.0 * i)
+    assert sink.rows == []
+
+
 def test_a_slower_sampler_widens_the_launcher_allowance():
     """dt is game-clock seconds, so at a 7 s interval two shots really could
     have fit — and the rule says so instead of accusing."""

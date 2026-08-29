@@ -36,8 +36,15 @@ follows [Semantic Versioning](https://semver.org/).
   total and reloading does not, so a drop is verified fire volume, and the
   ceiling is derived from the mandatory dump-then-reload cycle rather than
   being a flat multiple of the magazine - a flat one would have accused a
-  good machine-gunner. Launchers get a separate spacing rule, because a
-  one-round magazine can never reach a rounds-per-window threshold.
+  good machine-gunner. Launchers get two rules of their own: flagrant spam
+  is two rounds inside one interval, and the paced cheater who never shows
+  two together - a rocket every couple of seconds, invisible to any
+  single-interval test at 1 Hz - is caught on rate, the legal ceiling being
+  one round per reload with the deliberately-fast reload floor serving as
+  the margin. Pistols, bolt-actions and small drums get the one thing that
+  is impossible for them: two full magazines gone in less time than a
+  reload - classified by a class-wide capacity census, so one rifle read
+  low on ammunition can never be mistaken for a pistol.
   `remote_mine` watches for a mine appearing somewhere its placer's body is
   not; placement is arm's reach, so 50 m of budget covers the drift between
   the placement and the tick that sampled it. `fire_no_ammo` joins them:
