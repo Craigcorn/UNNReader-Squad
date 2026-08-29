@@ -5,7 +5,7 @@ drafted 2026-08-28 · **read "Program state" below first when resuming**
 
 ## Program state — as of 2026-08-29
 
-Everything here is on `Replay-Improvements` (through `870328b`) and deployed
+Everything here is on `Replay-Improvements` (through `03e74ff`) and deployed
 to the test box unless noted. Detail lives in each plan doc and the
 changelog's `[Unreleased]`; reports naming players live in
 `C:\Users\CRAIG\Documents\UNN\Misc\` (never the repo).
@@ -32,6 +32,16 @@ changelog's `[Unreleased]`; reports naming players live in
   held one-round weapon), remote_mine — plus the default three. Validated:
   zero false accusations over 24 recordings. Alerts are **DB-only**
   (`alert_webhook: null`) until Discord is set up.
+- Emplacement crew capture (2026-08-29, live-verified with a manned TOW):
+  a built mortar/TOW/HMG gun is an `SQDeployableVehicle` — a real vehicle
+  whose seats name the crew — and was being discarded by the junk filter's
+  MaxHealth-0 rule every tick. Guns now record with `owningDeployable`
+  joining them to the baseplate (placer, build state); origin-parked
+  staging-pool actors stay filtered (they carry no baseplate link), and
+  the viewer strips the three that leaked into old recordings. Standing
+  consequence: stats vehicle boards accrue emplacement seat-time from the
+  fix onward. Gun exists only while fully built (partial dig-down
+  despawns it).
 
 **Open decisions (owner: Craig unless noted):**
 
