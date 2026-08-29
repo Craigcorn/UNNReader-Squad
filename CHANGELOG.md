@@ -264,6 +264,26 @@ follows [Semantic Versioning](https://semver.org/).
   other. Recordings already written are immutable and keep their ghosts, so
   the viewer applies the same rule as frames enter its store - which cleans
   the old replays and streams from older backends in the same stroke.
+- The crew of every built emplacement was read perfectly and thrown away,
+  every tick. The gun a fully built mortar, TOW or HMG bunker spawns is a
+  real vehicle in Squad's engine - ordinary seat machinery, occupant name
+  and id included, plus a pointer back to the baseplate deployable it
+  belongs to - and the reader was reading all of it. But these guns carry
+  MaxHealth 0 by design (the baseplate owns the health), and MaxHealth 0 is
+  the signature the vehicle junk filter uses to recognise a freed memory
+  slot, so every gun was discarded on the way to the snapshot and no one
+  who ever manned an emplacement appears at one in any recording. Verified
+  live with a player on a TOW: the seat named them in full while the filter
+  ate the record. The gun's baseplate link is now read (by reflection, with
+  the live-verified offset as fallback) and recorded as `owningDeployable`,
+  and a vehicle that carries it is exempt from the MaxHealth rule - that
+  link is exactly what a freed slot cannot have. Emplacement guns now
+  appear as vehicles: crew in the seat panel, joinable to the deployable
+  that carries the placer and build state. The pool actors Squad parks at
+  world origin carry no baseplate link, so the origin rule above still
+  removes them; and because the guns flow through the ordinary vehicle
+  pipeline, the stats vehicle boards begin accruing emplacement seat-time
+  under the gun's class name from here on.
 
 ## [1.4.4] - 2026-08-19
 

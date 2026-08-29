@@ -252,6 +252,14 @@ PROJECTILE_BASE_NAMES = (
 # v10.4.1 (SQVehicle.VehicleSeats @+0x8c8, inner ObjectProperty).
 SQ_VEHICLE_SEATS_OFFSET = 0x8c8
 
+# SQDeployableVehicle.OwningDeployable — the gun actor a fully built
+# emplacement spawns (mortar tube, TOW tripod, HMG bunker gun, …) is a
+# real SQVehicle whose ordinary seat machinery names its crew, and this
+# pointer joins it back to the baseplate SQDeployable it belongs to.
+# Fallback for reflection; verified via dump_struct_layout + a live
+# manned TOW on Squad v10.5.3 (2026-08-29).
+SQ_DEPLOYABLE_VEHICLE_OWNING_OFF = 0x0b18
+
 # SQVehicleSeatComponent layout (4-level chain: SQVehicleSeatComponent
 # → USceneComponent → UActorComponent → UObject, size=800). Six own
 # props identify the seat's role + occupant:
@@ -663,6 +671,9 @@ class SnapshotCaches:
     is_marker: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQDeployable?
     is_deployable: dict[int, SubclassCacheValue] = field(default_factory=dict)
+    # class_addr -> is-subclass-of-SQDeployableVehicle? (emplacement guns)
+    is_deployable_vehicle: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -1038,6 +1049,13 @@ class SnapshotPaths:
     # ON that component's class. Reflected by name because the Squad-Replay
     # reader's hardcoded 0x03FC/0x1024 point at a config float on this build.
     soldier_movement_offsets: dict[str, int] = field(default_factory=dict)
+    # ----- Emplacement guns (SQDeployableVehicle) -----
+    # The gun a fully built emplacement spawns is an SQVehicle subclass; its
+    # OwningDeployable pointer joins it to the baseplate deployable. Class
+    # address 0 when not loaded; the offset is reflected with the verified
+    # module constant as fallback.
+    sq_deployable_vehicle_class: int = 0
+    dv_owning_deployable_off: int = SQ_DEPLOYABLE_VEHICLE_OWNING_OFF
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1096,6 +1114,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # SQSoldierMovement — the character movement component that holds the
         # real sprint Stamina/StaminaMax floats (two-hop off the soldier).
         "SQSoldierMovement": "Class",
+        # SQDeployableVehicle — the gun a fully built emplacement spawns
+        # (its OwningDeployable pointer joins gun to baseplate).
+        "SQDeployableVehicle": "Class",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
@@ -1201,6 +1222,15 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         proj_layout["DamageInstigatorController"].offset
         if "DamageInstigatorController" in proj_layout
         else PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET)
+    # SQDeployableVehicle.OwningDeployable — reflected like the projectile
+    # field above, with the live-verified constant as fallback.
+    sq_deployable_vehicle_class_addr = _addr("SQDeployableVehicle")
+    dv_layout = (get_class_layout(pm, sq_deployable_vehicle_class_addr, alloc)
+                 if sq_deployable_vehicle_class_addr else {})
+    dv_owning_deployable_off = (
+        dv_layout["OwningDeployable"].offset
+        if "OwningDeployable" in dv_layout
+        else SQ_DEPLOYABLE_VEHICLE_OWNING_OFF)
     return SnapshotPaths(
         sq_player_state_class=sq_player_state_class_addr,
         sq_soldier_class=sq_soldier_class_addr,
@@ -1225,6 +1255,8 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         pc_playerstate_off=pc_playerstate_off,
         pc_voice_channel_off=pc_voice_channel_off,
         projectile_instigator_off=projectile_instigator_off,
+        sq_deployable_vehicle_class=sq_deployable_vehicle_class_addr,
+        dv_owning_deployable_off=dv_owning_deployable_off,
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -3865,6 +3897,24 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                      caches=caches)
         for vh_addr, cls_addr in vehicles_raw
     ]
+    # Emplacement guns — SQDeployableVehicle subclasses (a built mortar's
+    # tube, a TOW tripod, an HMG bunker gun). Attach the baseplate link so
+    # consumers can join gun -> deployable -> placer. The junk filter below
+    # also keys on it: these guns carry MaxHealth 0 by design (the health
+    # lives on the baseplate), which is otherwise the freed-slot signature
+    # — the reason no crewed emplacement ever reached a recording.
+    if paths.sq_deployable_vehicle_class:
+        is_dv_cache = caches.is_deployable_vehicle
+        for v, (vh_addr, cls_addr) in zip(vehicles, vehicles_raw,
+                                          strict=True):
+            if not _is_subclass_of(pm, cls_addr,
+                                   paths.sq_deployable_vehicle_class,
+                                   is_dv_cache, _subgen):
+                continue
+            ob = pm.try_read(vh_addr + paths.dv_owning_deployable_off, 8)
+            own = struct.unpack("<Q", ob)[0] if ob and len(ob) == 8 else 0
+            if own:
+                v["owningDeployable"] = f"{own:#x}"
     # Junk filter for vehicles — same pattern as deployables. Freed
     # vehicle slots routinely read back with:
     #   - classShort = None (class FName couldn't resolve)
@@ -3878,18 +3928,25 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     # Also dropped: emplacement staging actors. Squad pre-spawns one
     # instance of each emplacement gun class the match's factions could
     # build (ZiS-3, emplaced ZU-23, M2 tripod, …) and parks it at the
-    # exact world origin — team 0, full health, no seat components,
-    # never visible to a player. World origin sits INSIDE the play area
-    # on most maps, so recording these painted a stack of phantom icons
-    # mid-map. A physics-settled vehicle never rests at exactly (0,0,0);
-    # the check is per-tick and keeps any occupied actor, so the moment
-    # one is genuinely deployed (moves, or somehow seats a player while
-    # still at origin) it enters the snapshot like any other vehicle.
+    # exact world origin — team 0, no owning deployable, no seat
+    # components, never visible to a player. World origin sits INSIDE
+    # the play area on most maps, so recording these painted a stack of
+    # phantom icons mid-map. A physics-settled vehicle never rests at
+    # exactly (0,0,0); the check is per-tick and keeps any occupied
+    # actor, so the moment one is genuinely deployed (moves, or somehow
+    # seats a player while still at origin) it enters the snapshot like
+    # any other vehicle.
+    #
+    # NOT dropped: a deployed emplacement gun. It carries MaxHealth 0 by
+    # design (the baseplate owns the health), which is otherwise the
+    # freed-slot signature — its live OwningDeployable link is what
+    # distinguishes a real gun from a freed slot.
     def _is_junk_vehicle(v: dict[str, Any]) -> bool:
         if not v.get("classShort"):
             return True
         mh = v.get("maxHealth")
-        if mh is None or mh <= 0 or mh > 1e6:
+        if ((mh is None or mh <= 0 or mh > 1e6)
+                and not v.get("owningDeployable")):
             return True
         pos = v.get("position")
         if not pos:

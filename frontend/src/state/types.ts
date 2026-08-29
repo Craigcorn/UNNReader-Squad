@@ -117,6 +117,10 @@ export interface Vehicle {
   kind?: string;
   faction?: string[];
   lastDamager?: { addr: string; name: string | null; class: string | null };
+  // Emplacement guns only (SQDeployableVehicle): the id of the baseplate
+  // deployable this gun belongs to — joins a manned mortar/TOW/HMG to the
+  // deployable record that carries its placer and build state.
+  owningDeployable?: string;
   seats?: VehicleSeat[];
   // Phase 2B additions — populated by backend reads of SQVehicle's
   // VehicleComponents / VehicleTurrets / CachedVehicleEngine fields.
