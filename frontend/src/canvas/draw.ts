@@ -937,8 +937,21 @@ function vehicleSquadNumber(v: Vehicle,
 function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
                       view: ViewState, cs: CanvasSize,
                       showAllNumbers: boolean) {
+  // Emplacement guns report SQPawn.Team from their OCCUPANT (0 while
+  // unmanned), so an unmanned gun would draw neutral. The baseplate
+  // deployable carries true ownership — join it for the icon tint.
+  let depTeams: Map<string, number | null> | null = null;
+  for (const v of snap.vehicles ?? []) {
+    if (v.owningDeployable) {
+      depTeams = new Map((snap.deployables ?? []).map(
+        (d) => [d.id, d.team]));
+      break;
+    }
+  }
   for (const v of snap.vehicles ?? []) {
     if (!v.position) continue;
+    const team = (v.owningDeployable
+      ? depTeams?.get(v.owningDeployable) : null) ?? v.team;
     const [x, y] = worldToScreen(view, cs, v.position.x, v.position.y);
     // UE yaw: 0° = +X (east / right). Squad's stock minimap PNGs are
     // drawn nose-UP (top of image = front of vehicle), so a +90° (π/2)
@@ -972,10 +985,12 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
     }
 
     if (ready) {
-      drawVehicleBadge(ctx, x, y, yawIcon, size, teamColor(v.team), vehImg!,
+      drawVehicleBadge(ctx, x, y, yawIcon, size, teamColor(team), vehImg!,
                        turretImg, turretYawIcon);
       // Attached / parked-on-another-actor cue: thin white outer ring.
-      if (v.attached) {
+      // Not for emplacement guns — always bolted to their baseplate,
+      // so the ring would be permanent noise on every one of them.
+      if (v.attached && !v.owningDeployable) {
         ctx.beginPath();
         ctx.arc(x, y, size * 0.55, 0, 2 * Math.PI);
         ctx.strokeStyle = "#fff";
@@ -996,10 +1011,10 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
     ctx.lineTo(-ts * 0.7, ts * 0.6);
     ctx.lineTo(-ts * 0.7, -ts * 0.6);
     ctx.closePath();
-    ctx.fillStyle = teamColor(v.team);
+    ctx.fillStyle = teamColor(team);
     ctx.fill();
     ctx.lineWidth = 1.2 * cs.dpr;
-    ctx.strokeStyle = v.attached ? "#fff" : "#0e1116";
+    ctx.strokeStyle = (v.attached && !v.owningDeployable) ? "#fff" : "#0e1116";
     ctx.stroke();
     ctx.restore();
   }

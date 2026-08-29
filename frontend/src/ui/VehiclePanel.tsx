@@ -204,8 +204,14 @@ export function VehiclePanel() {
     );
   }
 
-  const hp = v.health ?? 0;
-  const hpMax = v.maxHealth ?? 0;
+  // An emplacement gun carries MaxHealth 0 by design — the baseplate
+  // deployable owns the health — so its own numbers would render as
+  // "500/0 · 0%". Show the structure's health through the join instead.
+  const base = v.owningDeployable
+    ? (snap?.deployables ?? []).find((d) => d.id === v.owningDeployable)
+    : undefined;
+  const hp = (base ? base.health : v.health) ?? 0;
+  const hpMax = (base ? base.maxHealth : v.maxHealth) ?? 0;
   const hpPct = hpMax > 0 ? Math.max(0, Math.min(100, (hp / hpMax) * 100)) : 0;
   const hpColor = hpPct > 50 ? "var(--good)"
                  : hpPct > 25 ? "var(--warn)"
@@ -248,7 +254,10 @@ export function VehiclePanel() {
     <div id="vehicle-panel">
       <header>
         <h2>
-          <span className="dot" style={{ background: teamColor(v.team) }} />
+          {/* An unmanned emplacement gun reports team 0 (SQPawn.Team follows
+              the occupant) — the baseplate carries true ownership. */}
+          <span className="dot"
+                style={{ background: teamColor((base ?? v).team) }} />
           {vehicleDisplayName(v.classShort)}
         </h2>
         <div className="vp-head-actions">
@@ -266,7 +275,7 @@ export function VehiclePanel() {
           return photoUrl ? <VehiclePhoto key={photoUrl} url={photoUrl} /> : null;
         })()}
         <div className="meta">
-          <span>Team: <b>{v.team ?? "—"}</b></span>
+          <span>Team: <b>{(base ?? v).team ?? "—"}</b></span>
           <span>Status: <b className={alive ? "alive" : "dead"}>
             {alive ? "Intact" : "Destroyed"}
           </b></span>
@@ -282,9 +291,13 @@ export function VehiclePanel() {
           <span className="hp-num">{fmtInt(hp)}/{fmtInt(hpMax)}</span>
         </div>
 
-        {v.attached && (
+        {base ? (
+          // Every emplacement gun is bolted to its baseplate, so the generic
+          // attached/parked cue would show permanently and mean nothing here.
+          <div className="note">emplacement gun — health is the structure's</div>
+        ) : v.attached ? (
           <div className="note">attached to another object / parked</div>
-        )}
+        ) : null}
         {v.lastDamager && (
           <div className="note">last hit by: {v.lastDamager.name ?? "?"}</div>
         )}

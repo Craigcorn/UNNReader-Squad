@@ -31,10 +31,17 @@ function body(hit: Hit, snap: Snapshot | null) {
     case "vehicle": {
       const e = hit.hit.e;
       const passengers = passengersOf(snap, e);
+      // Emplacement gun: MaxHealth 0 by design — the baseplate deployable
+      // owns the health, so show the structure's numbers through the join.
+      const base = e.owningDeployable
+        ? (snap?.deployables ?? []).find((d) => d.id === e.owningDeployable)
+        : undefined;
       return <>
-        {dot(e.team)}<b>{vehicleDisplayName(e.classShort)}</b>
-        <br />HP {fmtInt(e.health)} / {fmtInt(e.maxHealth)}
-        {e.attached && <><br /><span style={{ opacity: .6 }}>attached</span></>}
+        {dot((base ?? e).team)}<b>{vehicleDisplayName(e.classShort)}</b>
+        <br />HP {fmtInt((base ?? e).health)} / {fmtInt((base ?? e).maxHealth)}
+        {base
+          ? <><br /><span style={{ opacity: .6 }}>emplacement gun</span></>
+          : e.attached && <><br /><span style={{ opacity: .6 }}>attached</span></>}
         {e.lastDamager && <><br />last hit by {e.lastDamager.name ?? "?"}</>}
         {passengers.length > 0 && (
           <>

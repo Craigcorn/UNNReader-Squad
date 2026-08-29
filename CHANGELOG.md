@@ -284,6 +284,18 @@ follows [Semantic Versioning](https://semver.org/).
   removes them; and because the guns flow through the ordinary vehicle
   pipeline, the stats vehicle boards begin accruing emplacement seat-time
   under the gun's class name from here on.
+- The first emplacement gun ever displayed read "0% · 500/0" and claimed to
+  be parked. Both are the gun's own fields telling the truth about the
+  wrong actor: the gun carries MaxHealth 0 because the baseplate owns the
+  health, its team follows the OCCUPANT (0 whenever nobody is on it), and
+  it is permanently attached to its baseplate - so the health bar divided
+  by zero, an unmanned gun drew neutral on the map, and the
+  attached-vehicle cue showed on every emplacement forever. The viewer now
+  follows the owningDeployable join it was already given: health, bar and
+  team come from the baseplate structure, and the attached/parked note and
+  map ring - which exist to flag the RARE case of a vehicle riding another
+  actor - are replaced for guns by an "emplacement gun" label. Viewer-side,
+  so the recording that surfaced it displays correctly on reload.
 
 ## [1.4.4] - 2026-08-19
 
