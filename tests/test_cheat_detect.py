@@ -657,6 +657,23 @@ def test_a_projectile_with_a_verified_firer_counts_as_a_shot():
     assert sink.types() == ["fire_no_ammo"]
 
 
+def test_a_launch_is_not_billed_to_the_rifle_back_in_hand():
+    """Spawn detection lags the throw: by the tick a smoke or rocket first
+    appears, the firer has often swapped back to their rifle — whose pool
+    then sits perfectly still, because it fired nothing. Measured on the
+    test box, where five real launches accused the operator's own M4. A
+    launch counts only while the held weapon is the one-round family."""
+    mgr, sink = _run(FIRE_ON)
+    for i in range(7):
+        ts = 2.0 * i
+        mgr.run_tick(_snap(
+            [_player(eos="eos-1", name="Alice", weapon="BP_M4A1_C",
+                     mags=[30, 30, 30, 30])],
+            tick=i + 1, elapsed=ts, projectiles=[_proj(f"0x{i:x}")]),
+            tick=i + 1, now=1000.0 + ts)
+    assert sink.rows == []
+
+
 def test_the_projectiles_already_in_the_air_at_attach_are_not_new():
     """A reader restarting mid-match sees a sky full of rounds. None of them
     were fired on its first tick."""

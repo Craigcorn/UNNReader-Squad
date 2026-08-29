@@ -50,7 +50,10 @@ follows [Semantic Versioning](https://semver.org/).
   the placement and the tick that sampled it. `fire_no_ammo` joins them:
   where `infinite_ammo` assumes a cheater's ammo stops falling, this one
   counts verified shots first and asks about the ledger second, taking no
-  position on a premise nobody has confirmed. Off is deliberate and not
+  position on a premise nobody has confirmed - and a launched round is
+  charged only while the launcher is still the weapon in hand, because
+  spawn sampling lags the throw and the rifle someone swaps back to must
+  not answer for a pool that rightly never moved. Off is deliberate and not
   temporary politeness. All four were replayed over nine real recordings -
   four 100-player matches and a test server's archive - and three of them had
   to be corrected before they stopped accusing innocent people; the fourth

@@ -871,6 +871,21 @@ class CheatDetect(Plugin):
             eos = p.get("eosId") if p else None
             if not eos:
                 continue
+            held, hmags = _held_weapon(p)
+            if not held or hmags is None:
+                continue
+            hcap = max(self._class_cap.get(held, (0, 0))[0], _mag_max(hmags))
+            if hcap != 1:
+                # A launch may only be charged to the HELD weapon when that
+                # weapon is the one-round family that fires launched rounds.
+                # Spawn detection lags the throw by up to a tick, so a thrown
+                # smoke sampled after the swap back to the rifle would bill
+                # the rifle's motionless pool as evidence — measured on the
+                # test box, where five real launches accused the operator's
+                # own M4 of firing nothing. The cheater who swaps weapons
+                # after every launch escapes this path; that is the accepted
+                # direction, the same one every guard here fails toward.
+                continue
             shots[eos] = shots.get(eos, 0) + 1
 
         for eos, n in shots.items():
