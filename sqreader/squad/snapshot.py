@@ -689,11 +689,13 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQGuidedProjectile? (TOW/Kornet/HJ-8)
     is_guided_projectile: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
-    # Guided-missile actor addr -> its position last build. A live powered
-    # round moves every build, so a bit-identical repeat marks a dead actor
-    # (wire cut / self-destruct — bHasImpacted never flips for those) whose
-    # corpse would otherwise be recorded parked mid-air for up to a minute.
-    guided_last_pos: dict[int, tuple[float, float, float]] = field(
+    # Guided-missile actor addr -> (position last build, consecutive
+    # repeats seen). A live powered round moves every build, so repeats
+    # mark a dead actor (wire cut / self-destruct — bHasImpacted never
+    # flips for those) whose corpse would otherwise be recorded parked
+    # mid-air for up to a minute. One repeat is tolerated (a build racing
+    # engine replication); emission stops from the second repeat on.
+    guided_last_pos: dict[int, tuple[tuple[float, float, float], int]] = field(
         default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
@@ -3984,10 +3986,14 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     # or self-destructed missile's actor lingers in memory up to a minute,
     # parked mid-air with bHasImpacted still false (a wire cut is not an
     # impact), and recording it painted a dead missile hanging in the sky.
-    # A live powered round moves every build, so a bit-identical repeat of
-    # last build's position stops the emission — the death-point record
-    # itself was emitted the build it arrived there. Resting smoke rounds
-    # are not guided and are untouched.
+    # A live powered round moves every build — but a SINGLE repeat is
+    # tolerated (a build racing the engine's replication can catch the
+    # same transform twice), so only the second consecutive bit-identical
+    # repeat onward is dropped. The death-point record and one echo stay
+    # in the file; the minute of corpse does not. Punching a one-frame
+    # hole mid-flight is exactly what this must never do: the viewer's
+    # vanish heuristic would read absence as an impact. Resting smoke
+    # rounds are not guided and are untouched.
     projectiles = []
     is_guided_cache = caches.is_guided_projectile
     guided_last = caches.guided_last_pos
@@ -4007,9 +4013,13 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 key = (float(px), float(py), float(pz))
                 guided_seen.add(p_addr)
                 last = guided_last.get(p_addr)
-                guided_last[p_addr] = key
-                if last == key:
-                    continue
+                if last is not None and last[0] == key:
+                    repeats = last[1] + 1
+                    guided_last[p_addr] = (key, repeats)
+                    if repeats >= 2:
+                        continue
+                else:
+                    guided_last[p_addr] = (key, 0)
         projectiles.append(rec)
     for stale_addr in [a for a in guided_last if a not in guided_seen]:
         del guided_last[stale_addr]

@@ -185,6 +185,24 @@ follows [Semantic Versioning](https://semver.org/).
   A fixed-trajectory round cannot change course between samples, so
   extrapolation is exactly its truth; for a steered missile the
   between-sample estimate is the accepted price of motion that moves.
+- The dead-reckoner lasted one viewing session before its own author's
+  tester shot it down. Its velocity came from wall-clock gaps between
+  frame arrivals, and replay frames arrive with jitter - two frames
+  landing nearly together made the gap a few milliseconds, the velocity
+  astronomical, and the extrapolation flung the icon hundreds of metres
+  offscreen, which read as the missile vanishing; every new sample then
+  snapped it back, which read as worse stutter. Both reports were the
+  same bug. Motion now renders ONE SAMPLE BEHIND instead - gliding from
+  the previous raw sample to the newest over a clamped, smoothed arrival
+  interval, the same render-behind philosophy the live path uses. It can
+  never overshoot recorded data, cannot be flung by a jittery arrival,
+  and costs one sample (~300 ms) of display lag a replay cannot feel.
+  Two hardenings landed with it: the tracker-vanish heuristic is
+  debounced (a projectile absent for ONE frame is a dropped record, not
+  an impact - death needs absence across two tick advances), and the
+  recorder tolerates a single repeated guided-missile position (a build
+  racing engine replication) so it can never punch a one-frame hole
+  mid-flight for that heuristic to misread.
 
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
