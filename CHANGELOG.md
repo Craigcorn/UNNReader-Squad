@@ -102,6 +102,23 @@ follows [Semantic Versioning](https://semver.org/).
   the turret record the viewer already speaks, plus a new optional
   `pitch` no tank emits.
 
+- An emplacement is now ONE thing on the map instead of two. Recording the
+  gun as a vehicle had given every emplacement a second icon - the
+  baseplate's proper badge plus an artless triangle for the gun - and the
+  newly captured aim rendered nowhere. The gun no longer draws at all: the
+  deployable badge is the one element, it grows a barrel needle showing
+  the gun's live traverse (root yaw plus swivel, the same addition tank
+  turrets use), and hovering or clicking the badge surfaces the GUN - the
+  crew, the magazines, the elevation in degrees, the structure's health -
+  because an armed deployable's hit is resolved to its gun at the
+  hit-test, so every panel downstream worked without knowing anything
+  changed. TOW, HMG and AA emplacements also stopped being blank badges:
+  the icon set never shipped art for crewed emplacements, so the closest
+  role silhouettes stand in (ATGM gets the HAT rocket, machine guns the
+  MG, auto-launchers the grenadier) until real icons are extracted from
+  the game files, and the known gun classes carry friendly display names
+  instead of raw blueprint strings.
+
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
   server. When a downed player finally dies, Squad's own Die line names the

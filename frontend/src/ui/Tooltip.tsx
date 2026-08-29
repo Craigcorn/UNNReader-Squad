@@ -36,11 +36,13 @@ function body(hit: Hit, snap: Snapshot | null) {
       const base = e.owningDeployable
         ? (snap?.deployables ?? []).find((d) => d.id === e.owningDeployable)
         : undefined;
+      const pitch = base ? e.turrets?.[0]?.pitch : null;
       return <>
         {dot((base ?? e).team)}<b>{vehicleDisplayName(e.classShort)}</b>
         <br />HP {fmtInt((base ?? e).health)} / {fmtInt((base ?? e).maxHealth)}
         {base
-          ? <><br /><span style={{ opacity: .6 }}>emplacement gun</span></>
+          ? <><br /><span style={{ opacity: .6 }}>emplacement gun{
+              pitch != null ? ` · elevation ${Math.round(pitch)}°` : ""}</span></>
           : e.attached && <><br /><span style={{ opacity: .6 }}>attached</span></>}
         {e.lastDamager && <><br />last hit by {e.lastDamager.name ?? "?"}</>}
         {passengers.length > 0 && (

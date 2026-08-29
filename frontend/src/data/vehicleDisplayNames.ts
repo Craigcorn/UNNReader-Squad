@@ -7,6 +7,22 @@
 // blueprint name in `vehicleDisplayName`.
 
 export const VEHICLE_DISPLAY_NAMES = new Map<string, string>([
+  // Emplacement guns (SQDeployableVehicle) — the vehicle actor a fully
+  // built deployable weapon spawns. Class names observed live / in the
+  // staging pools on Squad v10.5.3.
+  ["BP_EmplacedBGM71TOW_Tripod_C", "BGM-71 TOW"],
+  ["BP_EmplacedM2_Tripod_ACOG_Bunker_C", "M2 Browning (emplaced)"],
+  ["BP_EmplacedM2HB_Tripod_Shield_C", "M2HB (emplaced)"],
+  ["BP_L16mortar_Baseplate_C", "L16 Mortar"],
+  ["BP_M252mortar_Baseplate_C", "M252 Mortar"],
+  ["BP_81mmMortar_Baseplate_C", "81mm Mortar"],
+  ["BP_M1937mortar_Baseplate_C", "M1937 Mortar"],
+  ["BP_2b14podnosmortar_Baseplate_C", "2B14 Podnos Mortar"],
+  ["BP_Emplaced_ZU23-2_Antiaircannon_Base_C", "ZU-23-2 AA"],
+  ["BP_Emplaced_ZU23-2_Antiaircannon_Base_INS_C", "ZU-23-2 AA"],
+  ["BP_ZiS3_Base_C", "ZiS-3 Field Gun"],
+  ["BP_EmplacedSPG9_TripodScope_C", "SPG-9 Kopye"],
+  ["BP_Emplaced_HellCannon_Base_C", "Hell Cannon"],
   // Helicopters
   ["BP_CH146_C", "CH-146 Griffon"],
   ["BP_CH146_Desert_C", "CH-146 Griffon"],

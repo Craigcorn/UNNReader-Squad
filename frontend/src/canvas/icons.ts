@@ -400,6 +400,18 @@ export function deployableIconUrl(d: Deployable): string | null {
   if (cs.includes("AMMO") || cs.includes("CRATE"))
                                return "./icons/general/supplies_ammo_square.png";
   if (cs.includes("CONSTRUCT"))return "./icons/general/supplies_construction_square.png";
+  // Crewed emplacements — the icon set never included dedicated art for
+  // these, so borrow the closest role silhouettes (same white-outline
+  // style) until real emplacement icons are extracted from the game
+  // files. The badge is the ONE map element for an emplacement (its gun
+  // vehicle is deliberately not drawn), so this is the icon that shows.
+  if (/(TOW|ATGM|KORNET|HJ-?8|MILAN|SPG9|ZIS3)/.test(cs))
+    return "./icons/roles/T_role_heavyantitank.png";
+  if (/(AGS17|QLZ87)/.test(cs)) return "./icons/roles/T_role_grenadier.png";
+  if (/(M2_|EMPLACEDM2|KORD|DSHK|NSV|M240|MG3|QJZ|ZU23)/.test(cs))
+    return "./icons/roles/T_role_machinegunner.png";
+  if (cs.includes("HELLCANNON") || cs.includes("UB32"))
+    return "./icons/deployables/deployable_mortars.png";
   return null;
 }
 

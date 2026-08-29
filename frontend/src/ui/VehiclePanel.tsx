@@ -280,6 +280,9 @@ export function VehiclePanel() {
             {alive ? "Intact" : "Destroyed"}
           </b></span>
           {v.kind && <span>Type: <b>{v.kind}</b></span>}
+          {base && v.turrets?.[0]?.pitch != null && (
+            <span>Elevation: <b>{Math.round(v.turrets[0].pitch)}°</b></span>
+          )}
         </div>
 
         <div className="hp-row">

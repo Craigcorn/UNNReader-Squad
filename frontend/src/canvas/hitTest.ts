@@ -46,8 +46,23 @@ export function hitTest(snap: Snapshot | null, wx: number, wy: number,
   }
   for (const pr of snap.projectiles ?? []) consider({ type: "projectile", e: pr }, pr.position, r2);
   for (const m of snap.markers ?? [])       consider({ type: "marker", e: m }, m.position, r2);
-  for (const v of snap.vehicles ?? [])      consider({ type: "vehicle", e: v }, v.position, r2 * 1.5);
-  for (const d of snap.deployables ?? [])   consider({ type: "deployable", e: d }, d.position, r2);
+  // Emplacement guns are not drawn (the deployable badge is the ONE map
+  // element for an emplacement), so they must not capture hovers either.
+  // Instead an armed deployable's hit IS its gun: tooltip and click then
+  // surface crew, ammo and the joined health with no routing downstream.
+  let gunByDep: Map<string, Vehicle> | null = null;
+  for (const v of snap.vehicles ?? []) {
+    if (v.owningDeployable) (gunByDep ??= new Map()).set(v.owningDeployable, v);
+  }
+  for (const v of snap.vehicles ?? []) {
+    if (v.owningDeployable) continue;
+    consider({ type: "vehicle", e: v }, v.position, r2 * 1.5);
+  }
+  for (const d of snap.deployables ?? []) {
+    const gun = gunByDep?.get(d.id);
+    if (gun) consider({ type: "vehicle", e: gun }, d.position, r2);
+    else consider({ type: "deployable", e: d }, d.position, r2);
+  }
   for (const sp of snap.vehicleSpawners ?? []) consider({ type: "spawner", e: sp }, sp.position, r2);
   for (const rp of snap.rallyPoints ?? [])  consider({ type: "rally", e: rp }, rp.position, r2);
   // Only hover caps that are actually drawn (hidden pre-roll cloud excluded).

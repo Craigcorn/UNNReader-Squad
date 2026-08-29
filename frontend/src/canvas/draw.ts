@@ -689,10 +689,45 @@ function drawFobRadii(ctx: CanvasRenderingContext2D, snap: Snapshot,
 
 function drawDeployables(ctx: CanvasRenderingContext2D, snap: Snapshot,
                          view: ViewState, cs: CanvasSize) {
+  // Emplacement guns by their baseplate id — the badge below is the ONE
+  // map element for an emplacement, so the gun's aim renders here as a
+  // barrel needle instead of as a second icon.
+  let gunByDep: Map<string, Vehicle> | null = null;
+  for (const v of snap.vehicles ?? []) {
+    if (v.owningDeployable) (gunByDep ??= new Map()).set(v.owningDeployable, v);
+  }
   for (const d of snap.deployables ?? []) {
     if (!d.position) continue;
     const [x, y] = worldToScreen(view, cs, d.position.x, d.position.y);
     const url = deployableIconUrl(d);
+    // Aim needle, drawn first so the badge covers its base and it reads
+    // as a barrel poking out from under the disc. World aim = the gun's
+    // static root yaw + the swivel's traverse (same additive convention
+    // as hull+turret); the fallback triangle's rotate() sets the screen
+    // convention this reuses.
+    const gun = gunByDep?.get(d.id);
+    const t0 = gun?.turrets?.[0];
+    if (gun && t0 && t0.yaw != null && gun.yaw != null) {
+      const a = (gun.yaw + t0.yaw) * Math.PI / 180;
+      const len = 22 * cs.dpr * 0.95;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(a);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(len, 0);
+      ctx.lineWidth = 3.5 * cs.dpr;
+      ctx.strokeStyle = "#0e1116";
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(len, 0);
+      ctx.lineWidth = 2 * cs.dpr;
+      ctx.strokeStyle = teamColor(d.team);
+      ctx.stroke();
+      ctx.restore();
+    }
     // FOB+HAB are the key landmarks (bigger badge, emphasis bezel).
     // Other deployables (mines, ammo crates, repair stations) get the
     // same badge wrapper but smaller and without the emphasis bezel.
@@ -937,21 +972,11 @@ function vehicleSquadNumber(v: Vehicle,
 function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
                       view: ViewState, cs: CanvasSize,
                       showAllNumbers: boolean) {
-  // Emplacement guns report SQPawn.Team from their OCCUPANT (0 while
-  // unmanned), so an unmanned gun would draw neutral. The baseplate
-  // deployable carries true ownership — join it for the icon tint.
-  let depTeams: Map<string, number | null> | null = null;
-  for (const v of snap.vehicles ?? []) {
-    if (v.owningDeployable) {
-      depTeams = new Map((snap.deployables ?? []).map(
-        (d) => [d.id, d.team]));
-      break;
-    }
-  }
   for (const v of snap.vehicles ?? []) {
     if (!v.position) continue;
-    const team = (v.owningDeployable
-      ? depTeams?.get(v.owningDeployable) : null) ?? v.team;
+    // Emplacement guns are drawn as their deployable's badge (with an aim
+    // needle) — a second icon here was one map element too many.
+    if (v.owningDeployable) continue;
     const [x, y] = worldToScreen(view, cs, v.position.x, v.position.y);
     // UE yaw: 0° = +X (east / right). Squad's stock minimap PNGs are
     // drawn nose-UP (top of image = front of vehicle), so a +90° (π/2)
@@ -985,12 +1010,10 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
     }
 
     if (ready) {
-      drawVehicleBadge(ctx, x, y, yawIcon, size, teamColor(team), vehImg!,
+      drawVehicleBadge(ctx, x, y, yawIcon, size, teamColor(v.team), vehImg!,
                        turretImg, turretYawIcon);
       // Attached / parked-on-another-actor cue: thin white outer ring.
-      // Not for emplacement guns — always bolted to their baseplate,
-      // so the ring would be permanent noise on every one of them.
-      if (v.attached && !v.owningDeployable) {
+      if (v.attached) {
         ctx.beginPath();
         ctx.arc(x, y, size * 0.55, 0, 2 * Math.PI);
         ctx.strokeStyle = "#fff";
@@ -1011,10 +1034,10 @@ function drawVehicles(ctx: CanvasRenderingContext2D, snap: Snapshot,
     ctx.lineTo(-ts * 0.7, ts * 0.6);
     ctx.lineTo(-ts * 0.7, -ts * 0.6);
     ctx.closePath();
-    ctx.fillStyle = teamColor(team);
+    ctx.fillStyle = teamColor(v.team);
     ctx.fill();
     ctx.lineWidth = 1.2 * cs.dpr;
-    ctx.strokeStyle = (v.attached && !v.owningDeployable) ? "#fff" : "#0e1116";
+    ctx.strokeStyle = v.attached ? "#fff" : "#0e1116";
     ctx.stroke();
     ctx.restore();
   }
