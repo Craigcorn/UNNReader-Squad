@@ -8,9 +8,11 @@
 // Tracking strategy in priority order:
 //   1. projectile.id (actor pointer) — stable while the actor lives,
 //      so the cheapest sig match for matching this-tick to last-tick.
-//   2. Nearest-neighbour within MATCH_RADIUS — covers id churn across
-//      respawns / bucket boundary cases. Dead tracks are excluded so a
-//      fresh round can never inherit a corpse's trail.
+//   2. Nearest-neighbour within MATCH_RADIUS — ONLY for id-less rounds
+//      whose position-bucket sig drifted, only against id-less tracks
+//      of the same class, and never a dead track. An id-bearing
+//      projectile is a distinct actor and must never steal another
+//      round's tracker (it did once: see the guard at the match site).
 //   3. velocity vector (when backend Phase B+ emits it) — first-tick
 //      heading derived directly, no second sample required.
 //
@@ -71,7 +73,12 @@ import { teamColor } from "./draw";
 import { icon } from "./icons";
 import { worldToScreen } from "./worldToScreen";
 
-const MATCH_RADIUS_UE  = 250_000;                        // 2500 m
+// Nearest-neighbour rebinding radius — for ID-LESS rounds only, whose
+// position-bucket signature drifts as they fly. 150 m covers a bucket
+// hop plus one tick of the fastest round; the original 2500 m spanned
+// half the map and let a freshly spawned mortar round STEAL an airborne
+// TOW's tracker (see the guard at the match site).
+const MATCH_RADIUS_UE  = 15_000;                         // 150 m
 const MATCH_RADIUS_SQ  = MATCH_RADIUS_UE * MATCH_RADIUS_UE;
 const IMPACT_MS        = 1200;                           // ring lifetime
 const STALE_MS         = 12_000;                         // silently drop unseen live tracks
@@ -96,6 +103,7 @@ interface CanvasSize {
 interface TrailPoint { x: number; y: number; }
 
 interface Track {
+  cls: string | null;       // classShort — NN may only pair like classes
   x: number;                // newest RAW sample (world units)
   y: number;
   px: number;               // previous RAW sample — the glide's start
@@ -194,14 +202,23 @@ export function drawProjectilesAndImpacts(
     const sig = signature(r);
     seen.add(sig);
 
-    // Resolve previous track: sig hit first, then nearest-neighbour
-    // within radius (covers id-changing edge cases). Never a dead one.
+    // Resolve previous track: sig hit first. The nearest-neighbour
+    // fallback runs ONLY for id-less rounds whose position-bucket sig
+    // drifted, and only against tracks that are themselves id-less and
+    // of the same class. An id-bearing projectile is a DISTINCT actor:
+    // when this fallback could cross that line, six mortar rounds
+    // spawning beside one airborne TOW each hijacked its tracker in
+    // turn — deleting it, resetting trail, pacing and heading — which
+    // reached the user as flicker, jitter, and a trail that restarted
+    // mid-flight. Never a dead one either.
     let prev: Track | null = tracks.get(sig) ?? null;
-    if (!prev) {
+    if (!prev && !r.id) {
       let bestD2 = MATCH_RADIUS_SQ;
       let bestSig: string | null = null;
       for (const [psig, pt] of tracks) {
         if (seen.has(psig) || pt.dead) continue;
+        if (psig.startsWith("id:")) continue;
+        if (pt.cls !== (r.classShort ?? null)) continue;
         const dx = r.position.x - pt.x, dy = r.position.y - pt.y;
         const d2 = dx * dx + dy * dy;
         if (d2 < bestD2) { bestD2 = d2; bestSig = psig; prev = pt; }
@@ -213,6 +230,7 @@ export function drawProjectilesAndImpacts(
 
     const kind = r.kind ?? "mortar";
     const track: Track = prev ?? {
+      cls: r.classShort ?? null,
       x: r.position.x, y: r.position.y,
       px: r.position.x, py: r.position.y,
       sampleAt: now, gapMs: 0,

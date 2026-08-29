@@ -203,6 +203,22 @@ follows [Semantic Versioning](https://semver.org/).
   recorder tolerates a single repeated guided-missile position (a build
   racing engine replication) so it can never punch a one-frame hole
   mid-flight for that heuristic to misread.
+- A mortar round could steal a flying TOW's tracker - and with six rounds
+  in the air beside one missile, they took turns. The tracker's
+  nearest-neighbour fallback, inherited from the original module, matched
+  any unknown projectile to any track within 2500 metres - half the map -
+  and REBOUND it: the TOW's tracker deleted, its identity handed to a
+  freshly spawned mortar round, and the missile's next record forced to
+  start a new tracker from nothing. The theft predates every recent
+  change, but a tracker used to hold almost nothing, so being robbed cost
+  one heading blip; now it holds the steering trail, the motion pacing
+  and the death state, so each theft restarted the trail mid-flight,
+  snapped the motion, and flickered the icon - measured against the
+  recording that surfaced it: six thefts in one flight, one per symptom
+  report. The fallback now runs only for id-less rounds whose position
+  bucket drifted, only against id-less tracks of the same class, within
+  150 metres - an id-bearing projectile is a distinct actor, and a track
+  keyed by an id can no longer be stolen at all.
 
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
