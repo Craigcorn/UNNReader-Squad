@@ -173,22 +173,28 @@ export function interpolateProjectilesBetweenFulls(
 }
 
 // A guided missile's complete steering trail, precomputed per round at
-// load time and keyed by tick — so the renderer draws "the recorded
-// path up to the playhead" and a seek in either direction can never
-// tear it: the trail is a pure function of recorded data plus the
+// load time and keyed by TIMESTAMP — so the renderer draws "the
+// recorded path up to the playhead" and a seek in either direction can
+// never tear it: the trail is a pure function of recorded data plus the
 // current frame, not of the order the viewer happened to visit frames
-// in. The first point is the LAUNCHER when one can be joined honestly
-// (the round names its firer; the launcher has that player in a seat
-// within sight of the first sample). Points stop by themselves where
-// the round dies — a frozen position never clears the spacing gate.
-export interface ProjectileTimelinePoint { x: number; y: number; tick: number; }
+// in. Timestamp, not tick, deliberately: a reconstructed frame carries
+// its base full's TICK, so a tick-keyed point holding a position
+// interpolated toward the NEXT full passed a tick-based playhead filter
+// one frame early and the trail tip ran ahead of the missile — while
+// every frame's timestamp is its own real capture time, which makes the
+// filter exact. The first point is the LAUNCHER when one can be joined
+// honestly (the round names its firer; the launcher has that player in
+// a seat within sight of the first sample). Points stop by themselves
+// where the round dies — a frozen position never clears the spacing
+// gate.
+export interface ProjectileTimelinePoint { x: number; y: number; t: number; }
 
 export function buildProjectileTimelines(
   frames: Snapshot[],
 ): Map<string, ProjectileTimelinePoint[]> {
   const out = new Map<string, ProjectileTimelinePoint[]>();
   for (const f of frames) {
-    const tick = f.tick ?? 0;
+    const t = Date.parse(f.timestamp) || 0;
     for (const p of f.projectiles ?? []) {
       if (!p.position || !isGuidedProjectile(p)) continue;
       let tl = out.get(p.id);
@@ -202,7 +208,7 @@ export function buildProjectileTimelines(
             const dx = v.position.x - p.position.x;
             const dy = v.position.y - p.position.y;
             if (dx * dx + dy * dy > LAUNCHER_MAX_SQ) continue;
-            tl.push({ x: v.position.x, y: v.position.y, tick });
+            tl.push({ x: v.position.x, y: v.position.y, t });
             break;
           }
         }
@@ -212,7 +218,7 @@ export function buildProjectileTimelines(
         const dx = p.position.x - last.x, dy = p.position.y - last.y;
         if (dx * dx + dy * dy < TRAIL_SPACING_SQ) continue;
       }
-      tl.push({ x: p.position.x, y: p.position.y, tick });
+      tl.push({ x: p.position.x, y: p.position.y, t });
     }
   }
   return out;

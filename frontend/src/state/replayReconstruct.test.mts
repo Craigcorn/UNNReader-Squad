@@ -278,7 +278,8 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
   eq(tow[0]!.x, 0, "first point is the launcher the firer sits in");
   eq(tow.length, 3,
      "launcher + first sample + the far sample; the 1 m step is spaced out");
-  eq(tow[2]!.tick, 3, "points carry the tick that produced them");
+  eq(tow[2]!.t, Date.parse("2026-01-01T00:00:03+00:00"),
+     "points carry the capture time of the frame that produced them");
 }
 
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);

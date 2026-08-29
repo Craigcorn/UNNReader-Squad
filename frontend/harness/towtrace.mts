@@ -43,7 +43,7 @@ console.log(`frames: ${frames.length}, timelines: ${timelines.size}`);
 for (const [id, tl] of timelines) {
   console.log(`  timeline ${id}: ${tl.length} points, `
     + `first (${Math.round(tl[0]!.x)},${Math.round(tl[0]!.y)}) `
-    + `tick ${tl[0]!.tick}..${tl[tl.length - 1]!.tick}`);
+    + `spanning ${(tl[tl.length - 1]!.t - tl[0]!.t) / 1000}s`);
 }
 
 const view: ViewState = {
@@ -94,8 +94,8 @@ function play(tFrom: number, tTo: number, label: string) {
     }
     drawProjectilesAndImpacts(ctx, display, view, cs);
     const tr: any = _tracksForTest.get(TOW);
-    const dt = display.tick ?? 0;
-    const tlLen = tow ? tow.filter((q) => q.tick <= dt).length : 0;
+    const pMs = Date.parse(display.timestamp) || 0;
+    const tlLen = tow ? tow.filter((q) => q.t <= pMs).length : 0;
     const state = tr
       ? `trail=${tlLen} dead=${tr.dead} frozen=${tr.frozenTicks}`
       : "NO TRACK";

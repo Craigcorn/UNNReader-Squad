@@ -199,6 +199,10 @@ export function drawProjectilesAndImpacts(
 ) {
   const now = Date.now();
   const tick = snap.tick ?? null;
+  // The displayed frame's capture time — the playhead the precomputed
+  // trails are filtered against (see pass 3).
+  const playMs = snap.timestamp
+    ? (Date.parse(snap.timestamp) || null) : null;
   if (tick != null && lastSnapTick != null && tick < lastSnapTick) {
     // Rewind / restart: playback-order state is now from the future.
     tracks.clear();
@@ -404,8 +408,13 @@ export function drawProjectilesAndImpacts(
       ? timelines.get(sig.slice(3)) : undefined;
     if (tl) {
       // Replay: the recorded path up to the playhead — a pure function
-      // of data + current frame, so no seek can tear it.
-      const upTo = tick == null ? tl : tl.filter((q) => q.tick <= tick);
+      // of data + current frame, so no seek can tear it. Filtered by
+      // the displayed frame's TIMESTAMP (its real capture time); a
+      // tick filter let reconstructed-frame points — which carry their
+      // base full's tick but positions ahead of it — through one frame
+      // early, and the trail tip ran ahead of the missile.
+      const upTo = playMs == null
+        ? tl : tl.filter((q) => q.t <= playMs);
       pts = pt.dead ? upTo : [...upTo, { x: pt.x, y: pt.y }];
     } else {
       pts = pt.dead ? pt.path : [...pt.path, { x: pt.x, y: pt.y }];

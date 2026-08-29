@@ -245,6 +245,13 @@ follows [Semantic Versioning](https://semver.org/).
   the actual viewer modules and diffs a straight playthrough against a
   mid-flight backward seek: identical trail at every tick. Live mode
   keeps the incremental trail - there is no future to precompute from.
+  One refinement followed the first viewing: trail points were keyed by
+  TICK, and a reconstructed frame carries its base full's tick while
+  holding a position interpolated toward the NEXT full - so those points
+  passed the playhead filter one frame early and the trail tip rendered
+  ahead of the missile. Points are keyed by their frame's TIMESTAMP now,
+  which every frame owns individually, and the tip can no longer lead
+  the round it belongs to.
 - A guided missile's trail now starts at the launcher, and every shell
   points where it is going. The trail's first point was the round's
   first recorded sample, ~70-90 m downrange (the distance covered before
