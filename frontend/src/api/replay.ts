@@ -15,6 +15,7 @@
 // On switch back to live, the loader DROPS frames to free memory.
 
 import { useEffect } from "react";
+import { setProjectileTimelines } from "../canvas/projectiles";
 import { fetchRecordingFrames, fetchRecordingMeta } from "./recordings";
 import { useViewerStore } from "../state/viewerStore";
 import { replayLoad } from "../state/replayLoad";
@@ -31,8 +32,11 @@ export function useReplayLoader() {
   const setReplayKillTimeline = useViewerStore((s) => s.setReplayKillTimeline);
 
   useEffect(() => {
-    // Drop frames when leaving replay mode — keeps the heap free.
+    // Drop frames when leaving replay mode — keeps the heap free. The
+    // precomputed steering trails go with them (live mode falls back to
+    // the incremental per-track path).
     if (mode !== "replay") {
+      setProjectileTimelines(null);
       setReplay((r) => r.frames.length
         ? { ...r, frames: [], currentIdx: 0, playing: false }
         : r);

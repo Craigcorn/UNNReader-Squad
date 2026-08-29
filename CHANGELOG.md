@@ -230,6 +230,21 @@ follows [Semantic Versioning](https://semver.org/).
   draws, precomputed so the pair stream never stalls. Works on every
   recording ever made, single-tier production files included, and costs
   the recording nothing.
+- A steering trail could no longer survive the scrub bar. The trail was
+  accumulated incrementally in playback order, so a backward seek reset
+  the tracker (trail restarting mid-air at the seek point, heading
+  re-settling - reported as the missile "changing course" with no impact
+  ring) and a forward skip tripped the teleport guard and wiped it
+  without re-anchoring. In a replay the whole flight is already on disk,
+  so the trail is now PRECOMPUTED at load - every guided round's
+  complete path, launcher anchor included, each point keyed by the tick
+  that produced it - and the renderer draws "the recorded path up to
+  the playhead": a pure function of data plus current frame that no
+  seek in either direction can tear. Verified with a headless harness
+  (kept in frontend/harness) that replays the real recording through
+  the actual viewer modules and diffs a straight playthrough against a
+  mid-flight backward seek: identical trail at every tick. Live mode
+  keeps the incremental trail - there is no future to precompute from.
 - A guided missile's trail now starts at the launcher, and every shell
   points where it is going. The trail's first point was the round's
   first recorded sample, ~70-90 m downrange (the distance covered before

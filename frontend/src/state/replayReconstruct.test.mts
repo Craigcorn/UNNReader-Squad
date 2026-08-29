@@ -1,6 +1,7 @@
 // Standalone unit test for two-tier replay reconstruction. Bundled with
 // esbuild + run under node — no framework (matches diff.test.mts).
 import {
+  buildProjectileTimelines,
   interpolateProjectilesBetweenFulls,
   ReplayReconstructor,
   reconstructFromPosition,
@@ -248,6 +249,36 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
   interpolateProjectilesBetweenFulls(frames);
   eq(frames[1].projectiles[0].position.x, 42,
      "a genuinely sampled position is never overwritten");
+}
+
+// Steering timelines: anchored to the firer's launcher, spaced, ordered
+// by tick, guided rounds only.
+{
+  const mk = (tick: number, x: number, y: number): any => ({
+    timestamp: `2026-01-01T00:00:${String(tick).padStart(2, "0")}+00:00`,
+    tick,
+    players: [], vehicles: [
+      { id: "0xgun", team: 1, health: 500,
+        position: { x: 0, y: 0, z: 0 }, yaw: 0,
+        seats: [{ idx: 0, occupantName: "Crayon" }] },
+    ],
+    projectiles: [
+      { id: "0xtow", classShort: "BP_TOW_Proj_C", firer: "Crayon",
+        position: { x, y, z: 100 } },
+      { id: "0xshell", classShort: "BP_Mortarround4_C", firer: "Crayon",
+        position: { x, y, z: 100 } },
+    ],
+    markers: [], damageEvents: [], gameState: {},
+  });
+  const frames: any[] = [mk(1, 9000, 0), mk(2, 9100, 0), mk(3, 18000, 0)];
+  const tls = buildProjectileTimelines(frames);
+  const tow = tls.get("0xtow")!;
+  ok(!!tow, "guided round gets a timeline");
+  eq(tls.get("0xshell"), undefined, "ballistic round gets none");
+  eq(tow[0]!.x, 0, "first point is the launcher the firer sits in");
+  eq(tow.length, 3,
+     "launcher + first sample + the far sample; the 1 m step is spaced out");
+  eq(tow[2]!.tick, 3, "points carry the tick that produced them");
 }
 
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);

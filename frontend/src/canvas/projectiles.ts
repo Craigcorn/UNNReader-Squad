@@ -66,6 +66,12 @@
 // seek shows up as an impossible between-frame jump and resets that
 // track's trail and heading instead of drawing a line across the map.
 
+import {
+  isGuidedProjectile,
+  LAUNCHER_MAX_SQ,
+  TRAIL_SPACING_SQ,
+} from "../state/guided";
+import type { ProjectileTimelinePoint } from "../state/replayReconstruct";
 import type { Projectile, Snapshot, ViewState } from "../state/types";
 import { teamColor } from "./draw";
 import { icon } from "./icons";
@@ -81,8 +87,6 @@ const MATCH_RADIUS_SQ  = MATCH_RADIUS_UE * MATCH_RADIUS_UE;
 const IMPACT_MS        = 1200;                           // ring lifetime
 const STALE_MS         = 12_000;                         // silently drop unseen live tracks
 const DEATH_FADE_MS    = 2_500;                          // whole-trail fade after death
-const TRAIL_SPACING_UE = 2_500;                          // ≥25 m between trail points
-const TRAIL_SPACING_SQ = TRAIL_SPACING_UE * TRAIL_SPACING_UE;
 const TRAIL_MAX_POINTS = 256;                            // per-track backstop
 // Heading is measured from an ANCHOR that only moves when the round has
 // travelled this far from it — not from per-frame deltas. At 60 fps a
@@ -92,10 +96,6 @@ const TRAIL_MAX_POINTS = 256;                            // per-track backstop
 // both a stable, correct direction of travel.
 const HEADING_ANCHOR_UE = 300;                           // 3 m
 const HEADING_ANCHOR_SQ = HEADING_ANCHOR_UE * HEADING_ANCHOR_UE;
-// The launcher a guided round's trail is anchored to must be plausibly
-// at the launch site — a seat-name match alone could pick up stale data.
-const LAUNCHER_MAX_UE  = 50_000;                         // 500 m
-const LAUNCHER_MAX_SQ  = LAUNCHER_MAX_UE * LAUNCHER_MAX_UE;
 const FROZEN_DEAD_TICKS = 2;   // identical position across N tick advances
 const VANISH_DEAD_TICKS = 2;   // absent across N tick advances
 // A between-frame jump beyond this is a seek/teleport, not flight.
@@ -138,16 +138,28 @@ interface Impact {
 // Module-level tracker state. Shared across renderScene calls so
 // position deltas + impact dedupe survive between snapshots. (Single
 // renderer instance per page — MapCanvas — so a singleton is fine.)
+// _tracksForTest exposes it to the headless diagnostic harness, which
+// replays a real recording through this exact module and watches
+// identity/trail/death transitions frame by frame.
 const tracks         = new Map<string, Track>();
+export const _tracksForTest = tracks;
 const impacts: Impact[] = [];
 const impactSpawned  = new Map<string, number>();
 let lastSnapTick: number | null = null;
 
-// A guided missile is the backend-stamped kind; the class-name fallback
-// covers recordings written before the stamp existed.
-function isGuided(p: Projectile): boolean {
-  if (p.kind === "guided") return true;
-  return /TOW|KORNET|HJ-?8|ATGM|MILAN/i.test(p.classShort ?? "");
+// Replay-mode steering trails, precomputed at load and keyed by
+// projectile id + tick (see buildProjectileTimelines). When a round has
+// one, its trail is drawn as "the recorded path up to the playhead" —
+// immune to seeks in either direction, which is exactly where the
+// incremental per-track path (kept as the LIVE fallback) tears: a
+// backward seek resets the tracker, a forward skip trips the jump
+// guard, and both were reported from the field as trails restarting
+// mid-flight.
+let timelines: Map<string, ProjectileTimelinePoint[]> | null = null;
+export function setProjectileTimelines(
+  m: Map<string, ProjectileTimelinePoint[]> | null,
+): void {
+  timelines = m;
 }
 
 // Signature: prefer the stable actor id, fall back to a coarse class +
@@ -243,7 +255,7 @@ export function drawProjectilesAndImpacts(
     // sight of the first sample is where the wire physically starts.
     // Recorded data joined at display time — nothing invented; when no
     // seat matches, the trail honestly starts at the first sample.
-    if (!prev && isGuided(r) && r.firer) {
+    if (!prev && !timelines && isGuidedProjectile(r) && r.firer) {
       for (const v of snap.vehicles ?? []) {
         if (!v.position || !v.seats) continue;
         if (!v.seats.some((st) => st.occupantName === r.firer)) continue;
@@ -318,7 +330,7 @@ export function drawProjectilesAndImpacts(
     // Trail — guided rounds only, spaced so the whole flight fits: the
     // displayed stream is 60 fps, and appending every step held only
     // the last few seconds once the buffer capped.
-    if (!track.dead && isGuided(r)) {
+    if (!track.dead && !timelines && isGuidedProjectile(r)) {
       const lastP = track.path[track.path.length - 1];
       const farEnough = !lastP
         || ((r.position.x - lastP.x) ** 2
@@ -380,17 +392,25 @@ export function drawProjectilesAndImpacts(
   }
 
   // ---- pass 3: steering trails (under the icons) ------------------------
-  for (const pt of tracks.values()) {
-    if (pt.path.length < 2 && !(pt.path.length === 1 && !pt.dead)) continue;
+  for (const [sig, pt] of tracks) {
     // Alive: the whole flight, launch to warhead, tail slightly softer
     // than the head, closed off with a segment to the live position.
     // Dead: the complete trail fades out as one.
     const deadFade = pt.dead
       ? Math.max(0, 1 - (now - pt.diedAt) / DEATH_FADE_MS) : 1;
     if (deadFade <= 0) continue;
+    let pts: TrailPoint[];
+    const tl = timelines && sig.startsWith("id:")
+      ? timelines.get(sig.slice(3)) : undefined;
+    if (tl) {
+      // Replay: the recorded path up to the playhead — a pure function
+      // of data + current frame, so no seek can tear it.
+      const upTo = tick == null ? tl : tl.filter((q) => q.tick <= tick);
+      pts = pt.dead ? upTo : [...upTo, { x: pt.x, y: pt.y }];
+    } else {
+      pts = pt.dead ? pt.path : [...pt.path, { x: pt.x, y: pt.y }];
+    }
     const col = teamColor(pt.team);
-    const pts: TrailPoint[] = pt.dead
-      ? pt.path : [...pt.path, { x: pt.x, y: pt.y }];
     const n = pts.length;
     if (n < 2) continue;
     ctx.save();

@@ -14,6 +14,11 @@
 // full frame, so a position frame costs ~its moved entities, not a
 // full-snapshot clone.
 
+import {
+  isGuidedProjectile,
+  LAUNCHER_MAX_SQ,
+  TRAIL_SPACING_SQ,
+} from "./guided";
 import type {
   PositionFrame,
   PositionPlayer,
@@ -165,6 +170,52 @@ export function interpolateProjectilesBetweenFulls(
     runStart = -1;
     baseFull = f;
   }
+}
+
+// A guided missile's complete steering trail, precomputed per round at
+// load time and keyed by tick — so the renderer draws "the recorded
+// path up to the playhead" and a seek in either direction can never
+// tear it: the trail is a pure function of recorded data plus the
+// current frame, not of the order the viewer happened to visit frames
+// in. The first point is the LAUNCHER when one can be joined honestly
+// (the round names its firer; the launcher has that player in a seat
+// within sight of the first sample). Points stop by themselves where
+// the round dies — a frozen position never clears the spacing gate.
+export interface ProjectileTimelinePoint { x: number; y: number; tick: number; }
+
+export function buildProjectileTimelines(
+  frames: Snapshot[],
+): Map<string, ProjectileTimelinePoint[]> {
+  const out = new Map<string, ProjectileTimelinePoint[]>();
+  for (const f of frames) {
+    const tick = f.tick ?? 0;
+    for (const p of f.projectiles ?? []) {
+      if (!p.position || !isGuidedProjectile(p)) continue;
+      let tl = out.get(p.id);
+      if (!tl) {
+        tl = [];
+        out.set(p.id, tl);
+        if (p.firer) {
+          for (const v of f.vehicles ?? []) {
+            if (!v.position || !v.seats) continue;
+            if (!v.seats.some((s) => s.occupantName === p.firer)) continue;
+            const dx = v.position.x - p.position.x;
+            const dy = v.position.y - p.position.y;
+            if (dx * dx + dy * dy > LAUNCHER_MAX_SQ) continue;
+            tl.push({ x: v.position.x, y: v.position.y, tick });
+            break;
+          }
+        }
+      }
+      const last = tl[tl.length - 1];
+      if (last) {
+        const dx = p.position.x - last.x, dy = p.position.y - last.y;
+        if (dx * dx + dy * dy < TRAIL_SPACING_SQ) continue;
+      }
+      tl.push({ x: p.position.x, y: p.position.y, tick });
+    }
+  }
+  return out;
 }
 
 function fillRun(frames: Snapshot[], from: number, to: number,

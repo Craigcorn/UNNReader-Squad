@@ -2,10 +2,12 @@
 
 import type { RecordingMeta, Snapshot } from "../state/types";
 import {
+  buildProjectileTimelines,
   interpolateProjectilesBetweenFulls,
   ReplayReconstructor,
   type RecordingLine,
 } from "../state/replayReconstruct";
+import { setProjectileTimelines } from "../canvas/projectiles";
 import {
   isPackedHeader,
   REPLAY_FORMAT_VERSION,
@@ -78,6 +80,7 @@ export async function fetchRecordingFrames(
     // No streaming support — fall back to a single blocking read.
     for (const line of (await r.text()).split("\n")) pushLine(line);
     interpolateProjectilesBetweenFulls(out);
+    setProjectileTimelines(buildProjectileTimelines(out));
     onProgress?.(out.length);
     return out;
   }
@@ -104,8 +107,10 @@ export async function fetchRecordingFrames(
   pushLine(buf.trim());
   // With the whole timeline loaded, the bracketing full for every
   // reconstructed frame is known — fill in projectile motion so the
-  // pair stream never stalls at position-frame boundaries.
+  // pair stream never stalls at position-frame boundaries, and build
+  // the seek-proof steering trails for guided rounds.
   interpolateProjectilesBetweenFulls(out);
+  setProjectileTimelines(buildProjectileTimelines(out));
   onProgress?.(out.length);
   return out;
 }
