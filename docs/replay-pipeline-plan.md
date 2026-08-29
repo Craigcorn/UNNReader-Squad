@@ -42,7 +42,7 @@ changelog's `[Unreleased]`; reports naming players live in
 | Discord alert webhook + delivery path (direct vs platform) | deferred by choice |
 | Replay retention policy | team discussion pending |
 | Main-server stats DB export (cross-version parity corpus 2) | offered, not yet provided |
-| speedhack 18.0 borderline | **resolved 2026-08-29: proven false positive** — a BMP-1 passenger the reader failed to seat (per-blueprint seat gap; BMP-1/BTR-4 rear seats never resolve, BMP-2 and trucks do). Threshold stays 18.0; chips filed for vehicle-correlation suppression and the seat-offset probe. Evidence: Misc/speedhack-borderline-verdict.md |
+| speedhack 18.0 borderline | **resolved 2026-08-29: a hull-rider, correctly flagged** — the player stood on a moving BMP-1's roof (dz +2.4 m, unseated, at the vehicle's exact road speed), a rules violation the alert usefully surfaced. Seat tracking is fine (the same blueprint resolves passengers in the Fallujah recording); an initial seat-gap theory was disproven by Craig's challenge. Threshold stays 18.0, no suppression wanted. Evidence: Misc/speedhack-borderline-verdict.md |
 | Production rollout path for the fork | Phase 2/3 decision (see open question 4) |
 | HEAD-request support | task chip pending |
 
