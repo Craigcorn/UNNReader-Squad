@@ -7,10 +7,10 @@
     "Alerts are written to --stats-db and read back from GET /api/alerts,",
     "which is live-gated (an alert names a player and calls them a cheater).",
     "",
-    "IMPORTANT: every 'sustained ticks' threshold is scaled to the production",
-    "tick rate of 0.5 Hz (--hz 0.5 => a 2 s tick). If you change --hz, re-scale",
-    "them or the detectors quietly change meaning. See sqreader/plugins/",
-    "cheat_detect.py for the table."
+    "Durations are GAME-CLOCK SECONDS and mean the same thing at any --hz;",
+    "the old 'sustained ticks' knobs (and their re-scale-by-hand warning)",
+    "are gone. See sqreader/plugins/cheat_detect.py for every tunable and",
+    "the reasoning each threshold carries."
   ],
 
   "cheat_detect": {
@@ -20,7 +20,7 @@
 
       "detect_speedhack": true,
       "speed_max_foot_mps": 18.0,
-      "speed_sustained_ticks": 8,
+      "speed_sustained_seconds": 16.0,
 
       "detect_infinite_ammo": true,
       "inf_ammo_min_damage_events": 3,

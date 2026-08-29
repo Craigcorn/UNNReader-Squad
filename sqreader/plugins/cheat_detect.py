@@ -302,10 +302,14 @@ class CheatDetect(Plugin):
         # There is an upper bound as well as a lower one, and it is not
         # decoration. A stamina cheat lets you sprint indefinitely; it does not
         # make you faster than a sprint. Above the cap the movement has some
-        # other explanation — a vehicle seat we failed to resolve, a parachute,
-        # the position leak that puts a mounted soldier where the helicopter
-        # was — and that is speedhack's business, with speedhack's tuning
-        # history behind it. On the reference archive this detector's only
+        # other explanation — a vehicle seat we failed to resolve, bail
+        # momentum from a moving vehicle, the position leak that puts a
+        # mounted soldier where the helicopter was — and that is speedhack's
+        # business, with speedhack's tuning history behind it. (The inherited
+        # comments elsewhere in this file mention parachutes; vanilla Squad
+        # has none, and repeating that claim here once misled a validation
+        # round — see the upstream history for what was actually meant.)
+        # On the reference archive this detector's only
         # alert was at 18.4 m/s: the same player, in the same moment, that
         # speedhack reported at 18.2. One phenomenon, two accusations, and only
         # one of them was about stamina. 9.0 leaves the 7.8 cap a margin for
