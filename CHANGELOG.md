@@ -203,6 +203,23 @@ follows [Semantic Versioning](https://semver.org/).
   recorder tolerates a single repeated guided-missile position (a build
   racing engine replication) so it can never punch a one-frame hole
   mid-flight for that heuristic to misread.
+- Two attempts to smooth projectile motion lost to the interpolation that
+  was right all along. Removing the projectile lerp made the canvas
+  graft pair one frame's tick with the NEXT frame's raw positions, and
+  at every frame boundary the playhead's zero-alpha branch flipped the
+  position back a step - a ping-pong that was, at once, the reported
+  hitching, the false freeze-kills that made the missile vanish
+  mid-flight, and the flooded trail that forgot its launch. The lerp is
+  restored; the dead-reckoner and the render-behind glide are deleted;
+  the tracker owns identity, trails and death, and motion belongs to the
+  interpolator. The trail now spaces its points at least 25 m apart so a
+  whole flight fits its buffer at any frame rate. What remained of the
+  original stutter had a data cause, not a viewer cause: position frames
+  carried players and vehicles but never projectiles, so a missile's
+  position only changed on full frames and the lerp had nothing to move
+  it between - the 4 Hz sampler now samples projectiles too, and
+  reconstruction splices them like everything else, so a missile flies
+  as smoothly as the soldier who fired it.
 - A mortar round could steal a flying TOW's tracker - and with six rounds
   in the air beside one missile, they took turns. The tracker's
   nearest-neighbour fallback, inherited from the original module, matched

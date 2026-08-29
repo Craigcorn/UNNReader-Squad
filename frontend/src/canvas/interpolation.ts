@@ -3,7 +3,7 @@
 // _lerpSnap returns a shallow-cloned `cur` with positions/yaw/cap%
 // linearly interpolated from `prev` for any entity matchable by ID.
 
-import type { CaptureZone, Player, Snapshot, Vec3, Vehicle, VehicleTurret } from "../state/types";
+import type { CaptureZone, Player, Projectile, Snapshot, Vec3, Vehicle, VehicleTurret } from "../state/types";
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -87,6 +87,7 @@ function indexBy<T, K>(arr: T[] | undefined | null, key: (e: T) => K | null | un
 interface PrevMaps {
   players: Map<string | null, Player>;
   vehicles: Map<string, Vehicle>;
+  projectiles: Map<string, Projectile>;
   caps: Map<string, CaptureZone>;
 }
 let cachedPrev: Snapshot | null = null;
@@ -97,6 +98,7 @@ function prevMaps(prev: Snapshot): PrevMaps {
   cachedMaps = {
     players: indexBy<Player, string | null>(prev.players, (p) => p.eosId ?? p.name),
     vehicles: indexBy<Vehicle, string>(prev.vehicles, (v) => v.id),
+    projectiles: indexBy<Projectile, string>(prev.projectiles, (p) => p.id),
     caps: indexBy<CaptureZone, string>(prev.captureZones, (c) => c.id),
   };
   cachedPrev = prev;
@@ -114,7 +116,7 @@ export function lerpSnap(prev: Snapshot | null, cur: Snapshot | null,
   const vehicleThrSq = teleportThresholdSq(VEHICLE_MAX_CMS, tickMs, 6_000);
 
   const { players: prevPlayers, vehicles: prevVehicles,
-          caps: prevCaps } = prevMaps(prev);
+          projectiles: prevProjectiles, caps: prevCaps } = prevMaps(prev);
 
   const players = (cur.players ?? []).map((c) => {
     const p = prevPlayers.get(c.eosId ?? c.name);
@@ -167,14 +169,21 @@ export function lerpSnap(prev: Snapshot | null, cur: Snapshot | null,
     };
   });
 
-  // Projectiles are NOT lerped here — deliberately. Two-tier
-  // reconstructed frames repeat the base frame's projectiles by
-  // reference, so a frame-pair lerp glides one span in four and freezes
-  // the rest; and lerped positions fed to the projectile tracker would
-  // pollute its velocity estimates and steering trails with synthetic
-  // points. The projectiles module dead-reckons its own motion from raw
-  // samples instead (see canvas/projectiles.ts).
-  const projectiles = cur.projectiles ?? [];
+  const projectiles = (cur.projectiles ?? []).map((c) => {
+    const p = prevProjectiles.get(c.id);
+    if (!p || !p.position || !c.position) return c;
+    // Projectiles can legitimately travel >50m/tick (mortar, rocket,
+    // tank shell), so no teleport guard — the tracker module has its
+    // own jump handling. This lerp was once removed on the theory that
+    // reconstructed frames defeat it; they don't — playback paces by
+    // frame timestamps, so pairs bracket real movement — and removing
+    // it made the canvas graft pair frame a's tick with frame b's RAW
+    // positions, which ping-ponged the tracker at every pair boundary
+    // (the hitching, false freeze-kills and flooded trails all traced
+    // back to that mismatch). The tracker consumes these displayed
+    // positions; they must move smoothly and consistently with alpha.
+    return { ...c, position: lerpPos(p.position, c.position, t) };
+  });
 
   const captureZones = (cur.captureZones ?? []).map((c) => {
     const p = prevCaps.get(c.id);

@@ -1,9 +1,19 @@
 // Mortar / rocket / guided-missile projectile rendering with cross-tick
-// tracking, render-behind motion smoothing, steering trails, and an
-// impact ring animation. Ported from the legacy vanilla-JS mortar-rounds
-// module; adapted to our React canvas where MapCanvas already runs a
-// continuous rAF loop (no need for the old requestDraw() pump — rings
-// animate naturally).
+// tracking, steering trails, and an impact ring animation. Ported from
+// the legacy vanilla-JS mortar-rounds module; adapted to our React
+// canvas where MapCanvas already runs a continuous rAF loop (no need
+// for the old requestDraw() pump — rings animate naturally).
+//
+// MOTION comes in already smooth: the replay path lerps projectile
+// positions between the frames bracketing the continuous playhead
+// (interpolation.ts), so this module draws `position` as given. Two
+// attempts to own motion here — a forward dead-reckoner, then a
+// render-behind glide — both lost to the same truth: the canvas graft
+// pairs frame a's discrete fields with the interpolated entities, and
+// any raw-position scheme de-synchronised from that pairing ping-ponged
+// the tracker at every pair boundary (hitching, false freeze-kills,
+// flooded trails). Motion belongs to the interpolator; this module owns
+// IDENTITY (tracking), HISTORY (trails) and DEATH (rings, ghosts).
 //
 // Tracking strategy in priority order:
 //   1. projectile.id (actor pointer) — stable while the actor lives,
@@ -12,39 +22,27 @@
 //      whose position-bucket sig drifted, only against id-less tracks
 //      of the same class, and never a dead track. An id-bearing
 //      projectile is a distinct actor and must never steal another
-//      round's tracker (it did once: see the guard at the match site).
+//      round's tracker (six mortar rounds once took turns hijacking an
+//      airborne TOW's tracker through this fallback).
 //   3. velocity vector (when backend Phase B+ emits it) — first-tick
 //      heading derived directly, no second sample required.
 //
-// Motion smoothing renders ONE SAMPLE BEHIND, gliding from the previous
-// raw sample to the newest over a smoothed arrival interval — the same
-// render-behind philosophy the live path uses. It replaced two designs
-// that failed in turn: the frame-pair lerp in lerpSnap (two-tier
-// reconstructed frames repeat the base frame's projectiles by
-// reference, so it glided one span in four and froze the rest) and a
-// forward dead-reckoner (its velocity came from wall-clock arrival
-// gaps, and replay frames arrive with jitter — a near-zero gap made the
-// velocity astronomical and flung the icon offscreen, which read as the
-// missile vanishing). Interpolating between two REAL samples can never
-// overshoot recorded data, is immune to arrival jitter, and costs only
-// ~one sample (~300 ms) of display lag a replay cannot feel.
-//
 // Steering trail: guided missiles (TOW / Kornet / HJ-8) are the one
 // projectile family whose PATH is the story — the gunner steers them —
-// so each guided track accumulates its recorded positions and draws the
-// WHOLE flight, launch to warhead, as a polyline in the firer's team
-// colour for as long as the missile lives; when it dies the complete
-// trail fades out as one. Ballistic rounds fly a fixed arc and get no
-// trail (deliberate).
+// so each guided track accumulates displayed positions at least
+// TRAIL_SPACING apart and draws the WHOLE flight, launch to warhead,
+// in the firer's team colour for as long as the missile lives; when it
+// dies the complete trail fades out as one. The spacing gate matters:
+// positions arrive at 60 fps now, and appending them all held only the
+// last few seconds of flight once the buffer capped. Ballistic rounds
+// fly a fixed arc and get no trail (deliberate).
 //
 // Frozen-ghost rule (viewer side, for recordings already written): a
 // wire-cut or self-destructed missile's actor lingers in server memory
 // up to a minute, parked mid-air with hasImpacted still false — a live
 // powered round moves every tick, so an explosive, unimpacted projectile
 // frozen across two TICK-ADVANCING frames is treated as dead: impact
-// ring at the true death point, icon off, trail fades. Counting tick
-// advances matters: reconstructed 4 Hz frames share the base full
-// frame's projectiles at the same tick and must not count. Resting smoke
+// ring at the true death point, icon off, trail fades. Resting smoke
 // rounds are not explosive and are exempt. A dead track is PINNED while
 // its actor is still in the snapshot — old recordings carry the ghost
 // records, and GC'ing the dead track while they stream would resurrect
@@ -65,8 +63,8 @@
 // REGRESSION (rewind, restart) clears everything — trails rebuild as the
 // replay plays forward, and the reset also suppresses the spurious rings
 // the vanish heuristic used to fire on every backward seek. A forward
-// seek shows up as an impossible between-sample jump and resets that
-// track's trail and motion instead of drawing a line across the map.
+// seek shows up as an impossible between-frame jump and resets that
+// track's trail and heading instead of drawing a line across the map.
 
 import type { Projectile, Snapshot, ViewState } from "../state/types";
 import { teamColor } from "./draw";
@@ -83,15 +81,13 @@ const MATCH_RADIUS_SQ  = MATCH_RADIUS_UE * MATCH_RADIUS_UE;
 const IMPACT_MS        = 1200;                           // ring lifetime
 const STALE_MS         = 12_000;                         // silently drop unseen live tracks
 const DEATH_FADE_MS    = 2_500;                          // whole-trail fade after death
+const TRAIL_SPACING_UE = 2_500;                          // ≥25 m between trail points
+const TRAIL_SPACING_SQ = TRAIL_SPACING_UE * TRAIL_SPACING_UE;
 const TRAIL_MAX_POINTS = 256;                            // per-track backstop
+const HEADING_MIN_SQ   = 10_000;                         // ignore <1 m for heading
 const FROZEN_DEAD_TICKS = 2;   // identical position across N tick advances
 const VANISH_DEAD_TICKS = 2;   // absent across N tick advances
-// Sample arrival pacing: EMA'd, clamped to sane bounds so one weird
-// gap (rAF hiccup, playback catch-up burst) cannot warp the glide.
-const GAP_MIN_MS = 60;
-const GAP_MAX_MS = 1_500;
-// A between-sample jump beyond this is a seek/teleport, not flight
-// (fastest tracked round ~300 m/s × ~1.5 s of gap, with headroom).
+// A between-frame jump beyond this is a seek/teleport, not flight.
 const SAMPLE_JUMP_SQ   = 60_000 * 60_000;                // 600 m
 
 const MORTAR_ICON_URL  = "./icons/deployables/mortar_round.svg";
@@ -104,12 +100,8 @@ interface TrailPoint { x: number; y: number; }
 
 interface Track {
   cls: string | null;       // classShort — NN may only pair like classes
-  x: number;                // newest RAW sample (world units)
+  x: number;                // last displayed position (world units)
   y: number;
-  px: number;               // previous RAW sample — the glide's start
-  py: number;
-  sampleAt: number;         // wall-clock ms the newest sample arrived
-  gapMs: number;            // EMA of sample arrival intervals
   heading: number | null;   // screen-space radians, +x axis baseline
   lastSeenAt: number;       // wall-clock ms
   lastSeenTick: number | null;  // snap.tick when last present
@@ -203,14 +195,7 @@ export function drawProjectilesAndImpacts(
     seen.add(sig);
 
     // Resolve previous track: sig hit first. The nearest-neighbour
-    // fallback runs ONLY for id-less rounds whose position-bucket sig
-    // drifted, and only against tracks that are themselves id-less and
-    // of the same class. An id-bearing projectile is a DISTINCT actor:
-    // when this fallback could cross that line, six mortar rounds
-    // spawning beside one airborne TOW each hijacked its tracker in
-    // turn — deleting it, resetting trail, pacing and heading — which
-    // reached the user as flicker, jitter, and a trail that restarted
-    // mid-flight. Never a dead one either.
+    // fallback runs ONLY for id-less rounds (see header).
     let prev: Track | null = tracks.get(sig) ?? null;
     if (!prev && !r.id) {
       let bestD2 = MATCH_RADIUS_SQ;
@@ -232,8 +217,6 @@ export function drawProjectilesAndImpacts(
     const track: Track = prev ?? {
       cls: r.classShort ?? null,
       x: r.position.x, y: r.position.y,
-      px: r.position.x, py: r.position.y,
-      sampleAt: now, gapMs: 0,
       heading: null, lastSeenAt: now, lastSeenTick: tick, kind,
       team: r.team ?? null, path: [], lastTick: tick, frozenTicks: 0,
       dead: false, diedAt: 0,
@@ -244,32 +227,17 @@ export function drawProjectilesAndImpacts(
     const dyU = r.position.y - track.y;
     const movedSq = prev ? dxU * dxU + dyU * dyU : Infinity;
 
-    // A fresh RAW sample (ignore <1 m jitter). The previous sample
-    // becomes the glide's start; the arrival interval feeds a clamped
-    // EMA so one weird gap cannot warp the pacing. An impossible jump
-    // is a seek, not flight — restart the track there.
-    if (prev && movedSq > 10_000) {
-      if (movedSq > SAMPLE_JUMP_SQ) {
-        track.px = r.position.x;
-        track.py = r.position.y;
-        track.gapMs = 0;
-        track.path.length = 0;
-        track.heading = null;
-      } else {
-        track.px = track.x;
-        track.py = track.y;
-        const gap = Math.min(GAP_MAX_MS,
-          Math.max(GAP_MIN_MS, now - track.sampleAt));
-        track.gapMs = track.gapMs > 0
-          ? track.gapMs * 0.6 + gap * 0.4 : gap;
-        const [psx, psy] = worldToScreen(view, cs, track.x, track.y);
-        const [csx, csy] = worldToScreen(view, cs,
-          r.position.x, r.position.y);
-        track.heading = Math.atan2(csy - psy, csx - psx);
-      }
-      track.x = r.position.x;
-      track.y = r.position.y;
-      track.sampleAt = now;
+    if (prev && movedSq > SAMPLE_JUMP_SQ) {
+      // A seek, not flight — restart history at the new spot.
+      track.path.length = 0;
+      track.heading = null;
+    } else if (prev && movedSq > HEADING_MIN_SQ) {
+      // Heading from the displayed motion, in screen space (handles the
+      // map projection correctly).
+      const [psx, psy] = worldToScreen(view, cs, track.x, track.y);
+      const [csx, csy] = worldToScreen(view, cs,
+        r.position.x, r.position.y);
+      track.heading = Math.atan2(csy - psy, csx - psx);
     }
     // First-tick fallback when backend emits velocity (Phase B+).
     if (track.heading == null && r.velocity
@@ -281,32 +249,41 @@ export function drawProjectilesAndImpacts(
       track.heading = Math.atan2(ty - oy, tx - ox);
     }
 
-    // Frozen-ghost detection — only when the tick actually advanced
-    // (reconstructed 4 Hz frames repeat the base frame's projectiles at
-    // the same tick and must not count).
+    // Frozen-ghost detection — only when the tick actually advanced.
+    // The interpolated stream moves every rAF while the round flies, so
+    // an advance with sub-metre movement means the underlying frames
+    // hold an identical position: the actor stopped simulating.
     const advanced = tick != null
       && (track.lastTick == null || tick > track.lastTick);
     if (prev && advanced) {
-      if (movedSq <= 10_000 && r.isExplosive && !r.hasImpacted) {
+      if (movedSq <= HEADING_MIN_SQ && r.isExplosive && !r.hasImpacted) {
         track.frozenTicks += 1;
         if (track.frozenTicks >= FROZEN_DEAD_TICKS) {
           markDead(sig, track, r.position.x, r.position.y, now);
         }
-      } else if (movedSq > 10_000) {
+      } else if (movedSq > HEADING_MIN_SQ) {
         track.frozenTicks = 0;
       }
     }
     if (advanced) track.lastTick = tick;
     if (tick != null) track.lastSeenTick = tick;
 
-    // Trail — guided rounds only: their path is the story, drawn whole
-    // from launch until the missile dies.
-    if (!track.dead && isGuided(r)
-        && (track.path.length === 0 || movedSq > 10_000)) {
-      track.path.push({ x: r.position.x, y: r.position.y });
-      if (track.path.length > TRAIL_MAX_POINTS) track.path.shift();
+    // Trail — guided rounds only, spaced so the whole flight fits: the
+    // displayed stream is 60 fps, and appending every step held only
+    // the last few seconds once the buffer capped.
+    if (!track.dead && isGuided(r)) {
+      const lastP = track.path[track.path.length - 1];
+      const farEnough = !lastP
+        || ((r.position.x - lastP.x) ** 2
+            + (r.position.y - lastP.y) ** 2) >= TRAIL_SPACING_SQ;
+      if (farEnough) {
+        track.path.push({ x: r.position.x, y: r.position.y });
+        if (track.path.length > TRAIL_MAX_POINTS) track.path.shift();
+      }
     }
 
+    track.x = r.position.x;
+    track.y = r.position.y;
     track.lastSeenAt = now;
     if (r.team != null) track.team = r.team;
 
@@ -356,21 +333,25 @@ export function drawProjectilesAndImpacts(
 
   // ---- pass 3: steering trails (under the icons) ------------------------
   for (const pt of tracks.values()) {
-    if (pt.path.length < 2) continue;
+    if (pt.path.length < 2 && !(pt.path.length === 1 && !pt.dead)) continue;
     // Alive: the whole flight, launch to warhead, tail slightly softer
-    // than the head. Dead: the complete trail fades out as one.
+    // than the head, closed off with a segment to the live position.
+    // Dead: the complete trail fades out as one.
     const deadFade = pt.dead
       ? Math.max(0, 1 - (now - pt.diedAt) / DEATH_FADE_MS) : 1;
     if (deadFade <= 0) continue;
     const col = teamColor(pt.team);
-    const n = pt.path.length;
+    const pts: TrailPoint[] = pt.dead
+      ? pt.path : [...pt.path, { x: pt.x, y: pt.y }];
+    const n = pts.length;
+    if (n < 2) continue;
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.lineWidth = 2 * cs.dpr;
     ctx.strokeStyle = col;
     for (let i = 1; i < n; i++) {
-      const a = pt.path[i - 1]!, b = pt.path[i]!;
+      const a = pts[i - 1]!, b = pts[i]!;
       const [ax, ay] = worldToScreen(view, cs, a.x, a.y);
       const [bx, by] = worldToScreen(view, cs, b.x, b.y);
       ctx.globalAlpha = deadFade * (0.35 + 0.45 * (i / n));
@@ -382,16 +363,9 @@ export function drawProjectilesAndImpacts(
     ctx.restore();
   }
 
-  // ---- pass 4: icons (gliding between the two newest samples) -----------
+  // ---- pass 4: icons ----------------------------------------------------
   for (const { r, track } of drawable) {
-    // Ease from the previous sample to the newest over the smoothed
-    // arrival interval. Bounded by real data on both ends: no
-    // extrapolation, no overshoot, nothing a jittery arrival can fling.
-    const t = track.gapMs > 0
-      ? Math.min(1, (now - track.sampleAt) / track.gapMs) : 1;
-    const wx = track.px + (track.x - track.px) * t;
-    const wy = track.py + (track.y - track.py) * t;
-    const [sx, sy] = worldToScreen(view, cs, wx, wy);
+    const [sx, sy] = worldToScreen(view, cs, r.position!.x, r.position!.y);
     if (sx < -80 || sx > cs.width + 80 || sy < -80 || sy > cs.height + 80) {
       continue;  // offscreen; tracker keeps updating for heading carry
     }

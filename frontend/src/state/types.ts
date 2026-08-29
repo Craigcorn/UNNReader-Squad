@@ -508,6 +508,13 @@ export interface PositionVehicle {
   team?: number | null;
 }
 
+export interface PositionProjectile {
+  id: string;
+  x: number;
+  y: number;
+  z?: number | null;
+}
+
 export interface PositionFrame {
   t: "pos";
   tick?: number;
@@ -515,6 +522,9 @@ export interface PositionFrame {
   fullTick?: number;
   players: PositionPlayer[];
   vehicles: PositionVehicle[];
+  // Recordings made before projectiles joined the 4 Hz sampler have no
+  // such key — their missiles move at full-frame cadence only.
+  projectiles?: PositionProjectile[];
 }
 
 // View transform: same model the old viewer used.

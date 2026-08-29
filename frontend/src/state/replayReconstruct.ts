@@ -8,14 +8,16 @@
 // path (MapCanvas frame interpolation) then plays it as smooth 4 Hz movement
 // with zero changes — all the work is here.
 //
-// Heap: only `players` / `vehicles` get new arrays (with shallow-cloned entries
-// for the ones that moved); every other array (markers, deployables, zones,
-// projectiles, …) is shared by reference with the base full frame, so a
-// position frame costs ~its moved entities, not a full-snapshot clone.
+// Heap: only `players` / `vehicles` / `projectiles` get new arrays (with
+// shallow-cloned entries for the ones that moved); every other array
+// (markers, deployables, zones, …) is shared by reference with the base
+// full frame, so a position frame costs ~its moved entities, not a
+// full-snapshot clone.
 
 import type {
   PositionFrame,
   PositionPlayer,
+  PositionProjectile,
   PositionVehicle,
   Snapshot,
 } from "./types";
@@ -73,6 +75,23 @@ export function reconstructFromPosition(
     };
   });
 
+  // Projectiles joined the sampler later, so the key is optional: an old
+  // recording without it shares the base array by reference exactly as
+  // before, and its missiles move at full-frame cadence only.
+  let projectiles = base.projectiles;
+  if (pos.projectiles && base.projectiles?.length) {
+    const prById = new Map<string, PositionProjectile>();
+    for (const pr of pos.projectiles) prById.set(pr.id, pr);
+    projectiles = base.projectiles.map((p) => {
+      const u = prById.get(p.id);
+      if (!u) return p;
+      return {
+        ...p,
+        position: { x: u.x, y: u.y, z: u.z ?? p.position?.z ?? null },
+      };
+    });
+  }
+
   return {
     ...base, // shares gameState/teams/squads/zones/markers/deployables/… by ref
     timestamp: pos.timestamp,
@@ -87,6 +106,7 @@ export function reconstructFromPosition(
     tick: pos.fullTick ?? base.tick,
     players,
     vehicles,
+    projectiles,
     // Kills are per-tick deltas already delivered on the full frame that
     // precedes these position frames; re-emitting them here would double-count
     // in the kill feed. Empty is correct — no new kills in a position frame.

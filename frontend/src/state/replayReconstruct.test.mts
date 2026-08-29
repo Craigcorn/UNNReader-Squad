@@ -156,5 +156,45 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
      "tick is monotonic across a two-tier stream");
 }
 
+// A reconstructed frame carries the POSITION frame's own timestamp —
+// playback paces by timestamp, so inheriting the base full's stamp
+// would collapse the whole full+positions group into one instant.
+// This pins behavior that already existed; it was nearly regressed.
+{
+  const r = new ReplayReconstructor();
+  const base = full(1);
+  r.push(base);
+  const rec: any = r.push(pos(2, [{ id: "eos-a", x: 99, y: 99 }]));
+  eq(rec.timestamp, "2026-01-01T00:00:02.5+00:00",
+     "reconstructed frame keeps the pos frame's own timestamp");
+  ok(rec.timestamp !== base.timestamp,
+     "and does not inherit the base full's timestamp");
+}
+
+// Projectile positions splice like vehicles when the frame carries them,
+// and an old recording without the key shares the base array untouched.
+{
+  const r = new ReplayReconstructor();
+  const base: any = full(1);
+  base.projectiles = [
+    { id: "0x9000", classShort: "BP_TOW_Proj_C",
+      position: { x: 1, y: 2, z: 3 } },
+    { id: "0x9001", classShort: "BP_Mortarround4_C",
+      position: { x: 7, y: 8, z: 9 } },
+  ];
+  r.push(base);
+  const withPr: any = pos(2, []);
+  withPr.projectiles = [{ id: "0x9000", x: 100, y: 200, z: 300 }];
+  const rec: any = r.push(withPr);
+  eq(rec.projectiles[0].position.x, 100, "sampled projectile moved");
+  eq(rec.projectiles[0].position.z, 300, "sampled projectile carries z");
+  ok(rec.projectiles[1] === base.projectiles[1],
+     "unsampled projectile shared by reference");
+  const withoutPr: any = pos(3, []);
+  const rec2: any = r.push(withoutPr);
+  ok(rec2.projectiles === base.projectiles,
+     "an old recording without the key shares the whole base array");
+}
+
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
