@@ -10,6 +10,7 @@ import { useViewerStore } from "../state/viewerStore";
 import type { VehicleComponent, VehicleSeat, VehicleTurret } from "../state/types";
 import { vehicleDisplayName } from "../data/vehicleDisplayNames";
 import { vehiclePhotoUrl } from "../data/vehiclePhotos";
+import { emplacementElevation } from "./entityInfo";
 import { vehicleLoadout, type LoadoutWeapon } from "../data/vehicleLoadouts";
 import { vehicleWeaponDisplayName } from "../data/vehicleWeaponsStatic";
 import { useStaticCatalogs } from "../data/staticCatalogs";
@@ -281,7 +282,9 @@ export function VehiclePanel() {
           </b></span>
           {v.kind && <span>Type: <b>{v.kind}</b></span>}
           {base && v.turrets?.[0]?.pitch != null && (
-            <span>Elevation: <b>{Math.round(v.turrets[0].pitch)}°</b></span>
+            <span>Elevation: <b>
+              {emplacementElevation(v.classShort, v.turrets[0].pitch)}
+            </b></span>
           )}
         </div>
 

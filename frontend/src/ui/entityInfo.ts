@@ -3,6 +3,30 @@
 
 import type { Marker, Player } from "../state/types";
 
+// The recorded emplacement pitch is the gun mount's rotation RELATIVE TO
+// ITS REST POSE, not an absolute elevation. Direct-fire emplacements
+// (HMG / ATGM / AA) rest level, so the delta IS the elevation — but a
+// mortar tube rests at Squad's minimum elevation of 800 mils = 45.0°, so
+// the raw delta read "0°" on a tube physically pointing 45° up. Verified
+// empirically: a mortar cranked to its stop recorded +43.8°, and
+// 45° + 43.875° = 88.875° — exactly Squad's 1580-mil maximum. Mortar
+// players think in mils, so mortars display mils (with degrees); every
+// other emplacement displays the raw degrees, which for them are true.
+const MORTAR_REST_PITCH_DEG = 45.0;
+
+export function emplacementElevation(
+  classShort: string | null | undefined,
+  pitch: number | null | undefined,
+): string | null {
+  if (pitch == null) return null;
+  if ((classShort ?? "").toUpperCase().includes("MORTAR")) {
+    const deg = MORTAR_REST_PITCH_DEG + pitch;
+    const mils = Math.round((deg * 6400) / 360);
+    return `${mils} mils (${deg.toFixed(1)}°)`;
+  }
+  return `${Math.round(pitch)}°`;
+}
+
 // Friendly label for a marker's BP asset name. Examples:
 //   "BP_MapMarker_Action_MoveSL"          → "Move (SL)"
 //   "BP_MapMarker_Support_FOB"            → "FOB request"

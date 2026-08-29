@@ -118,6 +118,18 @@ follows [Semantic Versioning](https://semver.org/).
   MG, auto-launchers the grenadier) until real icons are extracted from
   the game files, and the known gun classes carry friendly display names
   instead of raw blueprint strings.
+- A mortar's elevation read as a few degrees on a tube pointing halfway to
+  vertical. The recorded pitch is the gun mount's rotation relative to its
+  REST pose, not an absolute angle - direct-fire emplacements rest level,
+  so their delta is the true elevation, but a mortar rests at Squad's
+  800-mil minimum, 45.0 degrees, so the display showed the offset and
+  called it the elevation. The proof doubled as the calibration: a tube
+  cranked to its stop recorded +43.8, and 45 plus 43.875 is 88.875 degrees
+  - exactly the in-game 1580-mil maximum. Mortars now display the readout
+  a mortar player actually dials, mils with degrees alongside, and every
+  other emplacement keeps raw degrees, which for them were always true.
+  The recording is untouched - it was telling the truth all along; the
+  display just had to learn which truth.
 
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed

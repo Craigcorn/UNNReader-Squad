@@ -6,7 +6,8 @@ import { passengersOf } from "../canvas/passengers";
 import { useViewerStore } from "../state/viewerStore";
 import type { Snapshot } from "../state/types";
 import { vehicleDisplayName } from "../data/vehicleDisplayNames";
-import { markerLabel, findPlacer, ftLabel, fmtInt } from "./entityInfo";
+import { emplacementElevation, markerLabel, findPlacer, ftLabel, fmtInt }
+  from "./entityInfo";
 
 interface Props { hit: Hit | null; x: number; y: number; }
 
@@ -36,13 +37,14 @@ function body(hit: Hit, snap: Snapshot | null) {
       const base = e.owningDeployable
         ? (snap?.deployables ?? []).find((d) => d.id === e.owningDeployable)
         : undefined;
-      const pitch = base ? e.turrets?.[0]?.pitch : null;
+      const elev = base
+        ? emplacementElevation(e.classShort, e.turrets?.[0]?.pitch) : null;
       return <>
         {dot((base ?? e).team)}<b>{vehicleDisplayName(e.classShort)}</b>
         <br />HP {fmtInt((base ?? e).health)} / {fmtInt((base ?? e).maxHealth)}
         {base
           ? <><br /><span style={{ opacity: .6 }}>emplacement gun{
-              pitch != null ? ` · elevation ${Math.round(pitch)}°` : ""}</span></>
+              elev != null ? ` · elevation ${elev}` : ""}</span></>
           : e.attached && <><br /><span style={{ opacity: .6 }}>attached</span></>}
         {e.lastDamager && <><br />last hit by {e.lastDamager.name ?? "?"}</>}
         {passengers.length > 0 && (
