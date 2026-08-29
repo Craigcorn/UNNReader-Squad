@@ -84,6 +84,24 @@ follows [Semantic Versioning](https://semver.org/).
   the field. Gated to the two real teams; anything else stays null.
   Recordings made before this carry no team and never will.
 
+- An emplacement gun now records what it is aimed at and what it has left
+  to fire. The ammo was one pointer walk away the whole time: the gun is
+  its own seat pawn, so the exact chain the tank-turret reader follows -
+  inventory, current weapon, the magazines array - enters directly at the
+  actor, and reads back a mortar's 3 shells, an M2's 100-round belt and a
+  TOW's single missile, draining live on fire and readable with nobody in
+  the seat. The aim is NOT where tank turrets keep it - the pawn and
+  weapon roots that carry a Challenger's traverse sit frozen at zero on an
+  emplacement, and the gun's own root never moves after the build - it
+  lives on two scene components instead: the swivel mesh's yaw is the
+  traverse (relative to the root, the same hull-plus-turret addition the
+  viewer already does) and the gun mount's pitch is the elevation, which
+  mortars mirror into their own cached tube pitch - same number, so one
+  read path covers every emplacement type. All of it verified live by
+  aim-diffing and firing a manned TOW, L16 mortar and M2. Both land in
+  the turret record the viewer already speaks, plus a new optional
+  `pitch` no tank emits.
+
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
   server. When a downed player finally dies, Squad's own Die line names the

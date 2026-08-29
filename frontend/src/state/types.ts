@@ -103,6 +103,9 @@ export interface VehicleTurret {
   // Turret RootComponent.RelativeRotation.Yaw — the turret's facing
   // offset from the hull's attach socket. World yaw = vehicle.yaw + turret.yaw.
   yaw?: number | null;
+  // Emplacement guns only: elevation in degrees (GunMountComponent pitch).
+  // Tank turrets don't emit this.
+  pitch?: number | null;
 }
 
 export interface Vehicle {

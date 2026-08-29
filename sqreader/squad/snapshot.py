@@ -260,6 +260,18 @@ SQ_VEHICLE_SEATS_OFFSET = 0x8c8
 # manned TOW on Squad v10.5.3 (2026-08-29).
 SQ_DEPLOYABLE_VEHICLE_OWNING_OFF = 0x0b18
 
+# SQDeployableVehicle aim components. The gun's ROOT never rotates (its
+# recorded yaw sat frozen through a whole manned session) — the aim
+# lives one level down, on two scene components whose RelativeRotation
+# we can already read: SwivelMeshComponent.yaw is the traverse (world
+# aim = gun root yaw + swivel yaw, the same additive convention tank
+# turrets use) and GunMountComponent.pitch is the elevation (mortars
+# mirror it into CachedTubePitch — same number, one read path for every
+# emplacement type). Verified live by aim-diffing a manned TOW and L16
+# mortar on Squad v10.5.3 (2026-08-29); reflection fallbacks.
+SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF    = 0x0b08
+SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF = 0x0b10
+
 # SQVehicleSeatComponent layout (4-level chain: SQVehicleSeatComponent
 # → USceneComponent → UActorComponent → UObject, size=800). Six own
 # props identify the seat's role + occupant:
@@ -1051,11 +1063,14 @@ class SnapshotPaths:
     soldier_movement_offsets: dict[str, int] = field(default_factory=dict)
     # ----- Emplacement guns (SQDeployableVehicle) -----
     # The gun a fully built emplacement spawns is an SQVehicle subclass; its
-    # OwningDeployable pointer joins it to the baseplate deployable. Class
-    # address 0 when not loaded; the offset is reflected with the verified
-    # module constant as fallback.
+    # OwningDeployable pointer joins it to the baseplate deployable, and its
+    # aim lives on SwivelMeshComponent (traverse yaw) + GunMountComponent
+    # (elevation pitch). Class address 0 when not loaded; offsets are
+    # reflected with the verified module constants as fallback.
     sq_deployable_vehicle_class: int = 0
     dv_owning_deployable_off: int = SQ_DEPLOYABLE_VEHICLE_OWNING_OFF
+    dv_swivel_off: int = SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF
+    dv_gun_mount_off: int = SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1222,8 +1237,8 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         proj_layout["DamageInstigatorController"].offset
         if "DamageInstigatorController" in proj_layout
         else PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET)
-    # SQDeployableVehicle.OwningDeployable — reflected like the projectile
-    # field above, with the live-verified constant as fallback.
+    # SQDeployableVehicle fields — reflected like the projectile field
+    # above, with the live-verified constants as fallback.
     sq_deployable_vehicle_class_addr = _addr("SQDeployableVehicle")
     dv_layout = (get_class_layout(pm, sq_deployable_vehicle_class_addr, alloc)
                  if sq_deployable_vehicle_class_addr else {})
@@ -1231,6 +1246,14 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         dv_layout["OwningDeployable"].offset
         if "OwningDeployable" in dv_layout
         else SQ_DEPLOYABLE_VEHICLE_OWNING_OFF)
+    dv_swivel_off = (
+        dv_layout["SwivelMeshComponent"].offset
+        if "SwivelMeshComponent" in dv_layout
+        else SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF)
+    dv_gun_mount_off = (
+        dv_layout["GunMountComponent"].offset
+        if "GunMountComponent" in dv_layout
+        else SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF)
     return SnapshotPaths(
         sq_player_state_class=sq_player_state_class_addr,
         sq_soldier_class=sq_soldier_class_addr,
@@ -1257,6 +1280,8 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         projectile_instigator_off=projectile_instigator_off,
         sq_deployable_vehicle_class=sq_deployable_vehicle_class_addr,
         dv_owning_deployable_off=dv_owning_deployable_off,
+        dv_swivel_off=dv_swivel_off,
+        dv_gun_mount_off=dv_gun_mount_off,
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -2529,6 +2554,57 @@ def read_vehicle_turrets(pm: ProcessMemory, alloc: FNameEntryAllocator,
                     rec["yaw"] = r.yaw
         out.append(rec)
     return out
+
+
+def read_emplacement_weapon(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                            vh_addr: int,
+                            paths: SnapshotPaths) -> dict[str, Any] | None:
+    """The emplacement-gun twin of read_vehicle_turrets, same record shape.
+
+    An SQDeployableVehicle leaves VehicleTurrets empty, but the gun IS its
+    own seat pawn (SQVehicle inherits SQVehicleSeat), so the tank-turret
+    ammo chain enters directly at the actor: gun +CachedVehicleInventory ->
+    CurrentWeapon -> Magazines. Aim is NOT the tank convention (the pawn
+    and weapon roots stay frozen at 0) — it lives on two scene components:
+    SwivelMeshComponent.yaw is the traverse relative to the gun's root
+    (frontend adds root yaw, exactly as it does hull+turret) and
+    GunMountComponent.pitch is the elevation. All verified live by
+    fire/aim-diffing a manned TOW, L16 mortar and M2 on Squad v10.5.3.
+    Returns None when the weapon chain doesn't resolve — never a guess.
+    """
+    inv_addr = _safe(lambda: pm.read_u64(
+        vh_addr + SQ_TURRET_INVENTORY_OFFSET))
+    weapon_addr = _safe(lambda: pm.read_u64(
+        inv_addr + SQ_INV_CURRENT_WEAPON_OFFSET)) if inv_addr else 0
+    if not weapon_addr:
+        return None
+    rec: dict[str, Any] = {
+        "name": _uobject_name(pm, weapon_addr, alloc) or "",
+        "className": _uobject_class_name(pm, vh_addr, alloc) or "",
+    }
+    wcls = _uobject_class_name(pm, weapon_addr, alloc)
+    if wcls and wcls != "None":
+        rec["weaponClass"] = wcls
+    mag_hdr = read_tarray_header(
+        pm, weapon_addr + SQ_VWEAPON_MAGAZINES_OFFSET)
+    if mag_hdr is not None and 0 < mag_hdr.count <= 32 and mag_hdr.data_ptr:
+        raw = pm.try_read(mag_hdr.data_ptr, mag_hdr.count * 8)
+        if raw is not None and len(raw) == mag_hdr.count * 8:
+            pairs = [struct.unpack_from("<ii", raw, k * 8)
+                     for k in range(mag_hdr.count)]
+            rec["magazines"] = [cur for _mx, cur in pairs]
+            rec["magazinesMax"] = [mx for mx, _cur in pairs]
+    swivel = _safe(lambda: pm.read_u64(vh_addr + paths.dv_swivel_off))
+    if swivel:
+        r = read_frotator(pm, swivel + paths.scene_relative_rotation_off)
+        if r is not None:
+            rec["yaw"] = r.yaw
+    mount = _safe(lambda: pm.read_u64(vh_addr + paths.dv_gun_mount_off))
+    if mount:
+        r = read_frotator(pm, mount + paths.scene_relative_rotation_off)
+        if r is not None:
+            rec["pitch"] = r.pitch
+    return rec
 
 
 def read_root_pos_yaw(pm: ProcessMemory, actor_addr: int,
@@ -3915,6 +3991,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             own = struct.unpack("<Q", ob)[0] if ob and len(ob) == 8 else 0
             if own:
                 v["owningDeployable"] = f"{own:#x}"
+                # Weapon + aim, in the turret record shape the viewer
+                # already speaks (VehicleTurrets is empty on these).
+                wep = read_emplacement_weapon(pm, alloc, vh_addr, paths)
+                if wep:
+                    v["turrets"] = [wep]
     # Junk filter for vehicles — same pattern as deployables. Freed
     # vehicle slots routinely read back with:
     #   - classShort = None (class FName couldn't resolve)
