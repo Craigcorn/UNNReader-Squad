@@ -130,6 +130,21 @@ The public build is replay-only: `canLive: false` is hard-wired and
 (snapshot buffer, 6 s render delay) are dormant but intact — Phase 6 feeds
 them from a socket instead of SSE.
 
+### Known game-side behaviors (not reader defects)
+
+- **A recorded TOW/guided-missile path is the server's replicated missile,
+  not the gunner's.** Squad gives the FIRER client authority over guided
+  missiles: the gunner's client flies a missile that answers their inputs
+  instantly and decides where damage lands, while the server (and every
+  spectator) flies a divergent replica from replicated inputs. The two can
+  disagree hard — laterally near-mirrored on a steered shot (verified
+  2026-08-29: gunner watched a hard-right finish; the server actor hooked
+  left/east). A memory reader can only ever see the server's actor, so the
+  recording shows what spectators and victims saw; the DAMAGE it produced
+  is server-side and recorded with correct attribution. This is also why a
+  victim can watch a recorded TOW visually miss their vehicle and still
+  take its damage — that is faithful to what they experienced in game.
+
 ### Regressions with named guards (do not reintroduce)
 
 Pause rewinding to the frame boundary (`playback.ts:47`); seek-while-playing

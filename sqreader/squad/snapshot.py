@@ -686,6 +686,15 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQDeployableVehicle? (emplacement guns)
     is_deployable_vehicle: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
+    # class_addr -> is-subclass-of-SQGuidedProjectile? (TOW/Kornet/HJ-8)
+    is_guided_projectile: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
+    # Guided-missile actor addr -> its position last build. A live powered
+    # round moves every build, so a bit-identical repeat marks a dead actor
+    # (wire cut / self-destruct — bHasImpacted never flips for those) whose
+    # corpse would otherwise be recorded parked mid-air for up to a minute.
+    guided_last_pos: dict[int, tuple[float, float, float]] = field(
+        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -1071,6 +1080,12 @@ class SnapshotPaths:
     dv_owning_deployable_off: int = SQ_DEPLOYABLE_VEHICLE_OWNING_OFF
     dv_swivel_off: int = SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF
     dv_gun_mount_off: int = SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF
+    # SQGuidedProjectile — the wire/laser-guided missile family (TOW,
+    # Kornet, HJ-8). Singled out from the tracked-projectile union because
+    # guided rounds get two treatments ballistic rounds don't: a "guided"
+    # kind stamp (the viewer draws a steering trail only for rounds that
+    # can steer) and the frozen-ghost rule. 0 when the class isn't loaded.
+    sq_guided_projectile_class: int = 0
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1282,6 +1297,7 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         dv_owning_deployable_off=dv_owning_deployable_off,
         dv_swivel_off=dv_swivel_off,
         dv_gun_mount_off=dv_gun_mount_off,
+        sq_guided_projectile_class=_addr("SQGuidedProjectile"),
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -3962,11 +3978,41 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
         for rp_addr, cls_addr in rally_points_raw
     ]
     rally_points = [r for r in rally_points if not r.get("stale")]
-    projectiles = [
-        read_projectile(pm, alloc, paths, p_addr,
-                        class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc))
-        for p_addr, cls_addr in projectiles_raw
-    ]
+    # Guided missiles (TOW / Kornet / HJ-8) get two treatments the ballistic
+    # rounds don't. (1) kind "guided" — the viewer draws a steering trail
+    # only for rounds that can steer. (2) The frozen-ghost rule: a wire-cut
+    # or self-destructed missile's actor lingers in memory up to a minute,
+    # parked mid-air with bHasImpacted still false (a wire cut is not an
+    # impact), and recording it painted a dead missile hanging in the sky.
+    # A live powered round moves every build, so a bit-identical repeat of
+    # last build's position stops the emission — the death-point record
+    # itself was emitted the build it arrived there. Resting smoke rounds
+    # are not guided and are untouched.
+    projectiles = []
+    is_guided_cache = caches.is_guided_projectile
+    guided_last = caches.guided_last_pos
+    guided_seen: set[int] = set()
+    for p_addr, cls_addr in projectiles_raw:
+        rec = read_projectile(
+            pm, alloc, paths, p_addr,
+            class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc))
+        if paths.sq_guided_projectile_class and _is_subclass_of(
+                pm, cls_addr, paths.sq_guided_projectile_class,
+                is_guided_cache, _subgen):
+            rec["kind"] = "guided"
+            pos = rec.get("position") or {}
+            px, py, pz = pos.get("x"), pos.get("y"), pos.get("z")
+            if (isinstance(px, (int, float)) and isinstance(py, (int, float))
+                    and isinstance(pz, (int, float))):
+                key = (float(px), float(py), float(pz))
+                guided_seen.add(p_addr)
+                last = guided_last.get(p_addr)
+                guided_last[p_addr] = key
+                if last == key:
+                    continue
+        projectiles.append(rec)
+    for stale_addr in [a for a in guided_last if a not in guided_seen]:
+        del guided_last[stale_addr]
     vehicles = [
         read_vehicle(pm, alloc, paths, vh_addr,
                      class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc),

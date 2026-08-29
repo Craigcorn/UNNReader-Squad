@@ -300,10 +300,12 @@ export interface Projectile {
   position: Vec3 | null;
   // Optional Phase B+ fields. velocity lets the renderer rotate the
   // projectile icon on its very first frame instead of waiting for a
-  // second position sample. kind ('mortar' | 'grad' | 's5') drives
-  // per-type icon + impact radius. team enables firer-colour tint.
+  // second position sample. kind drives per-type icon + impact radius;
+  // "guided" (TOW/Kornet/HJ-8, stamped by the backend from the class
+  // hierarchy) additionally enables the steering trail. team enables
+  // firer-colour tint.
   velocity?: Vec3 | null;
-  kind?: "mortar" | "grad" | "s5" | null;
+  kind?: "mortar" | "grad" | "s5" | "guided" | null;
   team?: number | null;
   // Name of the player who fired this round, resolved from the instigator
   // controller. Null when world-spawned or unresolvable (no-guess).

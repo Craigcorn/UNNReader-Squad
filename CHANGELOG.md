@@ -84,6 +84,23 @@ follows [Semantic Versioning](https://semver.org/).
   the field. Gated to the two real teams; anything else stays null.
   Recordings made before this carry no team and never will.
 
+- A guided missile now draws the path it flew. A TOW is the one projectile
+  whose path IS the story - the gunner steers it - and the viewer showed
+  only a teleporting dot, so a steered flight played back as sparse jumps
+  and an investigation was needed to learn what one recording already
+  knew. Guided rounds (stamped by the backend from the class hierarchy,
+  with a class-name fallback so older recordings benefit too) leave an
+  age-fading trail in the firer's team colour that outlives the missile
+  by a few seconds. Ballistic rounds fly a fixed arc and deliberately get
+  no trail. Rewinding a replay now also resets the projectile tracker -
+  trails rebuild on the way forward, and the phantom impact rings and
+  inverted icon headings that every backward seek used to produce go
+  with it. The path drawn is the server's replicated missile - Squad
+  gives the firer's client authority over guided-missile damage, so a
+  steered shot can land somewhere the recorded path never went; the
+  recording shows what spectators and victims saw, which is why a victim
+  can watch a recorded TOW miss them and still take its damage
+  (docs/architecture-notes.md, "Known game-side behaviors").
 - An emplacement gun now records what it is aimed at and what it has left
   to fire. The ammo was one pointer walk away the whole time: the gun is
   its own seat pawn, so the exact chain the tank-turret reader follows -
@@ -130,6 +147,24 @@ follows [Semantic Versioning](https://semver.org/).
   other emplacement keeps raw degrees, which for them were always true.
   The recording is untouched - it was telling the truth all along; the
   display just had to learn which truth.
+- A dead missile no longer hangs in the sky for a minute. A wire-cut or
+  self-destructed TOW's actor lingers in server memory long after it
+  stops flying - parked mid-air with bHasImpacted still false, because a
+  wire cut is not an impact - and the reader faithfully recorded the
+  corpse: one real shot produced 32 flight samples and then 148 copies
+  of the same frozen position, drawn as a missile standing in the air
+  for 53 seconds, with the impact ring firing only when the actor was
+  finally garbage-collected. A live powered round moves every build, so
+  a guided projectile repeating last build's exact position is dead and
+  stops being emitted - the death-point record itself is kept, so the
+  file still shows where it died. Measured against every recording with
+  a guided shot in it: all 92 flight samples kept across three missiles,
+  only bit-identical repeats dropped. Resting smoke rounds are not
+  guided and are untouched. Recordings already written keep their
+  ghosts, so the viewer applies the same idea from the recorded data -
+  an explosive, unimpacted projectile frozen across two tick-advancing
+  frames is treated as dead: ring at the true death point, icon off,
+  trail left to fade.
 
 ### Fixed
 - The kill the game itself had credited was thrown away on every licensed
