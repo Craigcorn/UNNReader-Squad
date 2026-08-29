@@ -94,6 +94,30 @@ follows [Semantic Versioning](https://semver.org/).
   roster afterwards, because where the two namespaces do coincide that lookup
   works. Nothing is guessed on the way past: an id nobody can name is still a
   question mark.
+- The kill feed printed a kill the game itself had denied. It keeps a window
+  of recent wounds so a death that lands seconds later - a bleed-out, a
+  give-up - can be credited to whoever put the player down, and nothing in
+  that window is cleared when a medic gets there. So: downed by Bob,
+  revived, then killed inside the window by something the window can never
+  hold - a give-up or a world cause, both attacker-less and therefore never
+  buffered - and the survived wound won. The feed said "Bob killed X" while
+  the death frame was holding the right answer in its other hand. A wounded
+  entry now yields to the death frame's own killed event when that event
+  says self-inflicted, or names a cause with nobody behind it; a buffered
+  KILLED event keeps its precedence, because there the backend and the
+  window agree. And because a give-up's event runs one frame behind the
+  counter it belongs to - the same lateness an earlier fix already found -
+  a death whose frame carries nothing of its own now waits one frame before
+  the survived wound is allowed to answer for it. Measured over five
+  recorded matches: of 1539 feed rows, 13 changed - eleven from a name to
+  Suicide, and two to a different name, both of those because the game's own
+  killed event arrived a frame late naming somebody the wound had nothing to
+  do with (a frag, and a BM-21 rocket). 128 more rows are identical and
+  appear one frame later, which is what the wait costs. Clearing the wound
+  at the revive was measured and not shipped: the deaths counter never moves
+  on the frame a player goes from wounded to healthy, so that rule cannot
+  tell a revive from a respawn - it would have fired on 1968 transitions to
+  reach the 584 that were revives.
 - A player who waited out most of the medic timer died as a question mark.
   The correlation that names the wounder when a downed player finally gives
   up remembered wounds for 180 seconds - but Squad allows 300 before the

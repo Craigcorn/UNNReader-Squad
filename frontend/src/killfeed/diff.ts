@@ -384,6 +384,42 @@ export function diffSnapshot(
   // used to run one tick too early and conclude "?". A death with no
   // evidence this tick is therefore HELD one tick and retried against the
   // next tick's buffer and events; only then does it concede.
+  //
+  // The buffer is consulted first, and a wound is NOT cleared when the victim
+  // is revived (the backend clears its own correlation; this buffer has no such
+  // rule). Those two together printed a wrong name: downed by Bob, revived,
+  // then within the window a death whose evidence never enters the buffer — a
+  // give-up or a world cause, both attacker-less and therefore never buffered —
+  // and the stale wound won while the death frame was holding the right answer
+  // in its other hand. So before a wounded-only buffer entry is accepted, the
+  // death frame's own killed event gets to speak: if it says self-inflicted, or
+  // names a cause with nobody behind it, it outranks the buffer. A buffered
+  // KILLED event is untouched — that is the real bleed-out attribution, where
+  // the backend and the buffer agree.
+  //
+  // Clearing the wound outright at the revive was considered and NOT shipped.
+  // The signal for it would be a wounded -> healthy transition with no deaths
+  // increment, and measured over the five reference matches that rule cannot
+  // tell a revive from a respawn: the deaths counter never moves on the frame
+  // of the transition (0 of 1968 transitions), so it would have fired on all
+  // of them, and 1384 of those 1968 are respawns — a player who died, was
+  // counted, and came back. Separating the two needs the soldier's pawn
+  // address as well, and buying a rule that fires 2.4x more often than the
+  // thing it is for is not the way to close a mislabel that precedence
+  // already closes.
+  const ownDeathEvidence = (vname: string, veos: string | null): boolean => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i]!;
+      if (!ev.killed || ev.victim !== vname) continue;
+      if (veos != null && ev.victimEosId != null && ev.victimEosId !== veos) continue;
+      // Only evidence that CANNOT be somebody else's kill overrules a buffered
+      // wound: the victim's own hand, or a named cause with no attacker at all.
+      if (ev.selfInflicted === true || ev.attacker === vname) return true;
+      if (!ev.attacker && ev.damageType != null) return true;
+    }
+    return false;
+  };
+
   const resolveDeath = (
     v: PendingDeath, mustEmit: boolean,
   ): KillFeedEntry | null => {
@@ -395,6 +431,24 @@ export function diffSnapshot(
       if (v.veos != null && b.ev.victimEosId != null && b.ev.victimEosId !== v.veos) continue;
       buf = b;
       break;
+    }
+
+    if (buf && buf.ev.wounded && !buf.ev.killed) {
+      if (ownDeathEvidence(vname, v.veos)) {
+        // The wound was survived — a revive, or simply an incap this death is
+        // not the end of. Consume it so it cannot mis-credit a later death
+        // either, and let the death frame's own answer through below.
+        buf.used = true;
+        buf = undefined;
+      } else if (!mustEmit) {
+        // Nothing this frame contradicts the buffered wound — but a give-up's
+        // self-inflicted event runs one tick behind the death counter it
+        // belongs to (the same lateness the pendingDeaths hold exists for), so
+        // accepting the wound here would decide before the evidence could
+        // arrive. Hold, and let the next ADVANCED tick settle it: if no such
+        // event comes, the buffer answers below exactly as it always has.
+        return null;
+      }
     }
 
     if (buf) {

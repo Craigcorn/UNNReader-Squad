@@ -164,18 +164,23 @@ function evt(o: any): any {
 
 // 10. REALISTIC: a wounded event attributes the death that follows it a
 //     few ticks later (Squad's incap -> bleed-out; no killed event fires).
+//     The death frame carries nothing of its own, so it is held one advanced
+//     tick first — a give-up's self-inflicted event runs exactly that late,
+//     and the buffered wound must not decide before it can arrive.
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)]));
+  diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)], [], 1));
   // Tick 2: A incapacitates B — NO row (incaps aren't surfaced), B alive.
   const r1 = diffSnapshot(s, snap([P("A","a",1,0,0), P("B","b",2,0,0)],
-    [evt({ wounded:true, attacker:"A", victim:"B", victimEosId:"b", victimTeam:2 })]));
+    [evt({ wounded:true, attacker:"A", victim:"B", victimEosId:"b", victimTeam:2 })], 2));
   // Tick 3: no new events, B bleeds out (death counter rises).
-  const r2 = diffSnapshot(s, snap([P("A","a",1,1,0), P("B","b",2,0,1)], []));
+  const r2 = diffSnapshot(s, snap([P("A","a",1,1,0), P("B","b",2,0,1)], [], 3));
+  const r3 = diffSnapshot(s, snap([P("A","a",1,1,0), P("B","b",2,0,1)], [], 4));
   eq(r1.newEntries.length, 0, "incap emits no row (kills only)");
-  eq(r2.newEntries.length, 1, "death row emitted on bleed-out");
-  eq(r2.newEntries[0].killer, "A", "death attributed to the wounder A");
-  eq(r2.newEntries[0].wounded, false, "the death row is a kill, not wounded");
+  eq(r2.newEntries.length, 0, "evidence-free death frame held one tick");
+  eq(r3.newEntries.length, 1, "death row emitted on bleed-out");
+  eq(r3.newEntries[0].killer, "A", "death attributed to the wounder A");
+  eq(r3.newEntries[0].wounded, false, "the death row is a kill, not wounded");
 }
 
 // 11. A wounded player who never dies (revived) yields no row at all.
@@ -192,12 +197,13 @@ function evt(o: any): any {
 // 12. Most-recent attacker wins: A wounds B, then C wounds B, then B dies.
 {
   const s = createDiffState();
-  diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,0),P("C","c",1,0,0)]));
+  diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,0),P("C","c",1,0,0)], [], 1));
   diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,0),P("C","c",1,0,0)],
-    [evt({ wounded:true, attacker:"A", victim:"B", victimEosId:"b", victimTeam:2 })]));
+    [evt({ wounded:true, attacker:"A", victim:"B", victimEosId:"b", victimTeam:2 })], 2));
   diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,0),P("C","c",1,0,0)],
-    [evt({ wounded:true, attacker:"C", victim:"B", victimEosId:"b", victimTeam:2 })]));
-  const r = diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,1),P("C","c",1,1,0)], []));
+    [evt({ wounded:true, attacker:"C", victim:"B", victimEosId:"b", victimTeam:2 })], 3));
+  diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,1),P("C","c",1,1,0)], [], 4));
+  const r = diffSnapshot(s, snap([P("A","a",1,0,0),P("B","b",2,0,1),P("C","c",1,1,0)], [], 5));
   eq(r.newEntries.length, 1, "one death row");
   eq(r.newEntries[0].killer, "C", "attributed to the most recent wounder C");
 }
@@ -241,13 +247,14 @@ function evt(o: any): any {
 {
   const s = createDiffState();
   const at = (players: any[], events: any[], es: number): any =>
-    ({ tick: 1, players, damageEvents: events, gameState: { elapsedSec: es }, vehicles: [] });
-  diffSnapshot(s, at([P("A","a",1,0,0), P("B","b",2,0,0)], [], 100));            // seed
+    ({ tick: es, players, damageEvents: events, gameState: { elapsedSec: es }, vehicles: [] });
+  diffSnapshot(s, at([P("A","a",1,0,0), P("B","b",2,0,0)], [], 99));             // seed
   diffSnapshot(s, at([P("A","a",1,0,0), P("B","b",2,0,0)],                        // A wounds B @100
     [evt({ wounded:true, attacker:"A", victim:"B", victimEosId:"b", victimTeam:2 })], 100));
   for (let i = 0; i < 30; i++)                                                    // 30 quiet ticks (>20:
     diffSnapshot(s, at([P("A","a",1,0,0), P("B","b",2,0,0)], [], 101 + i));       //   old tick-TTL dead)
-  const r = diffSnapshot(s, at([P("A","a",1,1,0), P("B","b",2,0,1)], [], 131));   // B bleeds out @131 (31s<45s)
+  diffSnapshot(s, at([P("A","a",1,1,0), P("B","b",2,0,1)], [], 131));             // B bleeds out @131 (31s<45s)
+  const r = diffSnapshot(s, at([P("A","a",1,1,0), P("B","b",2,0,1)], [], 132));   // held one tick, then answered
   eq(r.newEntries.length, 1, "bleed-out death emitted after many quiet ticks");
   eq(r.newEntries[0].killer, "A", "attacker survives the game-time TTL at 4 Hz");
 }
@@ -335,6 +342,115 @@ function evt(o: any): any {
   eq(drained.length, 1, "drain flushes the held death");
   eq(drained[0].victim, "A", "drained row keeps its victim");
   eq(drainPendingDeaths(s).length, 0, "drain empties the hold");
+}
+
+// ---- A death frame's own evidence outranks a stale buffered wound --------
+// Downed by Bob, revived, then killed by something the buffer can never hold
+// (a give-up or a world cause — both attacker-less, so neither is ever
+// buffered). The buffer still holds Bob's wound and used to win with it,
+// printing a kill the game itself did not award.
+
+// B1. Give-up inside the window, its self-inflicted event on the death frame.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],           // Bob downs X
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 3));  // revived: no death, no row
+  const r = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,1)],
+    [evt({ killed:true, victim:"X", victimEosId:"x", selfInflicted:true })], 4));
+  eq(r.newEntries.length, 1, "one row for the give-up");
+  eq(r.newEntries[0].suicide, true, "the death frame's own event wins: Suicide");
+  eq(r.newEntries[0].killer, null, "Bob is not credited a kill the game denied");
+}
+
+// B2. Same, but the self-inflicted event runs one tick behind the counter —
+//     the held-death path. Still Suicide, not Bob.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 3));  // revived
+  const r1 = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,1)], [], 4));
+  eq(r1.newEntries.length, 0, "death held for the evidence that runs a tick late");
+  const r2 = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,1)],
+    [evt({ killed:true, victim:"X", victimEosId:"x", selfInflicted:true })], 5));
+  eq(r2.newEntries.length, 1, "emitted once the evidence arrives");
+  eq(r2.newEntries[0].suicide, true, "late self-inflicted event still wins");
+  eq(r2.newEntries[0].killer, null, "still not Bob");
+}
+
+// B3. World death after the revive: an attacker-less event naming a cause.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 3));  // revived
+  const r = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,1)],
+    [evt({ killed:true, victim:"X", victimEosId:"x", damageType:"BP_Fall_C" })], 4));
+  eq(r.newEntries.length, 1, "one row for the fall");
+  eq(r.newEntries[0].killer, null, "the fall is nobody's kill");
+  eq(r.newEntries[0].damageType, "BP_Fall_C", "world cause shown instead of Bob");
+}
+
+// B4. No regression where backend and buffer agree: the bleed-out's own
+//     killed event names Bob, so Bob it is.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  const r = diffSnapshot(s, snap([P("Bob","bob",1,1,0), P("X","x",2,0,1)],
+    [evt({ killed:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 3));
+  eq(r.newEntries.length, 1, "one row, emitted on the death frame");
+  eq(r.newEntries[0].killer, "Bob", "a buffered KILLED event keeps its precedence");
+  eq(r.newEntries[0].suicide, false, "not mistaken for a self death");
+}
+
+// B5. The fallback the buffer exists for survives: no death-frame event at
+//     all, within the hold or after it, and Bob is still the answer.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  const r1 = diffSnapshot(s, snap([P("Bob","bob",1,1,0), P("X","x",2,0,1)], [], 3));
+  eq(r1.newEntries.length, 0, "held one tick for evidence that never comes");
+  const r2 = diffSnapshot(s, snap([P("Bob","bob",1,1,0), P("X","x",2,0,1)], [], 4));
+  eq(r2.newEntries.length, 1, "the buffered wound answers after the hold");
+  eq(r2.newEntries[0].killer, "Bob", "attributed to the wounder, as always");
+}
+
+// B6. Recency is unchanged: revived, then shot dead by Carl.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("Carl","carl",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("Carl","carl",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("Carl","carl",1,0,0), P("X","x",2,0,0)], [], 3));
+  const r = diffSnapshot(s, snap(
+    [P("Bob","bob",1,0,0), P("Carl","carl",1,1,0), P("X","x",2,0,1)],
+    [evt({ killed:true, attacker:"Carl", victim:"X", victimEosId:"x", victimTeam:2 })], 4));
+  eq(r.newEntries.length, 1, "one row");
+  eq(r.newEntries[0].killer, "Carl", "the newer attacker wins by recency");
+}
+
+// B7. A stale wound consumed by the death frame's own answer cannot come
+//     back to mis-credit the victim's NEXT death.
+{
+  const s = createDiffState();
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)], [], 1));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,0)],
+    [evt({ wounded:true, attacker:"Bob", victim:"X", victimEosId:"x", victimTeam:2 })], 2));
+  diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,1)],
+    [evt({ killed:true, victim:"X", victimEosId:"x", selfInflicted:true })], 3));
+  const r1 = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,2)], [], 4));
+  eq(r1.newEntries.length, 0, "second death held, nothing left to attribute it");
+  const r2 = diffSnapshot(s, snap([P("Bob","bob",1,0,0), P("X","x",2,0,2)], [], 5));
+  eq(r2.newEntries.length, 1, "second death conceded honestly");
+  eq(r2.newEntries[0].killer, null, "the spent wound does not credit Bob again");
 }
 
 console.log(`\nkillfeed diff tests: ${passed} passed, ${failed} failed`);
