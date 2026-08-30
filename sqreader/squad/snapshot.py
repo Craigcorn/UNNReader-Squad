@@ -1331,6 +1331,10 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
             "CombatScore", "RevivedPoints", "PlayerStates", "LeaderState",
             "Name", "SquadCreatorName", "SquadCreatorSteamID",
             "CreationTimeStamp",
+            # The read branch for this sat fully written and dead for as
+            # long as the squad reader existed — the name was simply never
+            # in this list, so no recording ever carried the flag.
+            "bIsLocked",
         ]),
         # BP_CaptureZone_C is the actor; its key field is SQCaptureZone
         # (a pointer to the SQCaptureZoneComponent that holds all the

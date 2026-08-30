@@ -7,6 +7,17 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A locked squad finally says so. The read branch for the squad's
+  bIsLocked flag sat fully written in the reader - comment, name-resolved
+  offset, padlock intent and all - and the viewer side was equally
+  finished: the scoreboard padlock, its tooltip, even the rule that a
+  recording from before the field existed shows nothing rather than
+  guessing "open". The one thing missing was the field's name in the
+  reflection grab list, so the read never ran and no recording ever
+  carried the flag. One word added; the whole feature lit up. First
+  entry of the format-lock pass: recordings now carry squad lock state
+  on every full frame, and it costs bytes.
+
 - `scripts/stats_parity.py` measures the claim the whole recording pipeline
   rests on: that a `.sqrx` file alone reproduces the statistics the agent
   computed while the match was being played. It replays an entire archive, in
