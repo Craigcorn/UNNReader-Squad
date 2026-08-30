@@ -14,6 +14,26 @@ import type { Marker, Player } from "../state/types";
 // other emplacement displays the raw degrees, which for them are true.
 const MORTAR_REST_PITCH_DEG = 45.0;
 
+// The game's own per-seat role label arrives as an attach-socket FName
+// (socket_seat_driver / socket_seat_gunner / socket_seat_passenger3 …).
+// Prettify it for display; anything that doesn't match the known shape
+// still gets a readable fallback (strip the prefix, split, capitalise)
+// rather than raw machinery. Null in → null out, so callers can fall
+// back to the hand-maintained loadout catalog for old recordings.
+export function seatRoleFromSocket(
+  socket: string | null | undefined,
+): string | null {
+  if (!socket) return null;
+  const m = socket.match(/^socket_seat_([a-z]+?)(\d+)?$/i);
+  if (m) {
+    const word = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase();
+    return m[2] ? `${word} ${m[2]}` : word;
+  }
+  const stripped = socket.replace(/^socket_(seat_)?/i, "").replace(/_/g, " ");
+  return stripped
+    ? stripped.charAt(0).toUpperCase() + stripped.slice(1) : null;
+}
+
 export function emplacementElevation(
   classShort: string | null | undefined,
   pitch: number | null | undefined,

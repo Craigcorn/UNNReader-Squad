@@ -1,7 +1,7 @@
 // The elevation display encodes one calibration fact: a mortar tube RESTS
 // at Squad's 800-mil minimum, so the recorded delta maps [0 .. 43.875] onto
 // [800 .. 1580] mils. These pins keep that mapping from drifting.
-import { emplacementElevation } from "./entityInfo.ts";
+import { emplacementElevation, seatRoleFromSocket } from "./entityInfo.ts";
 
 let passed = 0, failed = 0;
 function ok(cond: any, msg: string) {
@@ -22,6 +22,20 @@ ok(emplacementElevation("BP_EmplacedM2_Tripod_ACOG_Bunker_C", -1.8) === "-2°",
    "depression below level shows negative degrees");
 ok(emplacementElevation("BP_EmplacedM2_Tripod_ACOG_Bunker_C", null) === null,
    "no recorded pitch, no elevation line");
+
+// --- seat socket labels ----------------------------------------------------
+ok(seatRoleFromSocket("socket_seat_driver") === "Driver",
+   "driver socket prettifies");
+ok(seatRoleFromSocket("socket_seat_gunner") === "Gunner",
+   "gunner socket prettifies");
+ok(seatRoleFromSocket("socket_seat_passenger3") === "Passenger 3",
+   "numbered passenger keeps its number");
+ok(seatRoleFromSocket("socket_seat_commander") === "Commander",
+   "unlisted role words still prettify by shape");
+ok(seatRoleFromSocket("weird_socket_name") === "Weird socket name",
+   "unknown shapes get a readable fallback, not raw machinery");
+ok(seatRoleFromSocket(null) === null,
+   "no socket, no label — the catalog stays the fallback");
 
 console.log(`entityInfo: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

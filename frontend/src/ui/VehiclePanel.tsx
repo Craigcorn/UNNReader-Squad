@@ -10,7 +10,7 @@ import { useViewerStore } from "../state/viewerStore";
 import type { VehicleComponent, VehicleSeat, VehicleTurret } from "../state/types";
 import { vehicleDisplayName } from "../data/vehicleDisplayNames";
 import { vehiclePhotoUrl } from "../data/vehiclePhotos";
-import { emplacementElevation } from "./entityInfo";
+import { emplacementElevation, seatRoleFromSocket } from "./entityInfo";
 import { vehicleLoadout, type LoadoutWeapon } from "../data/vehicleLoadouts";
 import { vehicleWeaponDisplayName } from "../data/vehicleWeaponsStatic";
 import { useStaticCatalogs } from "../data/staticCatalogs";
@@ -226,6 +226,7 @@ export function VehiclePanel() {
   let displaySeats: { idx: number; occupantName: string | null;
                        occupantTeamId?: number | null;
                        occupantEosId?: string | null;
+                       seatSocket?: string | null;
                        seatHealth?: number | null }[];
   let totalSeats = 0;
   let occupiedSeats = 0;
@@ -491,15 +492,22 @@ export function VehiclePanel() {
             }
             for (const s of displaySeats) {
               if (usedIdx.has(s.idx)) continue;
+              // The recorded seat socket is the game's own label — it
+              // outranks the index-keyed catalog guess for seats the
+              // catalog doesn't know (emplacements, new vehicles).
               rows.push({ key: `x${s.idx}`,
-                role: seatRoleLabel(seatRoleByIdx.get(s.idx), s.idx),
+                role: seatRoleLabel(
+                  seatRoleFromSocket(s.seatSocket) ?? seatRoleByIdx.get(s.idx),
+                  s.idx),
                 occ: s, live: null, switchable: [], turretClass: null,
                 isWeaponSeat: false });
             }
           } else {
             for (const s of displaySeats) {
               rows.push({ key: `s${s.idx}`,
-                role: seatRoleLabel(seatRoleByIdx.get(s.idx), s.idx),
+                role: seatRoleLabel(
+                  seatRoleFromSocket(s.seatSocket) ?? seatRoleByIdx.get(s.idx),
+                  s.idx),
                 occ: s, live: null, switchable: [], turretClass: null,
                 isWeaponSeat: false });
             }

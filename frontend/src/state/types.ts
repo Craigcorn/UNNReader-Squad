@@ -79,6 +79,11 @@ export interface VehicleSeat {
   idx: number;
   addr?: string;
   seatComponentClass?: string | null;
+  // The game's own role label for the seat (socket_seat_driver /
+  // _gunner / _passengerN), recorded verbatim. Absent on recordings
+  // made before the agent read it — the loadout catalog stays the
+  // fallback for those.
+  seatSocket?: string | null;
   seatHealth?: number | null;
   playerStateAddr?: string;
   occupantName: string | null;

@@ -34,6 +34,22 @@ follows [Semantic Versioning](https://semver.org/).
   nothing rather than a guess. Enables commander identity and uptime
   per match. Third entry of the format-lock pass.
 
+- Every vehicle seat now records the game's own name for itself. The
+  viewer's Driver/Gunner labels came from a hand-maintained catalog
+  keyed by vehicle class and seat index - right for vehicles someone
+  entered, a guess for everything else, and empty for every vehicle a
+  future Squad patch adds. The seat's config struct carries an
+  attach-socket name (socket_seat_driver, socket_seat_gunner,
+  socket_seat_passenger3 - verified on live vehicles) which IS the
+  game's own role label; it is now recorded verbatim per seat, read once
+  per seat component and cached, offset resolved by reflection with the
+  live-verified constant as fallback. The viewer prettifies the socket
+  and prefers it over the catalog for seats the catalog does not know;
+  old recordings fall back to the catalog exactly as before. Measured
+  against a real 100-player recording through the recorder's own
+  compression: 304,186 stamped seat entries cost 197 KB - 0.46% of the
+  file. Fourth entry of the format-lock pass.
+
 - `scripts/stats_parity.py` measures the claim the whole recording pipeline
   rests on: that a `.sqrx` file alone reproduces the statistics the agent
   computed while the match was being played. It replays an entire archive, in

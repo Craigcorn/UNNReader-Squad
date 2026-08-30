@@ -286,6 +286,13 @@ SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET = 0x2f0  # bool
 # from the seat component). +0x4d0 on the SQVehicleSeat pawn.
 SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET = 0x4d0
 
+# SQVehicleSeatConfig.SeatAttachSocket — the game's own role label for a
+# seat (socket_seat_driver / _gunner / _passengerN), an FName inside the
+# config struct at SQ_SEATCOMP_SEAT_CONFIG_OFFSET. Fallback for
+# reflection; verified via dump_struct_layout + live vehicles on Squad
+# v10.5.3 (2026-08-30).
+SQ_SEATCFG_ATTACH_SOCKET_OFF = 0x30
+
 # Phase 2B (2026-05-26): vehicle subsystem reads.
 # SQVehicle (inherits SQVehicleSeat → SQPawn → Pawn → Actor → Object).
 # Verified via dump_struct_layout against live Squad v10.4.1.
@@ -721,6 +728,10 @@ class SnapshotCaches:
     # around for the lifetime of the vehicle.
     weapon_class_names: dict[int, str | None] = field(default_factory=dict)
     weapon_uobj_names:  dict[int, str | None] = field(default_factory=dict)
+    # Seat component addr -> its config's SeatAttachSocket FName — the
+    # game's own role label for the seat. Static for the component's
+    # life, so one read each, then dictionary hits.
+    seat_socket_names: dict[int, str | None] = field(default_factory=dict)
     # SQVehicleComponent (wheels/tracks/ammo racks/engine) class + instance
     # names. Components persist for the vehicle's life (~95% hit), and a vehicle
     # can carry up to 64 of them — the biggest per-vehicle name-read amplifier,
@@ -1080,6 +1091,9 @@ class SnapshotPaths:
     # kind stamp (the viewer draws a steering trail only for rounds that
     # can steer) and the frozen-ghost rule. 0 when the class isn't loaded.
     sq_guided_projectile_class: int = 0
+    # SeatAttachSocket offset within SQVehicleSeatConfig — the game's own
+    # role label for each vehicle seat. Reflected; verified fallback.
+    seatcfg_socket_off: int = SQ_SEATCFG_ATTACH_SOCKET_OFF
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1141,6 +1155,11 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # SQDeployableVehicle — the gun a fully built emplacement spawns
         # (its OwningDeployable pointer joins gun to baseplate).
         "SQDeployableVehicle": "Class",
+        # SQVehicleSeatConfig — the per-seat config struct; its
+        # SeatAttachSocket FName is the game's own role label for the
+        # seat (socket_seat_driver / _gunner / _passengerN — verified on
+        # live vehicles).
+        "SQVehicleSeatConfig": "ScriptStruct",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
@@ -1246,6 +1265,16 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         proj_layout["DamageInstigatorController"].offset
         if "DamageInstigatorController" in proj_layout
         else PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET)
+    # SQVehicleSeatConfig.SeatAttachSocket — the seat's role socket offset
+    # WITHIN the config struct (the struct itself sits at the verified
+    # SQ_SEATCOMP_SEAT_CONFIG_OFFSET on the seat component).
+    seatcfg_addr = _addr("SQVehicleSeatConfig")
+    seatcfg_layout = (get_class_layout(pm, seatcfg_addr, alloc)
+                      if seatcfg_addr else {})
+    seatcfg_socket_off = (
+        seatcfg_layout["SeatAttachSocket"].offset
+        if "SeatAttachSocket" in seatcfg_layout
+        else SQ_SEATCFG_ATTACH_SOCKET_OFF)
     # SQDeployableVehicle fields — reflected like the projectile field
     # above, with the live-verified constants as fallback.
     sq_deployable_vehicle_class_addr = _addr("SQDeployableVehicle")
@@ -1292,6 +1321,7 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         dv_swivel_off=dv_swivel_off,
         dv_gun_mount_off=dv_gun_mount_off,
         sq_guided_projectile_class=_addr("SQGuidedProjectile"),
+        seatcfg_socket_off=seatcfg_socket_off,
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -2196,7 +2226,8 @@ def _veh_arr_off(paths: "SnapshotPaths | None", name: str, const: int) -> int:
 
 
 def read_vehicle_seats(pm: ProcessMemory, alloc: FNameEntryAllocator,
-                       paths: SnapshotPaths, vh_addr: int
+                       paths: SnapshotPaths, vh_addr: int,
+                       caches: SnapshotCaches | None = None,
                        ) -> list[dict[str, Any]]:
     """
     Walk SQVehicle.VehicleSeats (TArray<SQVehicleSeatComponent*>) and
@@ -2224,6 +2255,23 @@ def read_vehicle_seats(pm: ProcessMemory, alloc: FNameEntryAllocator,
             "addr": f"{comp_addr:#x}",
             "seatComponentClass": _uobject_class_name(pm, comp_addr, alloc),
         }
+        # The game's own role label for this seat — SeatAttachSocket in
+        # the seat's config struct (socket_seat_driver / _gunner /
+        # _passengerN, verified live). Recorded verbatim; the viewer
+        # prettifies. Static per component, so cached: one FName read per
+        # seat lifetime, dictionary hits after.
+        if caches is not None and comp_addr in caches.seat_socket_names:
+            sock = caches.seat_socket_names[comp_addr]
+        else:
+            sock = _read_fname(
+                pm,
+                comp_addr + SQ_SEATCOMP_SEAT_CONFIG_OFFSET
+                + paths.seatcfg_socket_off,
+                alloc)
+            if caches is not None and sock and sock != "None":
+                caches.seat_socket_names[comp_addr] = sock
+        if sock and sock != "None":
+            seat["seatSocket"] = sock
         # Seat pawn (SQVehicleSeat) — gives the per-seat health.
         seat_pawn_addr = _safe(lambda: pm.read_u64(
             comp_addr + SQ_SEATCOMP_SEAT_PAWN_OFFSET))
@@ -2707,7 +2755,7 @@ def read_vehicle(pm: ProcessMemory, alloc: FNameEntryAllocator,
     # Per-seat occupancy (Driver / Gunner / additional seats with
     # the player currently sitting in each). See read_vehicle_seats
     # for the field shapes.
-    seats = read_vehicle_seats(pm, alloc, paths, vh_addr)
+    seats = read_vehicle_seats(pm, alloc, paths, vh_addr, caches=caches)
     if seats:
         out["seats"] = seats
     # Phase 2B subsystems — engine + per-component HP + turret weapons.
