@@ -54,6 +54,53 @@ def test_run_doctor_ok_and_drift(monkeypatch):
     assert d["state"] == "drift" and d["ok"] is False and len(d["drift"]) == 1
 
 
+def test_required_names_drift_when_present_and_skip_when_absent(monkeypatch):
+    """The tier's whole contract in one place: a loaded type missing a
+    declared name is drift (the rename that silently darkens a capture); a
+    type that is not loaded is skipped, never drift. Without this test the
+    drift path is exercised nowhere — the run_doctor tests' mock resolves no
+    classes, so every row silently takes the skip branch."""
+    class Arr:
+        def find_by_name(self, name, **k):
+            if name == "SQHealingEquipableItem":
+                return []                      # not loaded in this level
+            return [(1, 0xBEEF)]
+
+    import sqreader.ue.reflection as refl
+    # Layout carries the commander names but NOT CurrentHeldItem.
+    monkeypatch.setattr(refl, "get_class_layout",
+                        lambda pm, addr, alloc: {"CommanderState": object(),
+                                                 "CurrentCommander": object()})
+    drift, skipped = health.check_required_names(None, Arr(), None)
+    assert any(d["class"] == "SQSoldier" and d["field"] == "CurrentHeldItem"
+               and d["problem"] == "required name not reflected"
+               for d in drift)
+    assert any(s["class"] == "SQHealingEquipableItem" for s in skipped)
+    assert not any(d["class"] == "SQHealingEquipableItem" for d in drift)
+    assert not any(d["class"] in ("SQTeamState", "SQCommanderState")
+                   for d in drift)
+
+
+def test_run_doctor_reports_required_name_drift(monkeypatch):
+    """A missing required name must surface as state=drift through run_doctor
+    — it rides the same alarm the offset tables do."""
+    class Arr:
+        num_elements = 1000
+
+        def find_by_name(self, name, **k):
+            return [("addr", 0xDEAD)] if name == "SQPlayerState" else []
+
+    monkeypatch.setattr(health, "check_offset_drift", lambda *a: [])
+    monkeypatch.setattr(
+        health, "check_required_names",
+        lambda *a: ([{"class": "SQSoldier", "field": "CurrentHeldItem",
+                      "expected": None, "live": None,
+                      "problem": "required name not reflected"}], []))
+    d = health.run_doctor(None, Arr(), _OkAlloc())
+    assert d["state"] == "drift" and d["ok"] is False
+    assert d["drift"][0]["field"] == "CurrentHeldItem"
+
+
 def test_hardcoded_offset_tables_shape():
     tables = health.hardcoded_offset_tables()
     names = {c for c, _k, _o, _t in tables}
