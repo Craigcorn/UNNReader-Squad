@@ -1615,12 +1615,19 @@ def read_team_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
         if cs:
             pso = paths.ps_offsets
             out["commanderStateAddr"] = f"{cs:#x}"
+            # With no commander the pointer can still reference a
+            # placeholder state whose name reads empty — absence beats
+            # an empty string, so identity fields are only emitted when
+            # they actually carry one (live-verified on an empty server:
+            # pointer set, name "").
             if "PlayerNamePrivate" in pso:
-                out["commanderName"] = read_fstring(
-                    pm, cs + pso["PlayerNamePrivate"])
+                nm = read_fstring(pm, cs + pso["PlayerNamePrivate"])
+                if nm:
+                    out["commanderName"] = nm
             if "OnlineUserId" in pso:
-                out["commanderEosId"] = read_fstring(
-                    pm, cs + pso["OnlineUserId"])
+                eos = read_fstring(pm, cs + pso["OnlineUserId"])
+                if eos:
+                    out["commanderEosId"] = eos
     # array sizes are useful structural diagnostics
     for arr_name, key in [
         ("PlayerStates", "playerCount"),
