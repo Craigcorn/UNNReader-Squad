@@ -7,6 +7,17 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The damage-event struct moved and the reader read past it. Some Squad
+  update shifted SQSoldier.LastTakeHitInfo from 0x24c8 to 0x24e8, and
+  the memory-side damage enrichment - hit timestamps, damage type, the
+  causer, the bone - had been reading the old address ever since:
+  thirty-two bytes of the wrong memory, shipped as plausible data. The
+  log-authoritative kill feed kept the feed itself correct, which is
+  exactly why nobody noticed. The doctor caught it on the FIRST run
+  after the struct went on its watch list - the strongest possible
+  argument for that list - and the base now resolves by reflection at
+  startup like everything else, with the corrected constant as the
+  fallback it should always have been.
 - Doctor now watches the offsets it was quietly missing. A Squad update
   that moves a struct is silent - the reader keeps reading the old
   address, gets neighbouring bytes and ships plausible garbage - and

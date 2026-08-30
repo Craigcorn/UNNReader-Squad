@@ -561,7 +561,11 @@ RALLY_OFFSETS = {
 # damage amount, damage type, causer actor + class, wounded/killed
 # flags, ServerTimestamp (event identity), plus the embedded
 # PointDamageEvent whose HitResult holds Distance + BoneName.
-SQ_SOLDIER_TAKE_HIT_INFO_OFFSET      = 0x24c8
+# Drifted once: 0x24c8 -> 0x24e8 (+0x20) at a Squad update, caught by the
+# doctor's FIRST run after the struct went on its watch list — the read had
+# been silently degraded until then. Reflected at resolve time now; this is
+# the fallback.
+SQ_SOLDIER_TAKE_HIT_INFO_OFFSET      = 0x24e8
 
 # Within SQTakeHitInfo (own props from reflection dump):
 THI_ACTUAL_DAMAGE_OFFSET             = 0x0000  # float
@@ -1097,6 +1101,10 @@ class SnapshotPaths:
     # SeatAttachSocket offset within SQVehicleSeatConfig — the game's own
     # role label for each vehicle seat. Reflected; verified fallback.
     seatcfg_socket_off: int = SQ_SEATCFG_ATTACH_SOCKET_OFF
+    # SQSoldier.LastTakeHitInfo base — the damage-event enrichment struct.
+    # Reflected; the constant fallback has drifted once already, which is
+    # how it earned this field.
+    soldier_take_hit_off: int = SQ_SOLDIER_TAKE_HIT_INFO_OFFSET
     # SQHealingEquipableItem — the game's own base class for the healing
     # family (field dressings, medic bags). It is what a held medical item
     # is CHECKED against, so a faction's new dressing classifies itself.
@@ -1349,6 +1357,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         seatcfg_socket_off=seatcfg_socket_off,
         sq_healing_item_class=sq_healing_item_class_addr,
         healing_item_offsets=grab(heal_layout, ["HealedTarget", "ItemCount"]),
+        soldier_take_hit_off=(sd_layout["LastTakeHitInfo"].offset
+                              if "LastTakeHitInfo" in sd_layout
+                              else SQ_SOLDIER_TAKE_HIT_INFO_OFFSET),
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -2373,16 +2384,20 @@ def _resolve_weak_obj(pm: ProcessMemory, arr: GUObjectArray, addr: int) -> int:
         return 0
 
 
-def peek_take_hit_ts(pm: ProcessMemory, soldier_addr: int) -> float | None:
+def peek_take_hit_ts(pm: ProcessMemory, soldier_addr: int,
+                     take_hit_off: int = SQ_SOLDIER_TAKE_HIT_INFO_OFFSET
+                     ) -> float | None:
     """
     Cheap 4-byte read of just the FSQTakeHitInfo.ServerTimestamp field.
     Caller uses this to decide whether to invoke the full struct read
     (~50 bytes + 2 GUObjectArray lookups) — skipping the heavy work
     when ts hasn't moved is a ~2x CPU win on a populated server.
+
+    `take_hit_off` is the reflected LastTakeHitInfo base from
+    SnapshotPaths — the module constant is only the fallback default.
     """
     tb = pm.try_read(
-        soldier_addr + SQ_SOLDIER_TAKE_HIT_INFO_OFFSET
-            + THI_SERVER_TIMESTAMP_OFFSET, 4)
+        soldier_addr + take_hit_off + THI_SERVER_TIMESTAMP_OFFSET, 4)
     if tb is None or len(tb) < 4:
         return None
     ts = struct.unpack("<f", tb)[0]
@@ -2394,7 +2409,8 @@ def peek_take_hit_ts(pm: ProcessMemory, soldier_addr: int) -> float | None:
 
 
 def read_take_hit_info(pm: ProcessMemory, alloc: FNameEntryAllocator,
-                       arr: GUObjectArray, soldier_addr: int
+                       arr: GUObjectArray, soldier_addr: int,
+                       take_hit_off: int = SQ_SOLDIER_TAKE_HIT_INFO_OFFSET
                        ) -> dict[str, Any] | None:
     """
     Read SQSoldier.LastTakeHitInfo (FSQTakeHitInfo struct) and return a
@@ -2406,10 +2422,10 @@ def read_take_hit_info(pm: ProcessMemory, alloc: FNameEntryAllocator,
     (LastTakeHitInfo persists until the soldier respawns; we don't want
     to re-emit the same event every tick).
     """
-    ts = peek_take_hit_ts(pm, soldier_addr)
+    ts = peek_take_hit_ts(pm, soldier_addr, take_hit_off)
     if ts is None:
         return None
-    base = soldier_addr + SQ_SOLDIER_TAKE_HIT_INFO_OFFSET
+    base = soldier_addr + take_hit_off
 
     out: dict[str, Any] = {"ts": ts}
 
@@ -3919,7 +3935,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             # the timestamp actually changed.
             soldier_addr_str = sld.get("addr")
             soldier_addr_i = int(soldier_addr_str, 0) if soldier_addr_str else 0
-            new_ts = (peek_take_hit_ts(pm, soldier_addr_i)
+            new_ts = (peek_take_hit_ts(pm, soldier_addr_i,
+                                       paths.soldier_take_hit_off)
                       if soldier_addr_i else None)
             prev_lhb = damage_tracker.last_seen.get(key, 0)
             prev_ts = damage_tracker.last_ts.get(key, 0.0)
@@ -3934,7 +3951,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 continue
 
             # Only NOW do the full struct walk — typically <1% of ticks.
-            thi = (read_take_hit_info(pm, alloc, arr, soldier_addr_i)
+            thi = (read_take_hit_info(pm, alloc, arr, soldier_addr_i,
+                                      paths.soldier_take_hit_off)
                    if soldier_addr_i else None)
 
             attacker_name = ctrl_to_name.get(lhb) if lhb else None
