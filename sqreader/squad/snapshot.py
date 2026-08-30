@@ -689,14 +689,6 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQGuidedProjectile? (TOW/Kornet/HJ-8)
     is_guided_projectile: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
-    # Guided-missile actor addr -> (position last build, consecutive
-    # repeats seen). A live powered round moves every build, so repeats
-    # mark a dead actor (wire cut / self-destruct — bHasImpacted never
-    # flips for those) whose corpse would otherwise be recorded parked
-    # mid-air for up to a minute. One repeat is tolerated (a build racing
-    # engine replication); emission stops from the second repeat on.
-    guided_last_pos: dict[int, tuple[tuple[float, float, float], int]] = field(
-        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -3980,24 +3972,23 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
         for rp_addr, cls_addr in rally_points_raw
     ]
     rally_points = [r for r in rally_points if not r.get("stale")]
-    # Guided missiles (TOW / Kornet / HJ-8) get two treatments the ballistic
-    # rounds don't. (1) kind "guided" — the viewer draws a steering trail
-    # only for rounds that can steer. (2) The frozen-ghost rule: a wire-cut
-    # or self-destructed missile's actor lingers in memory up to a minute,
-    # parked mid-air with bHasImpacted still false (a wire cut is not an
-    # impact), and recording it painted a dead missile hanging in the sky.
-    # A live powered round moves every build — but a SINGLE repeat is
-    # tolerated (a build racing the engine's replication can catch the
-    # same transform twice), so only the second consecutive bit-identical
-    # repeat onward is dropped. The death-point record and one echo stay
-    # in the file; the minute of corpse does not. Punching a one-frame
-    # hole mid-flight is exactly what this must never do: the viewer's
-    # vanish heuristic would read absence as an impact. Resting smoke
-    # rounds are not guided and are untouched.
+    # Guided missiles (TOW / Kornet / HJ-8) are stamped kind "guided" from
+    # the class hierarchy — SQGuidedProjectile is the engine's own
+    # definition of a steerable round, so a new missile classifies
+    # correctly the day Squad ships it, with no name list to maintain.
+    # The viewer draws steering trails only for these.
+    #
+    # A dead missile's lingering actor (wire cut / self-destruct — parked
+    # mid-air for up to a minute with bHasImpacted still false) is
+    # recorded EXACTLY as memory holds it, corpse and all. Dropping those
+    # records at capture was tried and deliberately reverted: the corpse
+    # is genuinely what the server captured, the viewer already
+    # recognises it (an explosive, unimpacted round frozen across tick
+    # advances) and cleans up the display — and keeping the raw record
+    # means the behaviour can be reinterpreted later without wishing the
+    # data back into files that no longer hold it.
     projectiles = []
     is_guided_cache = caches.is_guided_projectile
-    guided_last = caches.guided_last_pos
-    guided_seen: set[int] = set()
     for p_addr, cls_addr in projectiles_raw:
         rec = read_projectile(
             pm, alloc, paths, p_addr,
@@ -4006,23 +3997,7 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 pm, cls_addr, paths.sq_guided_projectile_class,
                 is_guided_cache, _subgen):
             rec["kind"] = "guided"
-            pos = rec.get("position") or {}
-            px, py, pz = pos.get("x"), pos.get("y"), pos.get("z")
-            if (isinstance(px, (int, float)) and isinstance(py, (int, float))
-                    and isinstance(pz, (int, float))):
-                key = (float(px), float(py), float(pz))
-                guided_seen.add(p_addr)
-                last = guided_last.get(p_addr)
-                if last is not None and last[0] == key:
-                    repeats = last[1] + 1
-                    guided_last[p_addr] = (key, repeats)
-                    if repeats >= 2:
-                        continue
-                else:
-                    guided_last[p_addr] = (key, 0)
         projectiles.append(rec)
-    for stale_addr in [a for a in guided_last if a not in guided_seen]:
-        del guided_last[stale_addr]
     vehicles = [
         read_vehicle(pm, alloc, paths, vh_addr,
                      class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc),

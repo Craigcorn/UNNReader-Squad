@@ -230,6 +230,17 @@ follows [Semantic Versioning](https://semver.org/).
   draws, precomputed so the pair stream never stalls. Works on every
   recording ever made, single-tier production files included, and costs
   the recording nothing.
+- The recorder writes the dead missile's corpse again, on purpose. The
+  frozen-ghost emission stop was reverted by the owner's call, and the
+  reasoning is worth keeping: the lingering actor is genuinely what the
+  server captured, the viewer already recognises the signature and
+  cleans up the DISPLAY on any recording old or new, and keeping the
+  raw record in the file means the behaviour can be reinterpreted later
+  without wishing data back into files that no longer hold it. The
+  recorder's job is memory truth; interpretation lives in the viewer.
+  The kind "guided" stamp stays - it reads the engine's own class
+  hierarchy, so a guided weapon Squad ships next year classifies
+  correctly the day it lands, with no name list to grow.
 - A steering trail could no longer survive the scrub bar. The trail was
   accumulated incrementally in playback order, so a backward seek reset
   the tracker (trail restarting mid-air at the seek point, heading
