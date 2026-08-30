@@ -696,6 +696,9 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQGuidedProjectile? (TOW/Kornet/HJ-8)
     is_guided_projectile: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
+    # class_addr -> is-subclass-of-SQHealingEquipableItem? (dressings/bags)
+    is_healing_item: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -1094,6 +1097,16 @@ class SnapshotPaths:
     # SeatAttachSocket offset within SQVehicleSeatConfig — the game's own
     # role label for each vehicle seat. Reflected; verified fallback.
     seatcfg_socket_off: int = SQ_SEATCFG_ATTACH_SOCKET_OFF
+    # SQHealingEquipableItem — the game's own base class for the healing
+    # family (field dressings, medic bags). It is what a held medical item
+    # is CHECKED against, so a faction's new dressing classifies itself.
+    # 0 when the class isn't loaded (no medic has equipped one yet).
+    sq_healing_item_class: int = 0
+    # Its HealedTarget (the pawn a running heal channel is pointed at) and
+    # ItemCount (uses left, inherited from SQEquipableItem). Reflection only,
+    # with NO hardcoded fallback: a rename must blank the medical block, not
+    # read whatever now lives at a remembered offset.
+    healing_item_offsets: dict[str, int] = field(default_factory=dict)
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1160,6 +1173,10 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # seat (socket_seat_driver / _gunner / _passengerN — verified on
         # live vehicles).
         "SQVehicleSeatConfig": "ScriptStruct",
+        # SQHealingEquipableItem — the healing family's base class (field
+        # dressings, medic bags). Optional: it only loads once such an item
+        # exists in the level, and every medical read is gated on it.
+        "SQHealingEquipableItem": "Class",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
@@ -1218,6 +1235,14 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     sq_soldier_movement_class_addr = _addr("SQSoldierMovement")
     smv_layout = (get_class_layout(pm, sq_soldier_movement_class_addr, alloc)
                   if sq_soldier_movement_class_addr else {})
+    # SQHealingEquipableItem — the healing family's own base class. The layout
+    # chain-walks its supers, so ItemCount (declared on SQEquipableItem) comes
+    # back with it, the same way vehicle_array_offsets picks up fields declared
+    # on SQVehicleSeat. Absent class or absent name -> the medical block simply
+    # never fires; there is deliberately no constant to fall back on.
+    sq_healing_item_class_addr = _addr("SQHealingEquipableItem")
+    heal_layout = (get_class_layout(pm, sq_healing_item_class_addr, alloc)
+                   if sq_healing_item_class_addr else {})
 
     def grab(layout, names):
         return {n: layout[n].offset for n in names if n in layout}
@@ -1322,6 +1347,8 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         dv_gun_mount_off=dv_gun_mount_off,
         sq_guided_projectile_class=_addr("SQGuidedProjectile"),
         seatcfg_socket_off=seatcfg_socket_off,
+        sq_healing_item_class=sq_healing_item_class_addr,
+        healing_item_offsets=grab(heal_layout, ["HealedTarget", "ItemCount"]),
         sq_pawn_team_off=(pawn_layout["Team"].offset
                           if "Team" in pawn_layout else None),
         ps_offsets=grab(ps_layout, [
@@ -1332,6 +1359,10 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         ]),
         soldier_offsets=grab(sd_layout, [
             "Health", "BreathHoldStamina", "CurrentHeldWeapon",
+            # The equipable slot: dressings and medic bags live here, NOT in
+            # CurrentHeldWeapon (which holds guns and reads empty the whole
+            # time a dressing is out).
+            "CurrentHeldItem",
             # SQSoldierMovement component pointer — the two-hop base for the
             # real sprint Stamina (offsets in soldier_movement_offsets).
             "SoldierMovement",
@@ -2924,7 +2955,14 @@ def read_player(pm: ProcessMemory, alloc: FNameEntryAllocator,
                 soldier_addr = cand
                 break
 
-    out["soldier"] = _read_soldier(pm, alloc, arr, paths, soldier_addr)
+    out["soldier"] = _read_soldier(pm, alloc, arr, paths, soldier_addr,
+                                   caches=caches)
+    if out["soldier"] is not None and soldier_addr:
+        # The pawn's own address, private (underscore) like the controller and
+        # last-hit links above. build_snapshot needs it to turn one player's
+        # HealedTarget pointer into another player's identity, and strips it in
+        # the same pass — no consumer ever sees a raw address here.
+        out["_soldierAddr"] = soldier_addr
 
     # PlayerStatsIndex — keys the Squad stats-collector arrays. Read off the
     # soldier's controller (APawn.Controller == this player's SQPlayerController).
@@ -3037,7 +3075,8 @@ def _splice_collector_stats(players: list[dict],
 
 def _read_soldier(pm: ProcessMemory, alloc: FNameEntryAllocator,
                   arr: GUObjectArray, paths: SnapshotPaths,
-                  soldier_addr: int | None
+                  soldier_addr: int | None,
+                  caches: SnapshotCaches | None = None
                   ) -> dict[str, Any] | None:
     """
     Read the SQSoldier-derived UObject at `soldier_addr`. Returns None if
@@ -3189,6 +3228,43 @@ def _read_soldier(pm: ProcessMemory, alloc: FNameEntryAllocator,
                     if mags:
                         weapon["magazines"] = mags
                 block["weapon"] = weapon
+
+    # Medical — which healing item is held, how many uses are left in it, and,
+    # while a heal/bandage channel is actually running, who it is pointed at.
+    # The gate is the class hierarchy, the same technique as the projectile
+    # "guided" stamp: SQHealingEquipableItem is the game's own family base, so
+    # a faction's new dressing classifies itself the day Squad ships it, with
+    # no name list to maintain. CurrentHeldItem is the equipable slot — guns
+    # live in CurrentHeldWeapon and never appear here, and a dressing never
+    # appears there, so the two reads never have to be reconciled.
+    #
+    # HealedTarget is a plain UObject pointer (NOT a weak ptr) at the target's
+    # soldier pawn; it fills the instant a channel starts and clears the
+    # instant it ends, so its presence IS the channel. Resolved to an identity
+    # by build_snapshot, which is the only place that knows every pawn address
+    # read this tick.
+    ho = paths.healing_item_offsets
+    if ("CurrentHeldItem" in so and paths.sq_healing_item_class
+            and "HealedTarget" in ho):
+        item_addr = _resolve_weak_obj(
+            pm, arr, soldier_addr + so["CurrentHeldItem"])
+        if item_addr:
+            cb = pm.try_read(item_addr + UOBJ_CLASS_PRIVATE, 8)
+            cls_addr = struct.unpack("<Q", cb)[0] if cb and len(cb) == 8 else 0
+            if cls_addr and _is_subclass_of(
+                    pm, cls_addr, paths.sq_healing_item_class,
+                    caches.is_healing_item if caches else {},
+                    caches.subclass_gen if caches else 0):
+                med: dict[str, Any] = {
+                    "item": _uobject_class_name(pm, item_addr, alloc)}
+                if "ItemCount" in ho:
+                    cnt = _safe(lambda: pm.read_i32(item_addr + ho["ItemCount"]))
+                    if cnt is not None and 0 <= cnt <= 255:
+                        med["count"] = int(cnt)
+                tgt = _safe(lambda: pm.read_u64(item_addr + ho["HealedTarget"]))
+                if tgt:
+                    med["_healTargetAddr"] = tgt  # resolved in build_snapshot
+                block["medical"] = med
 
     # Position via RootComponent -> ComponentToWorld.Translation (world-space
     # cached transform, correct even when attached to a vehicle seat). Shared
@@ -3770,6 +3846,27 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
 
     players = [read_player(pm, alloc, arr, paths, addr, caches=caches)
                for addr in players_raw]
+
+    # ---- who a medic is healing -------------------------------------------
+    # A healing item's HealedTarget points at the target's SOLDIER PAWN — the
+    # same actor the roster's Soldier field holds — so the pointer becomes an
+    # identity by looking it up among the pawns read this tick. Done here, over
+    # the whole roster, because no single player's read can see another's pawn.
+    # A self-heal resolves to the holder's own id: that is the correct, explicit
+    # self signal, not a bug. A target that despawned inside the tick resolves
+    # to nothing and the key is simply absent — never a guess.
+    addr_to_eos = {p["_soldierAddr"]: p.get("eosId")
+                   for p in players if p.get("_soldierAddr")}
+    for p in players:
+        sld = p.get("soldier")
+        med = sld.get("medical") if isinstance(sld, dict) else None
+        if med:
+            tgt = med.pop("_healTargetAddr", None)
+            if tgt:
+                eos = addr_to_eos.get(tgt)
+                if eos:
+                    med["target"] = eos
+        p.pop("_soldierAddr", None)
 
     # Squad's per-player stats collectors (memory-only counters not in RCON):
     # read each singleton once, then splice its per-player entry into the

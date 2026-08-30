@@ -575,6 +575,22 @@ follows [Semantic Versioning](https://semver.org/).
   prefix records the revive with an empty reviver rather than a guess at who
   it was.
 
+- A recording now knows who a medic is healing and how many dressings they
+  have left. Health numbers alone say that somebody got better, never who
+  did it or with what, so every medical question there is - heals given,
+  dressings spent, whether a squad's medic is actually keeping their squad
+  alive - was unanswerable from a file. Each player holding a healing-family
+  item now records which item it is, the uses left in it, and, while a
+  bandage or a bag heal is actually running, the account id of the player it
+  is pointed at, self-heals included. The item is recognised by the game's
+  own healing base class rather than a list of names, so a new faction's
+  dressing classifies itself the day Squad ships it; every field is resolved
+  by reflection with no hardcoded fallback, so a rename blanks the block
+  instead of reading whatever now sits at a remembered offset; and a heal
+  target that does not resolve to a player read on the same tick is left out
+  rather than guessed. Measured on real production recordings through the
+  recorder's own compression: 84-104 KB a match, 0.20-0.21% of the file.
+
 ## [1.4.4] - 2026-08-19
 
 ### Added

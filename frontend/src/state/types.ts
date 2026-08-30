@@ -73,6 +73,16 @@ export interface Soldier {
   // soldier mid-bandage / mid-vehicle-mount can be in an unequipped
   // state; the killfeed uses lastKnownWeapon cache to bridge those.
   weapon?: SoldierWeapon | null;
+  // Present while a healing-family item (dressing / medic bag) is HELD, not
+  // only while it is being used. `item` is the item's class name verbatim
+  // (BP_Generic_FieldDressing_Medic_C), null only when the name read failed
+  // after the class check had already identified it. `count` is uses
+  // remaining. `target` is the eosId of the player being healed and appears
+  // ONLY while a heal/bandage channel is actually running — a self-heal shows
+  // the holder's own eosId, and a target that did not resolve to a rostered
+  // player is omitted rather than guessed. Absent on recordings made before
+  // the agent read any of this.
+  medical?: { item: string | null; count?: number; target?: string };
 }
 
 export interface VehicleSeat {
