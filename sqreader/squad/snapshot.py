@@ -1574,6 +1574,23 @@ def read_team_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
         out["woundeds"] = _safe(lambda: pm.read_i32(ts_addr + o["NumWoundeds"]))
     if "FactionSetupId" in o:
         out["factionId"] = _read_fname(pm, ts_addr + o["FactionSetupId"], alloc)
+    if "CommanderState" in o:
+        # The commander's own PlayerState — identity read from the pointed
+        # state exactly as a seat occupant's is, so the record carries a
+        # verified name and account id rather than a join. Null pointer =
+        # the team has no commander; the fields stay absent, never guessed.
+        # The offset has been grabbed since the team reader existed; this
+        # is the read that was never written.
+        cs = _safe(lambda: pm.read_u64(ts_addr + o["CommanderState"]))
+        if cs:
+            pso = paths.ps_offsets
+            out["commanderStateAddr"] = f"{cs:#x}"
+            if "PlayerNamePrivate" in pso:
+                out["commanderName"] = read_fstring(
+                    pm, cs + pso["PlayerNamePrivate"])
+            if "OnlineUserId" in pso:
+                out["commanderEosId"] = read_fstring(
+                    pm, cs + pso["OnlineUserId"])
     # array sizes are useful structural diagnostics
     for arr_name, key in [
         ("PlayerStates", "playerCount"),

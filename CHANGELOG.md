@@ -26,6 +26,14 @@ follows [Semantic Versioning](https://semver.org/).
   Squad rename blanks the field instead of reading junk. Second entry
   of the format-lock pass.
 
+- A recording now names each team's commander. The CommanderState offset
+  had been grabbed since the team reader existed - the read was simply
+  never written. The pointer resolves to the commander's own PlayerState
+  and the record carries their verified name and account id, exactly as
+  a vehicle seat names its occupant; a team with no commander records
+  nothing rather than a guess. Enables commander identity and uptime
+  per match. Third entry of the format-lock pass.
+
 - `scripts/stats_parity.py` measures the claim the whole recording pipeline
   rests on: that a `.sqrx` file alone reproduces the statistics the agent
   computed while the match was being played. It replays an entire archive, in

@@ -326,6 +326,12 @@ export interface TeamState {
   deaths: number | null;
   woundeds: number | null;
   factionId: string | null;
+  // The team's commander, identity read from their own PlayerState.
+  // All three absent when the team has no commander, and on recordings
+  // made before the agent read the field.
+  commanderStateAddr?: string | null;
+  commanderName?: string | null;
+  commanderEosId?: string | null;
   playerCount: number | null;
   squadCount: number | null;
   vehicleSlotCount: number | null;
