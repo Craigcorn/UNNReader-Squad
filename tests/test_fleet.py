@@ -136,10 +136,6 @@ def test_every_readable_hardcoded_offset_is_watched():
     # Each of these is in the register in health.hardcoded_offset_tables,
     # with the reason it cannot (yet) be checked by name.
     exempt = {
-        # UPROPERTY names never seen in a reflection dump.
-        "SQ_SEATCOMP_SEAT_CONFIG_OFFSET",
-        "SQ_TURRET_INVENTORY_OFFSET",
-        "SQ_INV_CURRENT_WEAPON_OFFSET",
         # Blueprint actors, no single UClass to check against.
         "AMMO_WEP_OFFSETS",
         # Private C++ members, not UPROPERTIES — reflection cannot see them;

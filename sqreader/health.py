@@ -39,13 +39,9 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
     that introduces it. A constant stays out only for a stated reason, and
     then it goes in this register:
 
-      * SQ_SEATCOMP_SEAT_CONFIG_OFFSET (0x250), SQ_TURRET_INVENTORY_OFFSET
-        (0x4c0), SQ_INV_CURRENT_WEAPON_OFFSET (0x1b8) — value-correlated
-        probe discoveries whose UPROPERTY names have never been seen in a
-        reflection dump. Verify the names live, then promote them here.
       * AMMO_WEP_OFFSETS — read off `AmmoWep_*_C` blueprint actors; no single
         UClass to check against and the declaring base class is unverified.
-        Same promotion path.
+        Verify the base class live, then promote here.
       * COLLECTOR_OFFSETS — private C++ members, not UPROPERTIES at all, so
         reflection cannot resolve them by name in any Squad build. Validated
         instead by the value-based collector verdicts (`cmd_doctor`,
@@ -77,8 +73,10 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         PROJECTILE_OFFSETS, RALLY_OFFSETS,
         SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF, SQ_DEPLOYABLE_VEHICLE_OWNING_OFF,
         SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF, SQ_SEATCFG_ATTACH_SOCKET_OFF,
+        SQ_INV_CURRENT_WEAPON_OFFSET, SQ_SEATCOMP_SEAT_CONFIG_OFFSET,
         SQ_SEATCOMP_SEAT_PAWN_OFFSET, SQ_SEATCOMP_SEATED_PLAYER_OFFSET,
         SQ_SEATCOMP_SEATED_SOLDIER_OFFSET, SQ_SOLDIER_TAKE_HIT_INFO_OFFSET,
+        SQ_TURRET_INVENTORY_OFFSET,
         SQ_VEHICLE_CACHED_ENGINE_OFFSET,
         SQ_VEHICLE_COMPONENTS_OFFSET, SQ_VEHICLE_SEATS_OFFSET,
         SQ_VEHICLE_TURRETS_OFFSET, SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET,
@@ -106,9 +104,20 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
             "SeatPawn":      SQ_SEATCOMP_SEAT_PAWN_OFFSET,
             "SeatedPlayer":  SQ_SEATCOMP_SEATED_PLAYER_OFFSET,
             "SeatedSoldier": SQ_SEATCOMP_SEATED_SOLDIER_OFFSET,
+            # Name verified live 2026-08-30 (SeatConfig @ +0x250) — promoted
+            # out of the unverified register.
+            "SeatConfig":    SQ_SEATCOMP_SEAT_CONFIG_OFFSET,
         }),
-        ("SQVehicleSeat", "Class", False,
-         {"SeatHealth": SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET}),
+        ("SQVehicleSeat", "Class", False, {
+            "SeatHealth": SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET,
+            # Name verified live 2026-08-30 — promoted out of the register.
+            "CachedVehicleInventory": SQ_TURRET_INVENTORY_OFFSET,
+        }),
+        # The owning class was identified by following a live seat pawn's
+        # inventory pointer (2026-08-30): SQVehicleInventoryComponent, with
+        # CurrentWeapon reflected at +0x1b8.
+        ("SQVehicleInventoryComponent", "Class", False,
+         {"CurrentWeapon": SQ_INV_CURRENT_WEAPON_OFFSET}),
         ("SQVehicleComponent", "Class", False, {
             "Health":           SQ_VEHCOMP_HEALTH_OFFSET,
             "MaxHealth":        SQ_VEHCOMP_MAX_HEALTH_OFFSET,
