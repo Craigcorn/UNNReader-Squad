@@ -30,7 +30,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 # Victim names contain spaces and unicode; capture non-greedily up to the
 # " ActualDamage=" / " KillingDamage=" delimiter. "Player:" may or may not
@@ -61,6 +61,41 @@ _REVIVE_RE = re.compile(
 _TS_RE = re.compile(r"^\[(?P<ts>[\d.]+-[\d.]+:[\d]+)\]")
 
 
+def _base_name_resolver(players: list[dict]
+                        ) -> Callable[[Optional[str]], Optional[str]]:
+    """Build the log-name -> roster-base-name resolver for one roster.
+
+    Squad log lines carry the full display name WITH the clan tag
+    ("『GM』 I3lack"); the memory reader splits the tag off (name="I3lack",
+    clanTag separate). Exact match first, else the longest base name that is a
+    suffix of the log name at a tag boundary (a non-alphanumeric separator
+    precedes it). A name the roster cannot account for is returned untouched —
+    the resolver strips tags, it never invents an identity.
+
+    Lifted out of `resolve_event_names` verbatim so the revive feed resolves
+    names by exactly the same rule the kill feed does, rather than growing a
+    second copy of it that could drift.
+    """
+    bases = [p["name"] for p in players if p.get("name")]
+    base_set = set(bases)
+
+    def resolve(full: Optional[str]) -> Optional[str]:
+        if not full or full in base_set:
+            return full
+        best = None
+        for n in bases:
+            if len(n) < 3 or not full.endswith(n):
+                continue
+            i = len(full) - len(n)
+            if i > 0 and full[i - 1].isalnum():
+                continue  # mid-word, not a clan-tag boundary
+            if best is None or len(n) > len(best):
+                best = n
+        return best or full
+
+    return resolve
+
+
 def resolve_event_names(events: list[dict], players: list[dict]) -> list[dict]:
     """Rewrite each event's attacker/victim to the matching snapshot player's
     base name.
@@ -87,26 +122,11 @@ def resolve_event_names(events: list[dict], players: list[dict]) -> list[dict]:
     against the log's own id cache first (same namespace by construction) and
     only leaves `killerEos` set when that misses. Kept anyway, because where the
     namespaces do coincide it still names a killer the log never mentioned."""
-    bases = [p["name"] for p in players if p.get("name")]
-    base_set = set(bases)
     eos_to_name = {p["eosId"]: p["name"]
                    for p in players if p.get("eosId") and p.get("name")}
     name_to_eos = {p["name"]: p["eosId"]
                    for p in players if p.get("name") and p.get("eosId")}
-
-    def resolve(full: Optional[str]) -> Optional[str]:
-        if not full or full in base_set:
-            return full
-        best = None
-        for n in bases:
-            if len(n) < 3 or not full.endswith(n):
-                continue
-            i = len(full) - len(n)
-            if i > 0 and full[i - 1].isalnum():
-                continue  # mid-word, not a clan-tag boundary
-            if best is None or len(n) > len(best):
-                best = n
-        return best or full
+    resolve = _base_name_resolver(players)
 
     for e in events:
         e["victim"] = resolve(e.get("victim"))
@@ -121,6 +141,23 @@ def resolve_event_names(events: list[dict], players: list[dict]) -> list[dict]:
                 if nm and nm != e.get("victim"):
                     e["attacker"] = nm
                     e["attackerEosId"] = keos
+    return events
+
+
+def resolve_revive_names(events: list[dict], players: list[dict]) -> list[dict]:
+    """Rewrite each revive event's reviver/victim to the roster's base name.
+
+    Same clan-tag problem the kill feed has, same fix, same resolver: a revive
+    line names both players the way the server displays them, and consumers key
+    on the base name the snapshot's roster carries.
+
+    A reviver the log did not name stays None — the roster is asked to strip a
+    tag, never to fill a blank.
+    """
+    resolve = _base_name_resolver(players)
+    for e in events:
+        e["reviver"] = resolve(e.get("reviver"))
+        e["victim"] = resolve(e.get("victim"))
     return events
 
 
@@ -221,6 +258,11 @@ class DamageLogParser:
         self._eos_names: dict[str, str] = {}
         self.max_eos_names = max_eos_names
         self._events: deque = deque(maxlen=max_buffer)
+        # Revives, drained separately from the damage events. The log is the
+        # ONLY place a revive is evented — memory carries the medic's item and
+        # target, never the completion — so the line the parser already reads
+        # to clear correlation state is also the whole record of the act.
+        self._revive_events: deque = deque(maxlen=max_buffer)
         self._last_ts: float = 0.0
 
     def _remember_eos(self, eos: Optional[str], name: Optional[str]) -> None:
@@ -261,6 +303,18 @@ class DamageLogParser:
             rev = m.group("reviver")
             self._remember_eos(m.group("reviver_eos"), rev.strip() if rev else None)
             self._remember_eos(m.group("victim_eos"), victim)
+            # ...and record the revive itself. Both halves come off this one
+            # line with their ids, so the event is what the log said and
+            # nothing more: when the id-bearing prefix is absent (see the
+            # regex comment above) the reviver goes out as None rather than
+            # being inferred from who was nearby.
+            self._revive_events.append({
+                "reviver": rev.strip() if rev else None,
+                "reviverEosId": m.group("reviver_eos"),
+                "victim": victim,
+                "victimEosId": m.group("victim_eos"),
+                "ts": round(ts, 3),
+            })
             self._wounded_by.pop(victim, None)
             self._pending.pop(victim, None)
             return
@@ -377,6 +431,13 @@ class DamageLogParser:
         self._events.clear()
         return out
 
+    def drain_revives(self) -> list[dict]:
+        """The revives seen since the last call. Separate buffer, so draining
+        one feed never consumes the other."""
+        out = list(self._revive_events)
+        self._revive_events.clear()
+        return out
+
 
 class LogTailer:
     """Follows the Squad log from its end in a daemon thread, feeds each new
@@ -411,6 +472,10 @@ class LogTailer:
         with self._lock:
             return self.parser.drain()
 
+    def drain_revives(self) -> list[dict]:
+        with self._lock:
+            return self.parser.drain_revives()
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -440,6 +505,11 @@ class LogTailer:
                         if line:
                             self.parser.feed(line)
                     self.parser.drain()  # discard stale events, keep state
+                    # The revive feed is discarded on the same terms: a revive
+                    # replayed from the log's tail already happened, and the
+                    # first tick after a restart must not report it as if it
+                    # had just been performed.
+                    self.parser.drain_revives()
             else:
                 f.seek(0, os.SEEK_END)
             cur_ino = os.fstat(f.fileno()).st_ino

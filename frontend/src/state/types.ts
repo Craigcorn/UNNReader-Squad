@@ -390,6 +390,18 @@ export interface DamageEvent {
   ts?: number | null;                 // event tick id (for dedupe)
 }
 
+// One completed revive, straight off the server log's own line. The log is the
+// only place a revive is evented — memory carries the medic's item and target
+// while a channel runs, never the completion — so this is the whole record of
+// the act, and it lands only on the ticks whose log lines produced one.
+export interface ReviveEvent {
+  reviver: string | null;        // base name; null if the log omitted it
+  reviverEosId: string | null;
+  victim: string;
+  victimEosId: string | null;
+  ts: number;                    // epoch seconds from the log timestamp
+}
+
 // One row in the kill feed. Derived view computed from tick-over-tick
 // diffs of player.stats.kills/deaths, paired with damageEvents for
 // metadata enrichment. Pinned values (vehicle, weapon) are captured AT
@@ -501,6 +513,9 @@ export interface Snapshot {
   rallyPoints: RallyPoint[];
   projectiles: Projectile[];
   damageEvents: DamageEvent[];
+  // Only on ticks whose log lines carried a revive — most frames have none,
+  // and an empty array on every frame would cost bytes for nothing.
+  reviveEvents?: ReviveEvent[];
 }
 
 // ----- two-tier recording: compact 4 Hz position frames --------------------

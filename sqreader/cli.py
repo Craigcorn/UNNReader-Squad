@@ -1180,9 +1180,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print(f"[tick {tick}] synth-match error: {_sy_e!r}",
                       file=sys.stderr)
         if log_tailer is not None:
-            from .squad.logtail import resolve_event_names
+            from .squad.logtail import (
+                resolve_event_names, resolve_revive_names,
+            )
             snap["damageEvents"] = resolve_event_names(
                 log_tailer.drain(), snap.get("players") or [])
+            # Revives merge at the SAME point, for the same reason: everything
+            # downstream — the tee, the .sqrx, the recorder, stats, plugins —
+            # then sees one identical list, and a replay recomputing from the
+            # file sees exactly what the live pass did. The key is written only
+            # on the ticks that produced a revive: most ticks produce none, and
+            # an always-present empty list would cost bytes on every frame.
+            revives = resolve_revive_names(
+                log_tailer.drain_revives(), snap.get("players") or [])
+            if revives:
+                snap["reviveEvents"] = revives
         line = json.dumps(snap, ensure_ascii=False) + "\n"
         beat.mark()
         if out_f:

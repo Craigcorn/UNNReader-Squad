@@ -1,11 +1,19 @@
 """Pure-logic tests for the Squad-log damage/wound/die correlation. No I/O,
 no live process — feeds real log-line shapes through DamageLogParser and
 checks the events it emits."""
+from datetime import datetime, timezone
+
 from sqreader.squad.logtail import (
     DamageLogParser, _norm_weapon, find_squad_log, resolve_event_names,
+    resolve_revive_names,
 )
 
 TS = "[2026.07.12-18.31.24:082][892]"
+# What the parser must make of TS — the same instant, to the millisecond the
+# log prints. Computed rather than typed out, so this asserts the parse and
+# not a number somebody once copied.
+TS_EPOCH = round(datetime(2026, 7, 12, 18, 31, 24, 82_000,
+                          tzinfo=timezone.utc).timestamp(), 3)
 
 
 def actual(victim, attacker, eos, weapon, dmg="50.0"):
@@ -380,6 +388,98 @@ def test_drain_clears():
     p.feed(wound("V"))
     assert len(p.drain()) == 1
     assert p.drain() == []
+
+
+def test_revive_emits_an_event_carrying_both_identities():
+    # The log is the only place a revive is evented — memory never shows the
+    # completion — so the line the parser already read to clear correlation
+    # state is the whole record of the act, and it goes out intact.
+    p = DamageLogParser()
+    p.feed(revive("Doc", "Ruby", reos="0002doc", veos="0002ruby"))
+    revives = p.drain_revives()
+    assert len(revives) == 1
+    r = revives[0]
+    assert r["reviver"] == "Doc"
+    assert r["reviverEosId"] == "0002doc"
+    assert r["victim"] == "Ruby"
+    assert r["victimEosId"] == "0002ruby"
+    assert r["ts"] == TS_EPOCH
+
+
+def test_revive_without_the_id_prefix_still_emits_with_no_reviver():
+    # The id-bearing prefix is optional on purpose (a future log revision may
+    # move the ids). The revive still happened and is still recorded — with the
+    # reviver blank, because a name this pattern cannot attribute to an id is
+    # not a name we know.
+    line = (f"{TS}LogSquad: Doc has revived Ruby "
+            f"(Online IDs: EOS: 0002ruby steam: 2)")
+    p = DamageLogParser()
+    p.feed(line)
+    revives = p.drain_revives()
+    assert len(revives) == 1
+    assert revives[0]["reviver"] is None
+    assert revives[0]["reviverEosId"] is None
+    assert revives[0]["victim"] == "Ruby"
+    assert revives[0]["victimEosId"] == "0002ruby"
+
+
+def test_drain_revives_is_separate_from_drain():
+    # Two buffers, two drains: consuming one must never consume the other, or
+    # a tick that carried a revive would lose its kill feed and vice versa.
+    p = DamageLogParser()
+    p.feed(actual("VictimA", "KillerB", "0002ab", "BP_AK74_C_1"))
+    p.feed(wound("VictimA"))
+    p.feed(revive("Doc", "VictimA"))
+    assert len(only(p.drain(), wounded=True)) == 1
+    assert len(p.drain_revives()) == 1        # survived the damage drain
+    assert p.drain_revives() == []            # ...and is cleared by its own
+    assert p.drain() == []
+
+
+def test_revive_event_does_not_disturb_the_correlation_it_clears():
+    # Emitting the event must leave the revive line's original job alone:
+    # forgetting who downed the victim, so their next death is not miscredited.
+    p = DamageLogParser()
+    p.feed(actual("PlayerA", "KillerB", "0002ab", "BP_AK74_C_1"))
+    p.feed(wound("PlayerA"))
+    p.drain()
+    p.feed(revive("Medic", "PlayerA"))
+    p.feed(die("PlayerA", ctrl="nullptr"))    # later world death
+    k = only(p.drain(), killed=True)
+    assert len(k) == 1
+    assert k[0]["attacker"] is None           # still NOT credited to KillerB
+    assert [e["victim"] for e in p.drain_revives()] == ["PlayerA"]
+
+
+def test_resolve_revive_names_strips_clan_tag_to_base():
+    # Same clan-tag problem the kill feed has, same resolver: the log prints
+    # the tagged display name, the roster holds the base name.
+    players = [{"name": "Doc"}, {"name": "Ruby"}]
+    events = [{"reviver": "『GM』 Doc", "victim": "TIM Ruby"},
+              {"reviver": "Ruby", "victim": "Doc"}]
+    resolve_revive_names(events, players)
+    assert events[0]["reviver"] == "Doc"
+    assert events[0]["victim"] == "Ruby"
+    assert events[1]["reviver"] == "Ruby"     # exact match stays
+    assert events[1]["victim"] == "Doc"
+
+
+def test_resolve_revive_names_leaves_a_blank_reviver_blank():
+    # The roster is asked to strip a tag, never to fill in a name the log
+    # did not print.
+    players = [{"name": "Ruby"}]
+    events = [{"reviver": None, "reviverEosId": None, "victim": "『GM』 Ruby"}]
+    resolve_revive_names(events, players)
+    assert events[0]["reviver"] is None
+    assert events[0]["victim"] == "Ruby"
+
+
+def test_resolve_revive_names_unknown_left_as_is():
+    players = [{"name": "Ruby"}]
+    events = [{"reviver": "SomeoneWhoLeft", "victim": "Ruby"}]
+    resolve_revive_names(events, players)
+    assert events[0]["reviver"] == "SomeoneWhoLeft"   # no crash, unchanged
+    assert events[0]["victim"] == "Ruby"
 
 
 def test_resolve_event_names_strips_clan_tag_to_base():

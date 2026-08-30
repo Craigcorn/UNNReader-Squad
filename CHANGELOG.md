@@ -560,6 +560,21 @@ follows [Semantic Versioning](https://semver.org/).
   actor - are replaced for guns by an "emplacement gun" label. Viewer-side,
   so the recording that surfaced it displays correctly on reload.
 
+- A recording now carries the revives the log was already telling us about.
+  The tailer has matched the revive line since the kill feed was built, but
+  only to clear correlation state: it read "X has revived Y", forgot who had
+  downed Y so their next death would not be miscredited, and dropped the
+  line. Nothing else in the game reports a completed revive - memory carries
+  the medic's item and target only while a channel is running - so that
+  discarded line was the entire record of the act, and no recording made so
+  far holds one. Revives now ride the snapshot as their own list, carrying
+  both players' names and account ids and the log's own timestamp, and they
+  merge at the same point the kill feed merges, so a replay recomputing from
+  the file sees exactly what the live pass saw. Only the ticks that produced
+  a revive carry the key, and a line that omits the reviver's id-bearing
+  prefix records the revive with an empty reviver rather than a guess at who
+  it was.
+
 ## [1.4.4] - 2026-08-19
 
 ### Added
