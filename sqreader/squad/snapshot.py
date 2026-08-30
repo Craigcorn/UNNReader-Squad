@@ -1298,7 +1298,7 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
             "PlayerNamePrivate", "TeamId", "Score", "CompressedPing",
             "bIsABot", "OnlineUserId", "SquadState", "TeamState",
             "Soldier", "CurrentPawn", "CurrentRoleId", "CurrentRole",
-            "PlayerId", "PlayerStateData",
+            "PlayerId", "PlayerStateData", "LastTeamChangeTime",
         ]),
         soldier_offsets=grab(sd_layout, [
             "Health", "BreathHoldStamina", "CurrentHeldWeapon",
@@ -2750,6 +2750,15 @@ def read_player(pm: ProcessMemory, alloc: FNameEntryAllocator,
         out["teamId"] = _safe(lambda: pm.read_i32(ps_addr + o["TeamId"]))
     if "CurrentRoleId" in o:
         out["roleId"] = _read_fname(pm, ps_addr + o["CurrentRoleId"], alloc)
+    if "LastTeamChangeTime" in o:
+        # When this player last switched sides — the field that makes
+        # time-on-team honest for side-swappers and counts the swaps.
+        # int32, recorded VERBATIM: the clock it speaks (unix epoch vs a
+        # game clock) is not yet pinned against a live player; consumers
+        # correlate, the recorder does not interpret. Reflection-resolved,
+        # so a Squad rename blanks it instead of reading junk.
+        out["lastTeamChangeTime"] = _safe(lambda: pm.read_i32(
+            ps_addr + o["LastTeamChangeTime"]))
 
     # Stats / network
     if "Score" in o:

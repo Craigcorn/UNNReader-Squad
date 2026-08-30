@@ -22,6 +22,10 @@ export interface Player {
   roleId: string | null;
   score: number | null;
   ping: number | null;
+  // When this player last switched sides (int, recorded verbatim; clock
+  // basis pinned by consumers). Absent on recordings made before the
+  // agent read it.
+  lastTeamChangeTime?: number | null;
   isBot: boolean | null;
   clanTag: string | null;
   squadStateAddr: string | null;

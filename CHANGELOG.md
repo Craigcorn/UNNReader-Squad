@@ -18,6 +18,14 @@ follows [Semantic Versioning](https://semver.org/).
   entry of the format-lock pass: recordings now carry squad lock state
   on every full frame, and it costs bytes.
 
+- A recording now knows when each player last switched sides. Without
+  it, a side-swapper's whole match credits to their final team;
+  with it, time-on-team is honest and swaps are countable. The int is
+  recorded verbatim - the clock it speaks gets pinned against a live
+  player before anything interprets it - and reflection-resolved, so a
+  Squad rename blanks the field instead of reading junk. Second entry
+  of the format-lock pass.
+
 - `scripts/stats_parity.py` measures the claim the whole recording pipeline
   rests on: that a `.sqrx` file alone reproduces the statistics the agent
   computed while the match was being played. It replays an entire archive, in
