@@ -30,6 +30,14 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   `scripts/stats_parity.py` against the test-box corpus before push, and a
   non-zero exit is a failed gate — every diff is fixed or written down in the
   tool's exclusion catalog with its reason.
+- **Every new memory read stays doctor-checkable.** Reflection-resolved by
+  name wherever possible; any hardcoded offset the reader can read through
+  (fallbacks included) is added to `health.hardcoded_offset_tables()` in the
+  same change, reflection-only reads get a `required_reflection_names()`
+  entry, and anything genuinely uncheckable goes in that function's register
+  with its reason. This is what keeps drift loud and self-heal able to repair
+  it — see CONTRIBUTING.md "Reverse-engineered offsets"; `tests/test_fleet.py`
+  enforces it.
 - **Recordings are immutable; consumers are bi-versioned.** Old `.sqrx` files
   must keep playing forever. Any wire-format change bumps the format version
   and extends the Python↔TypeScript cross-language fixture

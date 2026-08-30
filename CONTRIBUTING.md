@@ -72,3 +72,31 @@ later.
 Memory offsets target a specific Squad build. If a Squad update breaks reads,
 `sqreader doctor` reports which offsets drifted; `docs/offsets.md`
 explains how they were derived.
+
+**Adding a memory read? It has to stay checkable.** A Squad update that moves
+a struct is silent: the reader keeps reading the old address, gets
+neighbouring bytes, and ships plausible garbage. `doctor` is what makes that
+loud — and it can only check what it is told about. So, in the SAME change
+that adds the read:
+
+- **Prefer reflection.** Resolve the field by name in `resolve_paths` and it
+  cannot drift at all: a moved field is re-found on the next start, a renamed
+  one blanks (an honest null, never a wrong read). Most new fields need
+  nothing else.
+- **Any hardcoded offset the reader can read THROUGH — including one used
+  only as a reflection fallback — goes in `health.hardcoded_offset_tables()`**
+  (`sqreader/health.py`). That one table feeds both the human `sqreader
+  doctor` and the machine `run_doctor` the self-heal gates on, so a drifted
+  constant is both reported and repairable by a signed offset pack. Mark the
+  row `optional=True` when the type legitimately may not be loaded in a level
+  (no emplacement built, no FOB placed) — absent then means skipped, not
+  drift.
+- **A reflection-only read with no fallback still needs a line in
+  `health.required_reflection_names()`.** It cannot drift, but a rename makes
+  it vanish from recordings silently; that entry turns the rename into a drift
+  report instead of data quietly going dark.
+- **Can't check it?** Add it to the register in `hardcoded_offset_tables()`'s
+  docstring with the reason (unverified property name, no single owning class,
+  struct-internal, never read). `tests/test_fleet.py` fails on any offset
+  constant that is neither watched nor registered, so the register is the only
+  way out and it costs one honest sentence.

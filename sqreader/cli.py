@@ -1794,8 +1794,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # SQDeployable / SQVehicleSpawner / SQMapMarker / SQProjectile —
     # hardcoded *_OFFSETS dicts. Verify they still align by reading via
     # reflection and comparing.
-    def offsets_match(class_name: str, hardcoded: dict[str, int]) -> tuple[bool, list[str]]:
-        h = arr.find_by_name(class_name, class_name="Class",
+    def offsets_match(class_name: str, hardcoded: dict[str, int],
+                      kind: str = "Class") -> tuple[bool, list[str]]:
+        h = arr.find_by_name(class_name, class_name=kind,
                              alloc=alloc, limit=1)
         if not h:
             return False, [f"class {class_name!r} not found"]
@@ -1818,11 +1819,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # set is shared with the fleet health signal (`health.hardcoded_offset_tables`)
     # so this human command and the machine-readable `run_doctor` can never
     # disagree about which offsets "correct" means.
-    from .health import hardcoded_offset_tables
-    for cls, table in hardcoded_offset_tables():
-        passed, problems = offsets_match(cls, table)
+    from .health import check_required_names, hardcoded_offset_tables
+    for cls, kind, optional, table in hardcoded_offset_tables():
+        if optional and not arr.find_by_name(cls, class_name=kind,
+                                             alloc=alloc, limit=1):
+            # Not loaded in this level (no emplacement built, say) — absence
+            # is not drift for an optional type.
+            print(f"SKIP  {cls} hardcoded offsets: type not loaded")
+            continue
+        passed, problems = offsets_match(cls, table, kind)
         check(f"{cls} hardcoded offsets ({len(table)} fields)",
               passed, "; ".join(problems))
+
+    # Reflection-only reads have no constant to drift, but a Squad RENAME
+    # makes them vanish from recordings silently — fail-safe and dark. These
+    # rows turn that into a visible failure. A type that isn't loaded yet
+    # (no medic item / emplacement in the level) is reported as skipped.
+    name_drift, name_skipped = check_required_names(pm, arr, alloc)
+    for s in name_skipped:
+        print(f"SKIP  required names on {s['class']}: {s['reason']}")
+    check(f"required reflection names ({len(name_drift)} missing)",
+          not name_drift,
+          "; ".join(f"{d['class']}.{d['field']}" for d in name_drift))
 
     # Lane graph layout: DesignOutgoingLinks ArrayProperty offset on
     # SQGraphInitializerComponent + the FSQDesignLink struct shape.

@@ -6,6 +6,30 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Doctor now watches the offsets it was quietly missing. A Squad update
+  that moves a struct is silent - the reader keeps reading the old
+  address, gets neighbouring bytes and ships plausible garbage - and
+  doctor is what makes that loud, so an offset it does not know about is
+  a hole in the alarm. Fourteen constants sat in that hole, every one of
+  them readable: the emplacement gun's joins and aim, the seat's role
+  socket, the vehicle entity arrays, the FOB resource pool, the
+  player-controller fields, the marker manager's array, the soldier's
+  last-hit struct, the actor owner used to join ammo pools to vehicles,
+  and the projectile's firer - which had already drifted once. They are
+  checked now, which also means a signed offset pack can repair them.
+  Types that may legitimately not be loaded in a level - no emplacement
+  built, no FOB placed - are marked optional and skipped when absent
+  rather than reported as drift, so an empty layer cannot cry wolf.
+  Reads that resolve purely by reflection cannot drift, but a rename
+  makes them vanish from recordings without a word; the fields the
+  medical capture and the commander identity depend on are now declared,
+  so a rename surfaces as drift instead of data quietly going dark. What
+  still cannot be checked is written down with the reason it cannot,
+  and a test fails on any offset that is neither watched nor written
+  down - the rule that keeps the next addition honest is in
+  CONTRIBUTING.md.
+
 ### Added
 - A locked squad finally says so. The read branch for the squad's
   bIsLocked flag sat fully written in the reader - comment, name-resolved
