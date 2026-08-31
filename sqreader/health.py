@@ -109,15 +109,14 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET, SQ_VEHCOMP_STATE_OFFSET — declared
         but never read, so nothing can drift through them. Watch them the day
         they are first read.
-      * STRUCT-INTERNAL offsets — fields addressed relative to a struct, not a
-        class: THI_* / HR_* (inside FSQTakeHitInfo and its FHitResult),
-        MARKER_ARRAY_ITEMS_OFFSET and the derived MARKER_ITEMS_ABS_OFFSET
-        (FastArraySerializer `Items`), MARKER_ITEM_SIZE / the per-item field
-        offsets (brute-forced stride, no property names). A class table cannot
-        express these. The follow-up that WOULD cover the named ones is a
-        second check tier built on `struct_layout_for_field` — the same call
-        `resolve_paths` already uses for PlayerStateData. Until then damage-
-        event struct drift stays visible only as implausible values.
+      * STRUCT-INTERNAL offsets with no property name — MARKER_ITEM_SIZE and
+        the per-item MARKER_ITEM_OFFSETS are a brute-forced stride into an
+        unnamed element struct, so there is nothing to resolve by name;
+        `check_marker_stride` verifies the stride by value instead. The NAMED
+        struct internals (THI_* / HR_* / PDE_HIT_INFO_OFFSET /
+        MARKER_ARRAY_ITEMS_OFFSET) are no longer in this register: they are
+        checked by `struct_field_tables` above. MARKER_ITEMS_ABS_OFFSET is
+        the sum of two watched constants and needs no row of its own.
       * SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF (this module) — a private C++
         member with no property name to check; `check_component_to_world`
         verifies it by value against live vehicles instead."""
@@ -196,17 +195,20 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
             "CachedVehicleEngine": SQ_VEHICLE_CACHED_ENGINE_OFFSET,
         }),
         # Emplacement gun joins/aim — same reflection-first-with-fallback
-        # pattern. OPTIONAL: `resolve_paths` treats the class as optional, so
-        # a level without one must skip, not cry drift.
-        ("SQDeployableVehicle", "Class", True, {
+        # pattern. REQUIRED: `resolve_paths` tolerates the class being absent
+        # because a level may have no emplacement BUILT, but the UCLASS is
+        # registered by C++ module load, not by content — proved present on a
+        # 0-player server with nothing built, 2026-08-30. Absence is therefore
+        # a rename, which is exactly what this tier exists to catch.
+        ("SQDeployableVehicle", "Class", False, {
             "OwningDeployable":    SQ_DEPLOYABLE_VEHICLE_OWNING_OFF,
             "SwivelMeshComponent": SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF,
             "GunMountComponent":   SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF,
         }),
         # The seat's role-socket offset lives inside a ScriptStruct, not a
-        # UClass — which is what the meta-class column is for. Optional for
-        # the same reason as the row above.
-        ("SQVehicleSeatConfig", "ScriptStruct", True,
+        # UClass — which is what the meta-class column is for. Native, so
+        # required for the same reason as the row above.
+        ("SQVehicleSeatConfig", "ScriptStruct", False,
          {"SeatAttachSocket": SQ_SEATCFG_ATTACH_SOCKET_OFF}),
         # FOB radio resource pool — reflection-first with these as fallback
         # (see `f_off` in read_deployable). The BP that declares them is a
@@ -215,39 +217,102 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         ("BP_BaseFobCreator_C", "BlueprintGeneratedClass", True,
          dict(FOB_RESOURCE_OFFSETS)),
         # Player-controller fields, reflection-first with these as fallback.
-        # Optional because a dedicated server's controller is the blueprint
-        # variant; `resolve_paths` accepts either and so does this row's
-        # absence.
-        ("SQPlayerController", "Class", True, {
+        # A dedicated server's controller INSTANCE is the blueprint variant
+        # and `resolve_paths` accepts either — but the native SQPlayerController
+        # UClass is registered regardless, so its absence here is a rename.
+        ("SQPlayerController", "Class", False, {
             "PlayerStatsIndex":   PC_PLAYER_STATS_INDEX_OFFSET,
             "PlayerState":        PC_PLAYER_STATE_OFFSET,
             "RecentVoiceChannel": PC_RECENT_VOICE_CHANNEL_OFFSET,
         }),
-        # The map-marker manager's MarkerArray struct. Its FastArray `Items`
-        # offset INSIDE that struct is struct-internal — see the register.
-        ("SQMapMarkerManagerComponent", "Class", True,
+        # The map-marker manager's MarkerArray struct; native, so required.
+        # The FastArray `Items` offset INSIDE that struct is checked by the
+        # struct tier (`struct_field_tables`).
+        ("SQMapMarkerManagerComponent", "Class", False,
          {"MarkerArray": MARKER_MGR_MARKER_ARRAY_OFFSET}),
     ]
 
 
-def required_reflection_names() -> list[tuple[str, str, list[str]]]:
+def struct_field_tables() -> list[tuple[str, str, tuple[str, ...], bool,
+                                        dict[str, int]]]:
+    """The STRUCT-INTERNAL tier: offsets addressed relative to a struct rather
+    than a class, as (owner type, meta-class, hop path, optional?, {field:
+    offset}).
+
+    A class table cannot express these — `LastTakeHitInfo.ActualDamage` is not
+    a field of SQSoldier, it is a field of the FSQTakeHitInfo it holds — which
+    is why the damage-event internals sat in the register with "no way to check
+    this" written next to them. `struct_layout_for_field`'s two moves (find the
+    StructProperty, read the UScriptStruct it points at) compose down a path,
+    so the FHitResult two hops in is reachable with the helpers that already
+    exist.
+
+    Same values, same single source: every offset is imported from
+    `squad.snapshot`. Same optional policy as the class tables: an absent
+    OWNER is drift unless the row says the type may legitimately not be
+    loaded; a hop that resolves but lacks the field is always drift."""
+    from .squad.snapshot import (
+        HR_BONE_NAME_OFFSET, HR_DISTANCE_OFFSET, MARKER_ARRAY_ITEMS_OFFSET,
+        PDE_HIT_INFO_OFFSET, THI_ACTUAL_DAMAGE_OFFSET, THI_DAMAGE_CAUSER_OFFSET,
+        THI_DAMAGE_TYPE_CLASS_OFFSET, THI_FLAGS_OFFSET,
+        THI_PAWN_INSTIGATOR_OFFSET, THI_POINT_DAMAGE_EVENT_OFFSET,
+        THI_SERVER_TIMESTAMP_OFFSET,
+    )
+    return [
+        # FSQTakeHitInfo — every damage event the reader enriches. This struct
+        # has ALREADY moved once (its base shifted 0x20 and the reader spent
+        # months reading past it), so its internals are the last place that
+        # should be taken on trust. `bKilled` is the flags byte: the reader
+        # masks bit 0 out of THI_FLAGS_OFFSET, and reflection puts bKilled,
+        # bWounded and bEjectedFromVehicle at that same offset.
+        ("SQSoldier", "Class", ("LastTakeHitInfo",), False, {
+            "ActualDamage":     THI_ACTUAL_DAMAGE_OFFSET,
+            "ServerTimestamp":  THI_SERVER_TIMESTAMP_OFFSET,
+            "DamageTypeClass":  THI_DAMAGE_TYPE_CLASS_OFFSET,
+            "PawnInstigator":   THI_PAWN_INSTIGATOR_OFFSET,
+            "DamageCauser":     THI_DAMAGE_CAUSER_OFFSET,
+            "bKilled":          THI_FLAGS_OFFSET,
+            "PointDamageEvent": THI_POINT_DAMAGE_EVENT_OFFSET,
+        }),
+        # Two hops deeper: the FHitResult the bone name and hit distance come
+        # out of. The reader reaches it as base + PointDamageEvent + HitInfo,
+        # so both steps are watched.
+        ("SQSoldier", "Class", ("LastTakeHitInfo", "PointDamageEvent"), False,
+         {"HitInfo": PDE_HIT_INFO_OFFSET}),
+        ("SQSoldier", "Class",
+         ("LastTakeHitInfo", "PointDamageEvent", "HitInfo"), False,
+         {"Distance": HR_DISTANCE_OFFSET, "BoneName": HR_BONE_NAME_OFFSET}),
+        # The FastArraySerializer `Items` the marker walk indexes into.
+        # Belt-and-braces with `check_marker_stride`, which reaches the same
+        # field through the property chain instead.
+        ("SQMapMarkerManagerComponent", "Class", ("MarkerArray",), False,
+         {"Items": MARKER_ARRAY_ITEMS_OFFSET}),
+    ]
+
+
+def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
     """Reflection-only reads with no fallback constant: a Squad rename makes
     them silently vanish from recordings (fail-safe, but dark). Listing a
-    (type, meta-class, [property names]) row here turns that rename into a
-    drift report instead.
+    (type, meta-class, optional?, [property names]) row here turns that rename
+    into a drift report instead.
 
-    Semantics in `check_required_names`: a type that is absent from the
-    GUObjectArray is SKIPPED, not drift — several of these only load once
-    the matching content exists in the level (a medic item, an emplacement
-    gun). A type that is present but missing a listed name is drift."""
+    The `optional` column carries the same meaning it does in the class
+    tables, and every row is currently REQUIRED. That is evidence, not
+    optimism: these are all native SQ* classes, registered when the C++ module
+    loads rather than when content spawns, and all four were present on a
+    0-player server with nothing built (2026-08-30). Treating them as optional
+    made a class-level rename of SQHealingEquipableItem or SQCommanderState an
+    eternal silent skip — the exact blind spot this tier exists to close. Mark
+    a row optional only with an observed reason for it."""
     return [
         # Medical capture (per-player `medical` dict).
-        ("SQSoldier", "Class", ["CurrentHeldItem"]),
-        ("SQHealingEquipableItem", "Class", ["HealedTarget", "ItemCount"]),
+        ("SQSoldier", "Class", False, ["CurrentHeldItem"]),
+        ("SQHealingEquipableItem", "Class", False,
+         ["HealedTarget", "ItemCount"]),
         # Commander identity: the team-state pointer and the hop the
         # identity read takes through the commander-state actor.
-        ("SQTeamState", "Class", ["CommanderState"]),
-        ("SQCommanderState", "Class", ["CurrentCommander"]),
+        ("SQTeamState", "Class", False, ["CommanderState"]),
+        ("SQCommanderState", "Class", False, ["CurrentCommander"]),
     ]
 
 
@@ -277,8 +342,10 @@ def check_target_names() -> dict[str, str]:
     names: dict[str, str] = {}
     for cls, kind, _optional, _table in hardcoded_offset_tables():
         names[cls] = kind
-    for row in required_reflection_names():
-        names[row[0]] = row[1]
+    for cls, kind, _optional, _fields in required_reflection_names():
+        names[cls] = kind
+    for cls, kind, _path, _optional, _table in struct_field_tables():
+        names[cls] = kind
     # The core gate + the classes the moved checks need beyond the tables.
     names["SQPlayerState"] = "Class"
     names["SQGraphInitializerComponent"] = "Class"
@@ -418,9 +485,13 @@ def check_required_names(pm: Any, arr: Any, alloc: Any,
     tg = _targets_for(pm, arr, alloc, targets)
     drift: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
-    for cls, _kind, names in required_reflection_names():
+    for cls, _kind, optional, names in required_reflection_names():
         if not tg.addr(cls):
-            skipped.append({"class": cls, "reason": "type not loaded"})
+            if optional:
+                skipped.append({"class": cls, "reason": "type not loaded"})
+            else:
+                drift.append({"class": cls, "field": "*", "expected": None,
+                              "live": None, "problem": "class not found"})
             continue
         live = tg.layout(cls)
         for fname in names:
@@ -460,6 +531,69 @@ def check_offset_drift(pm: Any, arr: Any, alloc: Any,
                               "live": None, "problem": "not reflected"})
             elif p.offset != off:
                 drift.append({"class": cls, "field": fname, "expected": off,
+                              "live": p.offset, "problem": "offset drift"})
+    return drift, skipped
+
+
+def check_struct_fields(pm: Any, arr: Any, alloc: Any,
+                        targets: DoctorTargets | None = None
+                        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Verify every `struct_field_tables` row against live reflection.
+
+    Walks the hop path with the same two moves `struct_layout_for_field`
+    makes — find the StructProperty, read the UScriptStruct it points at —
+    then compares the inner offsets. Returns (drift, skipped).
+
+    A hop whose NAME is gone from the layout is drift (Squad renamed or moved
+    it). A hop whose name is there but whose struct pointer would not read is
+    a transient /proc failure, and that is a skip: the doctor is what you run
+    BECAUSE reads are failing, so it must not turn a failed read into a
+    fabricated verdict."""
+    from .ue.reflection import (
+        find_field_by_name_with_super, get_class_layout,
+        read_fstructproperty_struct,
+    )
+    tg = _targets_for(pm, arr, alloc, targets)
+    drift: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for owner, _kind, path, optional, table in struct_field_tables():
+        where = f"{owner}.{'.'.join(path)}"
+        addr = tg.addr(owner)
+        if not addr:
+            if optional:
+                skipped.append({"class": where, "reason": "type not loaded"})
+            else:
+                drift.append({"class": where, "field": "*", "expected": None,
+                              "live": None, "problem": "class not found"})
+            continue
+        layout = tg.layout(owner)
+        struct_addr = 0
+        for i, hop in enumerate(path):
+            if hop not in layout:
+                drift.append({"class": where, "field": hop, "expected": None,
+                              "live": None,
+                              "problem": "struct field not reflected"})
+                struct_addr = 0
+                break
+            ff = find_field_by_name_with_super(
+                pm, addr if i == 0 else struct_addr, hop, alloc)
+            struct_addr = (read_fstructproperty_struct(pm, ff)
+                           if ff is not None else 0)
+            if not struct_addr:
+                skipped.append({"class": where,
+                                "reason": f"{hop} did not re-resolve "
+                                          f"(transient read)"})
+                break
+            layout = get_class_layout(pm, struct_addr, alloc)
+        if not struct_addr:
+            continue
+        for fname, off in table.items():
+            p = layout.get(fname)
+            if p is None:
+                drift.append({"class": where, "field": fname, "expected": off,
+                              "live": None, "problem": "not reflected"})
+            elif p.offset != off:
+                drift.append({"class": where, "field": fname, "expected": off,
                               "live": p.offset, "problem": "offset drift"})
     return drift, skipped
 
@@ -898,6 +1032,12 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
     drift.extend(name_drift)
     for s in name_skipped:
         checks.append({"check": f"required names on {s['class']}",
+                       "state": "skipped", "reason": s["reason"]})
+
+    struct_drift, struct_skipped = check_struct_fields(pm, None, alloc, targets)
+    drift.extend(struct_drift)
+    for s in struct_skipped:
+        checks.append({"check": f"struct fields in {s['class']}",
                        "state": "skipped", "reason": s["reason"]})
 
     for outcome in (check_reflection_anchors(pm, alloc, targets),

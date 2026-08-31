@@ -95,6 +95,10 @@ that adds the read:
   `health.required_reflection_names()`.** It cannot drift, but a rename makes
   it vanish from recordings silently; that entry turns the rename into a drift
   report instead of data quietly going dark.
+- **An offset addressed inside a struct rather than on a class has a table of
+  its own** — `health.struct_field_tables()`, which walks the struct hops by
+  reflection (`LastTakeHitInfo` → `PointDamageEvent` → `FHitResult`) and
+  compares the same constants the reader reads through.
 - **Can't check it?** Add it to the register in `hardcoded_offset_tables()`'s
   docstring with the reason (unverified property name, no single owning class,
   struct-internal, never read). `tests/test_fleet.py` fails on any offset

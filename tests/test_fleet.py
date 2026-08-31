@@ -59,6 +59,7 @@ def test_run_doctor_ok_and_drift(monkeypatch):
     arr = _Arr(resolves={"SQPlayerState"})
     monkeypatch.setattr(health, "check_offset_drift", _no_drift)
     monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
     monkeypatch.setattr(health, "check_reflection_anchors",
                         lambda *a: health.CheckOutcome([], [], []))
     assert health.run_doctor(None, arr, _OkAlloc())["state"] == "ok"
@@ -70,28 +71,35 @@ def test_run_doctor_ok_and_drift(monkeypatch):
     assert d["state"] == "drift" and d["ok"] is False and len(d["drift"]) == 1
 
 
-def test_required_names_drift_when_present_and_skip_when_absent(monkeypatch):
-    """The tier's whole contract in one place: a loaded type missing a
-    declared name is drift (the rename that silently darkens a capture); a
-    type that is not loaded is skipped, never drift. Without this test the
-    drift path is exercised nowhere — the run_doctor tests' mock resolves no
-    classes, so every row silently takes the skip branch."""
+def test_required_names_drift_when_a_loaded_type_lost_a_name(monkeypatch):
+    """The rename that silently darkens a capture: the type is right there,
+    the property it used to declare is not. Without this test the drift path
+    is exercised nowhere — the run_doctor tests' mock resolves no classes, so
+    every row would silently take the absent branch."""
     names = {row[0] for row in health.required_reflection_names()}
-    arr = _Arr(resolves=names - {"SQHealingEquipableItem"})
+    arr = _Arr(resolves=names)
 
     import sqreader.ue.reflection as refl
     # Layout carries the commander names but NOT CurrentHeldItem.
     monkeypatch.setattr(refl, "get_class_layout",
                         lambda pm, addr, alloc: {"CommanderState": object(),
-                                                 "CurrentCommander": object()})
+                                                 "CurrentCommander": object(),
+                                                 "HealedTarget": object(),
+                                                 "ItemCount": object()})
     drift, skipped = health.check_required_names(None, arr, None)
-    assert any(d["class"] == "SQSoldier" and d["field"] == "CurrentHeldItem"
-               and d["problem"] == "required name not reflected"
-               for d in drift)
-    assert any(s["class"] == "SQHealingEquipableItem" for s in skipped)
-    assert not any(d["class"] == "SQHealingEquipableItem" for d in drift)
-    assert not any(d["class"] in ("SQTeamState", "SQCommanderState")
-                   for d in drift)
+    assert skipped == []
+    assert [(d["class"], d["field"]) for d in drift] == [
+        ("SQSoldier", "CurrentHeldItem")]
+    assert drift[0]["problem"] == "required name not reflected"
+
+
+def test_required_names_still_skip_an_optional_row(monkeypatch):
+    """No row is optional today, but the semantics stay wired: mark one
+    optional with an observed reason and its absence must skip, not alarm."""
+    monkeypatch.setattr(health, "required_reflection_names",
+                        lambda: [("SomeContentClass", "Class", True, ["Foo"])])
+    drift, skipped = health.check_required_names(None, _Arr(), None)
+    assert drift == [] and skipped[0]["class"] == "SomeContentClass"
 
 
 def test_run_doctor_reports_required_name_drift(monkeypatch):
@@ -305,6 +313,7 @@ def test_run_doctor_carries_a_moved_checks_drift(monkeypatch):
     that is the entire point of moving it."""
     monkeypatch.setattr(health, "check_offset_drift", _no_drift)
     monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
     monkeypatch.setattr(
         health, "check_reflection_anchors",
         lambda *a: health.CheckOutcome(
@@ -323,6 +332,7 @@ def test_run_doctor_skips_land_in_checks_not_drift(monkeypatch):
     reported, and it is never drift."""
     monkeypatch.setattr(health, "check_offset_drift", _no_drift)
     monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
     monkeypatch.setattr(health, "check_reflection_anchors",
                         lambda *a: health.CheckOutcome([], [], []))
     d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc())
@@ -361,16 +371,108 @@ def test_hardcoded_offset_tables_shape():
         assert tbl and all(isinstance(v, int) for v in tbl.values())
 
 
-def test_types_resolve_paths_calls_optional_are_optional_here_too():
-    """A type `resolve_paths` tolerates the absence of must not be reported as
-    drift when it is absent — otherwise a layer with no emplacement built
-    fails the health check and can trigger a pointless self-heal."""
+def test_only_content_loaded_types_are_optional():
+    """Optional means "this level may genuinely not have loaded it", and after
+    2026-08-30 that is a much smaller set than it looked. Native SQ* classes
+    are registered when the C++ module loads, not when content spawns — all of
+    them answered on a 0-player server with nothing built — so their absence
+    is a rename and must be drift. Only blueprints load with content."""
     tables = {c: opt for c, _k, opt, _t in health.hardcoded_offset_tables()}
-    assert tables.get("SQDeployableVehicle") is True
-    assert tables.get("SQVehicleSeatConfig") is True
-    # Core types stay required: their absence IS the drift signal.
-    assert tables.get("SQDeployable") is False
-    assert tables.get("SQVehicle") is False
+    assert tables.get("BP_BaseFobCreator_C") is True
+    for native in ("SQDeployableVehicle", "SQVehicleSeatConfig",
+                   "SQPlayerController", "SQMapMarkerManagerComponent",
+                   "SQDeployable", "SQVehicle"):
+        assert tables.get(native) is False, native
+    assert all(not opt for _c, _k, opt, _n in health.required_reflection_names())
+
+
+def test_required_name_row_absence_is_drift_now(monkeypatch):
+    """The blind spot Item B closes: a class-level rename of
+    SQHealingEquipableItem used to look exactly like "no medic item in this
+    level" and skipped forever."""
+    arr = _Arr(resolves=set())
+    drift, skipped = health.check_required_names(None, arr, None)
+    assert skipped == []
+    assert {d["class"] for d in drift} == {
+        row[0] for row in health.required_reflection_names()}
+    assert all(d["problem"] == "class not found" for d in drift)
+
+
+# ---- struct-internal tier -------------------------------------------------
+
+def test_struct_field_tables_shape():
+    rows = health.struct_field_tables()
+    owners = {owner for owner, _k, _p, _o, _t in rows}
+    assert {"SQSoldier", "SQMapMarkerManagerComponent"} <= owners
+    for _owner, kind, path, optional, tbl in rows:
+        assert kind in {"Class", "ScriptStruct"}
+        assert path and all(isinstance(h, str) for h in path)
+        assert isinstance(optional, bool)
+        assert tbl and all(isinstance(v, int) for v in tbl.values())
+
+
+def test_struct_fields_report_drift_inside_the_struct(monkeypatch):
+    """The damage-event internals are the point: LastTakeHitInfo.ActualDamage
+    is not a field of SQSoldier, so nothing in the class tier can see it move."""
+    import sqreader.ue.reflection as refl
+    from sqreader.squad.snapshot import THI_ACTUAL_DAMAGE_OFFSET
+
+    monkeypatch.setattr(refl, "find_field_by_name_with_super",
+                        lambda *a: 0x77)
+    monkeypatch.setattr(refl, "read_fstructproperty_struct", lambda *a: 0x88)
+    # Every hop resolves; ActualDamage has moved 8 bytes on inside the struct.
+    monkeypatch.setattr(
+        refl, "get_class_layout",
+        lambda pm, addr, alloc: {
+            "ActualDamage": _Prop(THI_ACTUAL_DAMAGE_OFFSET + 8),
+            "PointDamageEvent": _Prop(0x38), "HitInfo": _Prop(0x30),
+            "Distance": _Prop(0x8), "BoneName": _Prop(0xF0),
+            "Items": _Prop(0x108)})
+    owners = {owner for owner, _k, _p, _o, _t in health.struct_field_tables()}
+    arr = _Arr(resolves=owners)
+    tg = health.DoctorTargets(None, None, {o: 0x1000 for o in owners},
+                              complete=True)
+    tg._layouts[0x1000] = {"LastTakeHitInfo": _Prop(0x24E8),
+                           "MarkerArray": _Prop(0xB8)}
+    drift, skipped = health.check_struct_fields(None, arr, None, tg)
+    assert skipped == []
+    assert any(d["field"] == "ActualDamage" and d["problem"] == "offset drift"
+               for d in drift)
+
+
+def test_struct_fields_call_a_renamed_hop_drift_and_a_dead_read_a_skip(
+        monkeypatch):
+    """A hop whose name is gone is a Squad rename — drift. A hop whose name is
+    there but will not read is /proc having a bad moment — skip, because
+    doctor is what you run when reads are failing."""
+    import sqreader.ue.reflection as refl
+    tg = health.DoctorTargets(None, None, {"SQSoldier": 0x1000,
+                                           "SQMapMarkerManagerComponent": 0x2000},
+                              complete=True)
+    tg._layouts[0x1000] = {}                      # LastTakeHitInfo gone
+    tg._layouts[0x2000] = {"MarkerArray": _Prop(0xB8)}
+    monkeypatch.setattr(refl, "find_field_by_name_with_super", lambda *a: None)
+    monkeypatch.setattr(refl, "read_fstructproperty_struct", lambda *a: 0)
+    drift, skipped = health.check_struct_fields(None, _Arr(), None, tg)
+    assert any(d["field"] == "LastTakeHitInfo"
+               and d["problem"] == "struct field not reflected" for d in drift)
+    assert any(s["class"] == "SQMapMarkerManagerComponent.MarkerArray"
+               and "transient" in s["reason"] for s in skipped)
+
+
+def test_struct_field_drift_reaches_run_doctor(monkeypatch):
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
+    monkeypatch.setattr(
+        health, "check_struct_fields",
+        lambda *a: ([{"class": "SQSoldier.LastTakeHitInfo",
+                      "field": "ActualDamage", "expected": 0, "live": 8,
+                      "problem": "offset drift"}], []))
+    d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc())
+    assert d["state"] == "drift" and d["drift"][0]["field"] == "ActualDamage"
 
 
 def test_every_readable_hardcoded_offset_is_watched():
@@ -381,8 +483,15 @@ def test_every_readable_hardcoded_offset_is_watched():
     WITH a reason; this test is what keeps that register honest."""
     from sqreader.squad import snapshot as snap
 
+    # Membership is by VALUE, which carries a caveat worth naming: two
+    # constants that happen to share a number mask each other, so a new
+    # constant whose value coincides with a watched one passes this test
+    # without being watched at all. The register is what catches those; this
+    # test only guarantees nobody adds an offset in silence.
     watched = {v for _c, _k, _o, tbl in health.hardcoded_offset_tables()
                for v in tbl.values()}
+    watched |= {v for _c, _k, _p, _o, tbl in health.struct_field_tables()
+                for v in tbl.values()}
     # Each of these is in the register in health.hardcoded_offset_tables,
     # with the reason it cannot (yet) be checked by name.
     exempt = {
@@ -397,14 +506,9 @@ def test_every_readable_hardcoded_offset_is_watched():
         # Declared but never read — nothing can drift through them.
         "MARKER_ITEM_OFFSETS", "SQ_SEATCOMP_ANIM_STATE_OFFSET",
         "SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET", "SQ_VEHCOMP_STATE_OFFSET",
-        # Struct-internal: addressed relative to a struct, not a class, so a
-        # class table cannot express them (see the register's last entry).
-        "THI_ACTUAL_DAMAGE_OFFSET", "THI_SERVER_TIMESTAMP_OFFSET",
-        "THI_DAMAGE_CAUSER_OFFSET", "THI_DAMAGE_TYPE_CLASS_OFFSET",
-        "THI_FLAGS_OFFSET", "THI_PAWN_INSTIGATOR_OFFSET",
-        "THI_POINT_DAMAGE_EVENT_OFFSET",
-        "HR_BONE_NAME_OFFSET", "HR_DISTANCE_OFFSET",
-        "MARKER_ARRAY_ITEMS_OFFSET", "MARKER_ITEMS_ABS_OFFSET",
+        # Derived: MARKER_MGR_MARKER_ARRAY_OFFSET + MARKER_ARRAY_ITEMS_OFFSET,
+        # and both halves are watched (class tier + struct tier).
+        "MARKER_ITEMS_ABS_OFFSET",
     }
     missing = []
     for name in dir(snap):
@@ -430,14 +534,15 @@ def test_every_readable_hardcoded_offset_is_watched():
 
 def test_required_reflection_names_cover_the_fallbackless_reads():
     rows = health.required_reflection_names()
-    by_cls = {c: set(names) for c, _k, names in rows}
+    by_cls = {c: set(names) for c, _k, _o, names in rows}
     # Medical capture and the commander-identity hop have no fallback
     # constants: a rename is invisible without these rows.
     assert "CurrentHeldItem" in by_cls["SQSoldier"]
     assert {"HealedTarget", "ItemCount"} <= by_cls["SQHealingEquipableItem"]
     assert "CurrentCommander" in by_cls["SQCommanderState"]
-    for _cls, kind, names in rows:
+    for _cls, kind, optional, names in rows:
         assert kind in {"Class", "ScriptStruct"} and names
+        assert isinstance(optional, bool)
 
 
 # ---- build detection + restart counter -----------------------------------

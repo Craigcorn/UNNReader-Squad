@@ -1766,6 +1766,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
           not name_drift,
           "; ".join(f"{d['class']}.{d['field']}" for d in name_drift))
 
+    # Offsets INSIDE a struct — the damage-event internals and the marker
+    # FastArray's Items. No class table can express them; this tier walks the
+    # struct hops by reflection and compares the same constants the reader
+    # reads through.
+    print("\n== struct-internal offsets ==")
+    struct_drift, struct_skipped = health.check_struct_fields(
+        pm, arr, alloc, targets)
+    for s in struct_skipped:
+        print(f"  SKIP struct fields in {s['class']}: {s['reason']}")
+    for owner, _kind, path, _optional, table in health.struct_field_tables():
+        where = f"{owner}.{'.'.join(path)}"
+        if any(s["class"] == where for s in struct_skipped):
+            continue
+        problems = [f"{d['field']}: {d['problem']}"
+                    for d in struct_drift if d["class"] == where]
+        check(f"{where} ({len(table)} fields)", not problems,
+              "; ".join(problems))
+
     # Lane graph layout: DesignOutgoingLinks ArrayProperty offset on
     # SQGraphInitializerComponent + the FSQDesignLink struct shape, plus the
     # RAAS visualizer's RouteIndex. Mode-aware: the pieces a layer genuinely

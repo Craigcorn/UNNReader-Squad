@@ -32,6 +32,23 @@ follows [Semantic Versioning](https://semver.org/).
   the one that still has to walk. A drift verdict is never reported off
   reused addresses - it re-resolves from scratch first, so the shortcut
   can make the doctor quicker but never wrong.
+- Doctor now checks inside the damage-event struct, and a class rename
+  can no longer hide behind "not loaded". Two holes, one shape. The
+  first: offsets addressed relative to a struct rather than a class -
+  the take-hit internals the reader reads every damage event through,
+  and the marker array's Items - had no table that could express them,
+  so the struct that already moved once and cost months of wrong data
+  was watched only at its base. They have a tier of their own now,
+  which walks the hops by reflection, two deep where the bone name and
+  hit distance live, and compares the same constants the reader uses.
+  The second: a watched type that was absent counted as "this level has
+  not loaded it" for every type, so renaming SQHealingEquipableItem or
+  SQCommanderState away would have read as an eternal skip rather than
+  a break. Native SQ classes are registered when the C++ module loads,
+  not when content spawns - checked on an empty server with nothing
+  built, every one of them answered - so they are required now and
+  their absence is drift. Blueprints, which genuinely do load with
+  content, stay optional.
 - The check-in now says which checks could not measure anything. A
   report of "ok" used to cover both "everything was checked and it is
   fine" and "three checks never ran"; the second is a coverage hole
