@@ -74,14 +74,29 @@ def gather_offline(*, reason: str, build_sha: str | None, restarts: int,
 
 
 def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
-           restarts: int, uptime_sec: float, channel: str) -> dict[str, Any]:
+           restarts: int, uptime_sec: float, channel: str,
+           sample_actors: list[int] | None = None) -> dict[str, Any]:
     """Assemble the check-in telemetry over the reader's own open handles.
 
     `health.run_doctor` walks the live class layouts (cheap) and classifies the
     reader as ok / drift / unknown; a `drift` server is one a Squad patch broke.
     The drift list is capped so a totally-broken reader can't send a huge body.
+
+    `sample_actors` is passed straight through to the doctor: a handful of
+    actor addresses the CALLER already holds, so the value-based
+    ComponentToWorld check can run without this path ever building a snapshot
+    of its own.
+
+    `skipped` names the checks that could not measure anything this time.
+    Situational skips are fine and self-resolving — an empty server, a layer
+    with no lane graph. A CHRONIC one is not: it is a coverage hole that looks
+    exactly like a pass, and without this field central cannot tell "ok,
+    everything measured" from "ok, but three checks never ran". Additive, so
+    the schema string does not move.
     """
-    doc = health.run_doctor(pm, arr, alloc)
+    doc = health.run_doctor(pm, arr, alloc, sample_actors=sample_actors)
+    skipped = [str(c.get("check")) for c in (doc.get("checks") or [])
+               if c.get("state") == "skipped" and c.get("check")]
     return {
         "schema": SCHEMA_CHECKIN,
         "agent_version": __version__,
@@ -90,6 +105,7 @@ def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
         "engine": squad_build.engine_version(pm, arr, alloc),
         "health": doc.get("state", "unknown"),      # ok | drift | unknown
         "drift": (doc.get("drift") or [])[:20],
+        "skipped": skipped[:10],
         "restarts": int(restarts),
         "uptime_sec": int(uptime_sec),
         "channel": channel,

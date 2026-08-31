@@ -11,11 +11,32 @@ class _OkAlloc:
         return "None"
 
 
-class _AbsentArr:
-    num_elements = 1000
+class _Arr:
+    """A GUObjectArray whose batched lookup resolves exactly `resolves`.
 
-    def find_by_name(self, *a, **k):
-        return []          # SQPlayerState unresolvable → "unknown", not drift
+    The doctor resolves every name it needs in ONE `find_all_by_names` walk,
+    so that — not `find_by_name` — is what a mock has to answer."""
+    num_elements = 1000
+    base = 0x1000
+
+    def __init__(self, resolves=(), addr=0xDEAD):
+        self._resolves = set(resolves)
+        self._addr = addr
+
+    def find_all_by_names(self, targets, *, alloc=None):
+        return {n: (0, self._addr) for n in targets if n in self._resolves}
+
+    def find_by_name(self, name, **k):
+        return [(0, self._addr)] if name in self._resolves else []
+
+
+class _AbsentArr(_Arr):
+    def __init__(self):
+        super().__init__(resolves=())     # nothing resolves → "unknown"
+
+
+def _no_drift(*a, **k):
+    return [], []
 
 
 def test_run_doctor_unknown_when_core_class_absent():
@@ -28,29 +49,24 @@ def test_run_doctor_unknown_when_anchors_bad():
         def fname_to_str(self, *a):
             return "xxx"                 # index0 != "None"
 
-    class BadArr:
+    class BadArr(_Arr):
         num_elements = 0                 # out of the sane range
-
-        def find_by_name(self, *a, **k):
-            return []
 
     assert health.run_doctor(None, BadArr(), BadAlloc())["state"] == "unknown"
 
 
 def test_run_doctor_ok_and_drift(monkeypatch):
-    class Arr:
-        num_elements = 1000
-
-        def find_by_name(self, name, **k):
-            return [("addr", 0xDEAD)] if name == "SQPlayerState" else []
-
-    monkeypatch.setattr(health, "check_offset_drift", lambda *a: [])
-    assert health.run_doctor(None, Arr(), _OkAlloc())["state"] == "ok"
+    arr = _Arr(resolves={"SQPlayerState"})
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
+    assert health.run_doctor(None, arr, _OkAlloc())["state"] == "ok"
 
     monkeypatch.setattr(health, "check_offset_drift",
-                        lambda *a: [{"class": "SQDeployable", "field": "Team",
-                                     "problem": "offset drift"}])
-    d = health.run_doctor(None, Arr(), _OkAlloc())
+                        lambda *a: ([{"class": "SQDeployable", "field": "Team",
+                                      "problem": "offset drift"}], []))
+    d = health.run_doctor(None, arr, _OkAlloc())
     assert d["state"] == "drift" and d["ok"] is False and len(d["drift"]) == 1
 
 
@@ -60,18 +76,15 @@ def test_required_names_drift_when_present_and_skip_when_absent(monkeypatch):
     type that is not loaded is skipped, never drift. Without this test the
     drift path is exercised nowhere — the run_doctor tests' mock resolves no
     classes, so every row silently takes the skip branch."""
-    class Arr:
-        def find_by_name(self, name, **k):
-            if name == "SQHealingEquipableItem":
-                return []                      # not loaded in this level
-            return [(1, 0xBEEF)]
+    names = {row[0] for row in health.required_reflection_names()}
+    arr = _Arr(resolves=names - {"SQHealingEquipableItem"})
 
     import sqreader.ue.reflection as refl
     # Layout carries the commander names but NOT CurrentHeldItem.
     monkeypatch.setattr(refl, "get_class_layout",
                         lambda pm, addr, alloc: {"CommanderState": object(),
                                                  "CurrentCommander": object()})
-    drift, skipped = health.check_required_names(None, Arr(), None)
+    drift, skipped = health.check_required_names(None, arr, None)
     assert any(d["class"] == "SQSoldier" and d["field"] == "CurrentHeldItem"
                and d["problem"] == "required name not reflected"
                for d in drift)
@@ -84,21 +97,258 @@ def test_required_names_drift_when_present_and_skip_when_absent(monkeypatch):
 def test_run_doctor_reports_required_name_drift(monkeypatch):
     """A missing required name must surface as state=drift through run_doctor
     — it rides the same alarm the offset tables do."""
-    class Arr:
-        num_elements = 1000
-
-        def find_by_name(self, name, **k):
-            return [("addr", 0xDEAD)] if name == "SQPlayerState" else []
-
-    monkeypatch.setattr(health, "check_offset_drift", lambda *a: [])
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
     monkeypatch.setattr(
         health, "check_required_names",
         lambda *a: ([{"class": "SQSoldier", "field": "CurrentHeldItem",
                       "expected": None, "live": None,
                       "problem": "required name not reflected"}], []))
-    d = health.run_doctor(None, Arr(), _OkAlloc())
+    d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc())
     assert d["state"] == "drift" and d["ok"] is False
     assert d["drift"][0]["field"] == "CurrentHeldItem"
+
+
+# ---- the checks the human command used to own alone ----------------------
+#
+# Each one gets a drift path and a skip path: a check that cannot fire is a
+# hole, and a check that fires when there was nothing to measure is the false
+# alarm that gets the whole signal ignored.
+
+class _Prop:
+    """Stand-in for reflection's FPropertyInfo."""
+
+    def __init__(self, offset=0, type_name="ObjectProperty", addr=0x7000):
+        self.offset = offset
+        self.type_name = type_name
+        self.addr = addr
+
+
+class _Pm:
+    """A /proc reader that answers only the reads it was given."""
+
+    def __init__(self, reads=None):
+        self.reads = dict(reads or {})
+
+    def try_read(self, addr, n):
+        return self.reads.get((addr, n))
+
+    def read_u64(self, addr):
+        b = self.try_read(addr, 8)
+        return int.from_bytes(b, "little") if b else 0
+
+
+def _targets(layouts, pm=None):
+    """DoctorTargets over canned layouts: {class name: {field: _Prop}}."""
+    addrs = {name: 0x1000 + i * 0x10
+             for i, name in enumerate(sorted(layouts)) if layouts[name] is not None}
+    tg = health.DoctorTargets(pm, None, addrs, complete=True)
+    for name, layout in layouts.items():
+        if layout is not None:
+            tg._layouts[tg.addr(name)] = layout
+    return tg
+
+
+def test_reflection_anchors_drift_and_skip(monkeypatch):
+    """The reflection walker's own assumptions. Nothing else the doctor says
+    means anything if these moved, so they have no skip rule beyond the core
+    class being absent."""
+    import sqreader.ue.reflection as refl
+    monkeypatch.setattr(refl, "find_field_by_name_with_super",
+                        lambda *a: 0x99)
+    monkeypatch.setattr(refl, "read_fstructproperty_struct", lambda *a: 0x99)
+    monkeypatch.setattr(health, "_object_name", lambda *a: "SomethingElse")
+    monkeypatch.setattr(refl, "bool_property_mask", lambda *a: (0x2c2, 0x10))
+    monkeypatch.setattr(refl, "struct_layout_for_field", lambda *a: {})
+    out = health.check_reflection_anchors(None, None,
+                                          _targets({"SQPlayerState": {}}))
+    problems = {d["field"] for d in out.drift}
+    assert problems == {"PlayerStateData", "bIsABot", "NumKills/RevivedPoints"}
+    assert all(n["ok"] is False for n in out.notes)
+
+    # Core class absent → skipped, never drift.
+    out = health.check_reflection_anchors(None, None,
+                                          _targets({"SQPlayerState": None}))
+    assert out.drift == [] and out.skipped[0]["check"] == "reflection anchors"
+
+
+def test_lane_graph_drift_and_skips():
+    from sqreader.squad.snapshot import (
+        LANE_GRAPH_OFFSETS, LANE_VISUALIZER_ROUTE_INDEX_OFF,
+    )
+    moved = LANE_GRAPH_OFFSETS["DesignOutgoingLinks"] + 8
+    out = health.check_lane_graph(_Pm(), None, _targets({
+        "SQGraphInitializerComponent": {
+            "DesignOutgoingLinks": _Prop(moved, "ArrayProperty")},
+        "SQGraphRAASVisualizerComponent": {
+            "RouteIndex": _Prop(LANE_VISUALIZER_ROUTE_INDEX_OFF + 4,
+                                "IntProperty")},
+    }))
+    fields = {d["field"] for d in out.drift}
+    assert "DesignOutgoingLinks" in fields and "RouteIndex" in fields
+
+    # A layer with no lane graph, and an AAS layer with no RAAS visualizer:
+    # both are content, not breakage. Absent means skipped.
+    out = health.check_lane_graph(_Pm(), None, _targets({
+        "SQGraphInitializerComponent": None,
+        "SQGraphRAASVisualizerComponent": None}))
+    assert out.drift == []
+    assert {s["check"] for s in out.skipped} == {"lane graph", "lane RouteIndex"}
+
+
+def test_marker_stride_drift_and_skip():
+    from sqreader.squad.snapshot import MARKER_MGR_MARKER_ARRAY_OFFSET
+    out = health.check_marker_stride(_Pm(), None, _targets({
+        "SQMapMarkerManagerComponent": {
+            "MarkerArray": _Prop(MARKER_MGR_MARKER_ARRAY_OFFSET + 8,
+                                 "StructProperty")}}))
+    assert [d["field"] for d in out.drift] == ["MarkerArray"]
+
+    out = health.check_marker_stride(_Pm(), None,
+                                     _targets({"SQMapMarkerManagerComponent": None}))
+    assert out.drift == [] and out.skipped[0]["check"] == "marker FastArray stride"
+
+
+# -- ComponentToWorld: the value check, and the thresholds that keep it quiet
+
+_ROOT_OFF, _REL_OFF, _ATT_OFF = 0x10, 0x20, 0x30
+
+
+def _c2w_case(monkeypatch, n_actors, n_bad, *, unreadable=0):
+    """n_actors vehicles, n_bad of them disagreeing, `unreadable` of them with
+    no root pointer at all."""
+    actors = [0x100000 + i * 0x1000 for i in range(n_actors)]
+    reads = {}
+    roots = {}
+    for i, a in enumerate(actors):
+        if i < unreadable:
+            continue
+        root = a + 0x800
+        roots[a] = root
+        reads[(a + _ROOT_OFF, 8)] = root.to_bytes(8, "little")
+        reads[(root + _ATT_OFF, 8)] = (0).to_bytes(8, "little")  # unattached
+
+    class _V:
+        def __init__(self, x):
+            self.x = self.y = self.z = x
+
+    bad_roots = {roots[a] for a in actors[len(actors) - n_bad:] if a in roots}
+
+    def fake_fvector(pm, addr):
+        for root in roots.values():
+            if addr == root + health.SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF:
+                return _V(9.0 if root in bad_roots else 1.0)
+            if addr == root + _REL_OFF:
+                return _V(1.0)
+        return None
+
+    import sqreader.ue.value as value
+    monkeypatch.setattr(value, "read_fvector", fake_fvector)
+    tg = _targets({"Actor": {"RootComponent": _Prop(_ROOT_OFF)},
+                   "SceneComponent": {"RelativeLocation": _Prop(_REL_OFF),
+                                      "AttachParent": _Prop(_ATT_OFF)}})
+    return health.check_component_to_world(_Pm(reads), None, tg, actors)
+
+
+def test_component_to_world_tolerates_a_straggler(monkeypatch):
+    """One vehicle caught mid-teleport writes its transform a frame late. That
+    is not a moved constant, and alarming on it would teach an operator to
+    ignore the check that matters."""
+    out = _c2w_case(monkeypatch, 5, 1)
+    assert out.drift == [] and out.skipped == []
+    assert out.notes[0]["ok"] is True and "4/5" in out.notes[0]["detail"]
+
+
+def test_component_to_world_reports_a_majority_mismatch(monkeypatch):
+    out = _c2w_case(monkeypatch, 5, 4)
+    assert len(out.drift) == 1
+    assert out.drift[0]["field"] == "ComponentToWorld.Translation"
+
+
+def test_component_to_world_skips_below_quorum(monkeypatch):
+    """Two readable vehicles is not a sample. Nothing to measure is never
+    drift."""
+    out = _c2w_case(monkeypatch, 2, 2)
+    assert out.drift == [] and out.skipped[0]["check"] == "ComponentToWorld"
+    assert "need 3" in out.skipped[0]["reason"]
+
+
+def test_component_to_world_skips_unreadable_actors(monkeypatch):
+    """A poisoned sample reads nothing back — that is a skip, not an alarm."""
+    out = _c2w_case(monkeypatch, 5, 0, unreadable=5)
+    assert out.drift == [] and out.skipped[0]["check"] == "ComponentToWorld"
+
+
+def test_component_to_world_skips_without_a_sample():
+    out = health.check_component_to_world(_Pm(), None, _targets({}), None)
+    assert out.drift == []
+    assert out.skipped[0]["reason"] == "no actor sample supplied"
+
+
+def test_collector_fields_only_fail_is_drift():
+    """A sibling that read while this one did not is layout drift; everything
+    else these counters do is event-gating."""
+    players = [{"stats": {"fobsBuilt": 3, "captures": 2, "defenses": 0}}]
+    out = health.check_collector_fields(players)
+    assert [d["field"] for d in out.drift] == ["suppliesDelivered"]
+    assert any("vehicleDamage" in s["reason"] for s in out.skipped)
+    # An empty server measures nothing; no snapshot at all says nothing.
+    assert health.check_collector_fields([]).drift == []
+    assert health.check_collector_fields(None) == health.CheckOutcome([], [], [])
+
+
+# ---- run_doctor composition ----------------------------------------------
+
+def test_run_doctor_carries_a_moved_checks_drift(monkeypatch):
+    """A check that used to be human-only must reach the machine verdict —
+    that is the entire point of moving it."""
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(
+        health, "check_reflection_anchors",
+        lambda *a: health.CheckOutcome(
+            [{"class": "SQPlayerState", "field": "bIsABot", "expected": 8,
+              "live": 16, "problem": "FBoolProperty byte-mask layout moved"}],
+            [], [{"label": "FBoolProperty.ByteMask layout", "ok": False,
+                  "detail": "got (706, 16)"}]))
+    d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc())
+    assert d["state"] == "drift" and d["drift"][0]["field"] == "bIsABot"
+    assert {"check": "FBoolProperty.ByteMask layout", "state": "failed",
+            "reason": "got (706, 16)"} in d["checks"]
+
+
+def test_run_doctor_skips_land_in_checks_not_drift(monkeypatch):
+    """Silence and "could not measure" are different things. A skip is
+    reported, and it is never drift."""
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
+    d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc())
+    assert d["state"] == "ok" and d["drift"] == []
+    skipped = {c["check"] for c in d["checks"] if c["state"] == "skipped"}
+    # No sample was passed and no lane/marker class resolved in the mock.
+    assert {"ComponentToWorld", "lane graph", "marker FastArray stride"} <= skipped
+    assert all(c.get("reason") for c in d["checks"] if c["state"] == "skipped")
+
+
+def test_c2w_sample_takes_only_unattached_placed_vehicles():
+    """The sample the serve loop hands over: attached vehicles carry a
+    parent-relative location, so comparing them would compare two different
+    things."""
+    from sqreader.cli import _c2w_sample
+
+    snap = {"vehicles": [
+        {"id": "7f0000000010", "position": [1, 2, 3]},
+        {"id": "7f0000000020", "position": [1, 2, 3], "attached": True},
+        {"id": "7f0000000030"},                         # no position
+        {"position": [1, 2, 3]},                        # no id
+        {"id": "7f0000000040", "position": [1, 2, 3]},
+    ]}
+    assert _c2w_sample(snap) == [0x7F0000000010, 0x7F0000000040]
+    assert _c2w_sample(snap, limit=1) == [0x7F0000000010]
+    assert _c2w_sample(None) == [] and _c2w_sample({}) == []
 
 
 def test_hardcoded_offset_tables_shape():
@@ -216,8 +466,8 @@ def test_bump_restarts_increments(tmp_path):
 
 def test_gather_telemetry(monkeypatch):
     monkeypatch.setattr(health, "run_doctor",
-                        lambda *a: {"state": "drift", "ok": False,
-                                    "drift": [{"class": "X", "field": "y"}]})
+                        lambda *a, **k: {"state": "drift", "ok": False,
+                                         "drift": [{"class": "X", "field": "y"}]})
     t = fleet.gather(pm=None, arr=None, alloc=None, build_sha="abc123",
                      restarts=2, uptime_sec=99.9, channel="beta")
     assert t["schema"] == "sqr-checkin-1"
@@ -226,6 +476,50 @@ def test_gather_telemetry(monkeypatch):
     assert t["health"] == "drift" and t["restarts"] == 2 and t["channel"] == "beta"
     assert t["uptime_sec"] == 99                    # int-coerced
     assert len(t["drift"]) == 1
+
+
+def test_gather_reports_which_checks_could_not_measure(monkeypatch):
+    """A chronic skip is a coverage hole that looks exactly like a pass from
+    central. The payload has to be able to tell them apart — additively, on
+    the same schema string."""
+    monkeypatch.setattr(
+        health, "run_doctor",
+        lambda *a, **k: {"state": "ok", "ok": True, "drift": [], "checks": [
+            {"check": "ComponentToWorld", "state": "skipped",
+             "reason": "no actor sample supplied"},
+            {"check": "marker FastArray stride", "state": "passed"},
+            {"check": "lane graph", "state": "skipped", "reason": "no lanes"},
+        ]})
+    t = fleet.gather(pm=None, arr=None, alloc=None, build_sha=None,
+                     restarts=0, uptime_sec=1, channel="stable")
+    assert t["schema"] == "sqr-checkin-1"           # additive, not a new schema
+    assert t["skipped"] == ["ComponentToWorld", "lane graph"]
+
+
+def test_gather_caps_the_skipped_list(monkeypatch):
+    monkeypatch.setattr(
+        health, "run_doctor",
+        lambda *a, **k: {"state": "ok", "ok": True, "drift": [], "checks": [
+            {"check": f"c{i}", "state": "skipped", "reason": "x"}
+            for i in range(40)]})
+    t = fleet.gather(pm=None, arr=None, alloc=None, build_sha=None,
+                     restarts=0, uptime_sec=1, channel="stable")
+    assert len(t["skipped"]) == 10
+
+
+def test_gather_passes_the_actor_sample_through(monkeypatch):
+    """The sample is the whole reason the machine doctor can check the
+    position transform without building a snapshot of its own."""
+    seen = {}
+
+    def fake(pm, arr, alloc, *, sample_actors=None):
+        seen["sample"] = sample_actors
+        return {"state": "ok", "ok": True, "drift": [], "checks": []}
+
+    monkeypatch.setattr(health, "run_doctor", fake)
+    fleet.gather(pm=None, arr=None, alloc=None, build_sha=None, restarts=0,
+                 uptime_sec=1, channel="stable", sample_actors=[0x10, 0x20])
+    assert seen["sample"] == [0x10, 0x20]
 
 
 def test_checkin_seals_and_posts(monkeypatch):

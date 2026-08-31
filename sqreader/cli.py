@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from . import __version__, config, elo
+# The doctor's checks live in health.py so the human command below and the
+# machine signal the fleet reports run the SAME functions and can never
+# disagree; cmd_doctor only formats what they return.
+from .health import collector_field_verdicts
 
 # Plugins run inside the tick loop. At the production 0.5 Hz the whole tick has
 # ~2 s, and the reader — not the plugins — owns that. Anything past this gets
@@ -309,71 +313,25 @@ def _str_tuple(value: Any) -> tuple[str, ...]:
     return tuple(v.strip() for v in value if isinstance(v, str) and v.strip())
 
 
-# Which collector each spliced player-stat field is read from. The grouping is
-# the load-bearing part: two fields from the same collector share ONE array
-# entry, which is what makes a disagreement between them mean something.
-COLLECTOR_FIELD_SOURCE: dict[str, str] = {
-    "fobsBuilt":         "logistics",
-    "suppliesDelivered": "logistics",
-    "vehicleDamage":     "combat",
-    "fobsDestroyed":     "combat",
-    "captures":          "objective",
-    "defenses":          "objective",
-}
+def _c2w_sample(snap: dict | None, *, limit: int = 8) -> list[int]:
+    """A handful of unattached vehicle actor addresses out of a snapshot the
+    caller ALREADY has — the doctor's ComponentToWorld sample.
 
-
-def _collector_field_verdicts(
-        players: list[dict]) -> dict[str, tuple[str, str]]:
-    """Doctor's verdict on each ODK collector field, from one snapshot.
-
-    Returns ``{field: (verdict, detail)}`` with verdict ``ok`` / ``skip`` /
-    ``fail``.
-
-    The rule used to be "some player must be carrying a value, or the offsets
-    have drifted", and that cost a diagnostic session. These counters are
-    EVENT-GATED: Squad creates a player's entry in a collector when they first
-    score in that category, so a server in warmup — or a whole round in which
-    nobody happened to destroy a FOB — reads exactly like a broken offset.
-    Absence is not evidence of drift. It is not evidence of anything.
-
-    A verified ZERO is a real answer: it says the entry exists and we read it.
-    The old rule accepted one only by accident, and then cried drift the moment
-    the entry had not been created yet. Confirmed against a live 10.5.3 server
-    with a player online building a FOB — fobsBuilt 1, suppliesDelivered 3000,
-    defenses 32 — the offsets resolve and track real actions.
-
-    What IS evidence: the two fields of one collector come out of a single
-    array entry, so if one of them read and its sibling did not, that struct's
-    layout is wrong. That is the only drift this check can honestly assert, and
-    now it is the only thing it does assert.
+    This is the whole trick that lets the machine doctor check the position
+    transform: the serve loop holds a fresher snapshot than the check could
+    ever build for itself, so the sample costs zero extra discovery, and the
+    check-in never has to walk the object array or build a snapshot to get it.
     """
-    fields = tuple(COLLECTOR_FIELD_SOURCE)
-    if not players:
-        return {f: ("skip", "no players online — no counter to read")
-                for f in fields}
-    carried: dict[str, list[float]] = {f: [] for f in fields}
-    for p in players:
-        st = p.get("stats") or {}
-        for f in fields:
-            v = st.get(f)
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                carried[f].append(v)
-    out: dict[str, tuple[str, str]] = {}
-    for f in fields:
-        vals = carried[f]
-        if vals:
-            zeros = sum(1 for v in vals if v == 0)
-            out[f] = ("ok", f"{len(vals)}/{len(players)} players, "
-                            f"max={max(vals):g}"
-                            + (f", {zeros} verified zero" if zeros else ""))
+    out: list[int] = []
+    for v in ((snap or {}).get("vehicles") or []):
+        if v.get("attached") or not v.get("position"):
             continue
-        sibling = next(s for s in fields if s != f
-                       and COLLECTOR_FIELD_SOURCE[s] == COLLECTOR_FIELD_SOURCE[f])
-        if carried[sibling]:
-            out[f] = ("fail", f"'{sibling}' came out of the same collector "
-                              f"entry and this did not — layout drift")
-        else:
-            out[f] = ("skip", "event-gated — nobody has scored one yet")
+        try:
+            out.append(int(str(v["id"]), 16))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -811,14 +769,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
     _checkin_restarts = (fleet.bump_restarts(stats_db_path.parent)
                          if push_active and stats_db_path is not None else 0)
 
-    def _checkin() -> None:
+    def _checkin(sample_actors: list[int] | None = None) -> None:
         if not push_active or push_creds is None or push_backlog is None:
             return
         try:
             telem = fleet.gather(pm, arr, alloc, build_sha=_checkin_build_sha,
                                  restarts=_checkin_restarts,
                                  uptime_sec=time.time() - started,
-                                 channel=_checkin_channel)
+                                 channel=_checkin_channel,
+                                 sample_actors=sample_actors)
             ingest_client.checkin(
                 push_creds, telem, seq=ingest_client._next_seq(push_backlog))
         except Exception as _ce:
@@ -858,11 +817,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
                   f"v{_committed.get('version')} ({len(_n)} offsets) at boot",
                   file=sys.stderr)
 
-    def _selfheal():
+    def _selfheal(sample_actors: list[int] | None = None):
         """One self-heal attempt: if the reader has DRIFTED and central offers a
         newer signed pack for our build, apply it in-process, verify with doctor,
         and commit — or roll back. Returns the re-resolved paths on a successful
-        apply, else None. Best-effort; never raises out to the loop."""
+        apply, else None. Best-effort; never raises out to the loop.
+
+        The same actor sample the check-in used goes into both doctor calls, so
+        the gate that decides to heal and the gate that decides the heal worked
+        are measuring the same things."""
         if not (_offset_autoheal and push_active and push_creds is not None
                 and _checkin_build_sha and _offset_state_dir is not None
                 and push_backlog is not None):
@@ -871,7 +834,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             from . import offset_client as _oc
             from .squad.snapshot import (
                 apply_offset_overrides, resolve_paths, revert_offset_overrides)
-            if health.run_doctor(pm, arr, alloc).get("state") != "drift":
+            if health.run_doctor(pm, arr, alloc,
+                                 sample_actors=sample_actors
+                                 ).get("state") != "drift":
                 return None      # only self-heal a genuinely drifted reader
             minv = _oc.active_version(_offset_state_dir, _checkin_build_sha)
             got = _oc.fetch_and_accept(
@@ -882,7 +847,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             applied = apply_offset_overrides(got["offsets"])
             new_paths = resolve_paths(pm, arr, alloc)
             caches.reset()
-            if health.run_doctor(pm, arr, alloc).get("state") == "ok":
+            if health.run_doctor(pm, arr, alloc,
+                                 sample_actors=sample_actors
+                                 ).get("state") == "ok":
                 _oc.save_active(_offset_state_dir, _checkin_build_sha,
                                 got["version"], got["offsets"])
                 print(f"[selfheal] applied offset pack v{got['version']} "
@@ -1367,8 +1334,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
             # best-effort. A successful self-heal rebinds `paths` for later ticks
             # (and hands them to the build worker in two-tier mode).
             if push_active and now - last_checkin >= fleet.CHECKIN_INTERVAL_SEC:
-                _checkin()
-                _healed = _selfheal()
+                # Hand the doctor vehicles from the snapshot this tick already
+                # built — the ComponentToWorld check needs live actors and this
+                # path may never go looking for its own.
+                _c2w = _c2w_sample(snap)
+                _checkin(_c2w)
+                _healed = _selfheal(_c2w)
                 if _healed is not None:
                     paths = _healed
                     if worker is not None:
@@ -1692,20 +1663,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     Returns non-zero if any check fails — this is the "did the Squad
     update break us?" smoke test.
     """
-    from . import addrcache
+    from . import addrcache, health
     from .mem import ProcessMemory
+    from .squad.snapshot import COLLECTOR_CLASSES
     from .ue.fname import KNOWN_ALLOCATOR_ADDR_V10_4_1
-    from .ue.uobject import KNOWN_GOBJECTS_ADDR_V10_4_1, UOBJ_NAME_PRIVATE
-    from .ue.reflection import (
-        bool_property_mask, struct_layout_for_field,
-        read_fstructproperty_struct, find_field_by_name_with_super,
-    )
-    from .squad.snapshot import (
-        LANE_GRAPH_OFFSETS, LANE_LINK_NODEA_OFF, LANE_LINK_NODEB_OFF,
-        COLLECTOR_CLASSES,
-    )
-    from .ue.value import read_fvector
-    import struct as _s
+    from .ue.uobject import KNOWN_GOBJECTS_ADDR_V10_4_1
 
     pid = args.pid or config.find_squad_server_pid()
     pm = ProcessMemory(pid)
@@ -1726,6 +1688,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ok = False
         sep = f"  {detail}" if detail else ""
         print(f"  {tag} {label}{sep}")
+
+    def report(outcome) -> None:
+        """Print one shared check's result. The human command decides how to
+        SAY it; what counts as a pass is decided in health.py, once."""
+        for s in outcome.skipped:
+            print(f"  SKIP {s['check']}: {s['reason']}")
+        for n in outcome.notes:
+            check(n["label"], n["ok"], n["detail"])
 
     print("\n== FNamePool / GUObjectArray ==")
     # What matters is that we resolved USABLE structures. Address drift
@@ -1748,152 +1718,60 @@ def cmd_doctor(args: argparse.Namespace) -> int:
              f"-> using {alloc.base:#x} (via cache/discovery)" if p_drift
              else f"matches known {KNOWN_ALLOCATOR_ADDR_V10_4_1:#x}"))
 
-    print("\n== reflection-derived layouts ==")
-    # FStructProperty.Struct at +0x70 — find SQPlayerState.PlayerStateData,
-    # read its +0x70, confirm it's the PlayerStateDataObject UScriptStruct.
-    ps_hits = arr.find_by_name("SQPlayerState", class_name="Class",
-                               alloc=alloc, limit=1)
-    if not ps_hits:
+    # Every class the checks need, resolved in ONE walk of the object array
+    # (the same batched lookup `resolve_paths` uses) instead of one walk per
+    # name — and the same resolution the machine doctor works from.
+    targets = health.resolve_targets(pm, arr, alloc)
+    if not targets.addr("SQPlayerState"):
         check("SQPlayerState class present", False,
               "not found — server empty/loading, or a deeper break")
         print("\nFAIL  doctor: could not resolve SQPlayerState; "
               "re-run once a match is live.")
         return 1
-    ps_class = ps_hits[0][1]
-    psd_ff = find_field_by_name_with_super(pm, ps_class, "PlayerStateData", alloc)
-    if psd_ff:
-        psd_struct = read_fstructproperty_struct(pm, psd_ff)
-        nm_b = pm.try_read(psd_struct + UOBJ_NAME_PRIVATE, 8)
-        if nm_b is None:
-            # doctor is what you run *because* reads are failing — report the
-            # failed read, do not crash on None inside struct.unpack.
-            check("FStructProperty.Struct at +0x70", False,
-                  "could not read the struct's FName")
-        else:
-            ci, num = _s.unpack("<II", nm_b)
-            sname = alloc.fname_to_str(ci, num)
-            check("FStructProperty.Struct at +0x70",
-                  sname == "PlayerStateDataObject", f"got {sname!r}")
-    else:
-        check("FStructProperty.Struct at +0x70", False,
-              "PlayerStateData field not found")
 
-    # FBoolProperty mask layout — bIsABot should be at byte mask 0x08
-    m = bool_property_mask(pm, ps_class, "bIsABot", alloc)
-    check("FBoolProperty.ByteMask layout (SQPlayerState.bIsABot)",
-          m is not None and m[1] == 0x08,
-          f"got {m!r}")
-
-    # PlayerStateDataObject reflection (struct_layout_for_field)
-    psd_layout = struct_layout_for_field(pm, ps_class, "PlayerStateData", alloc)
-    check("PlayerStateDataObject reflection (25 fields incl NumKills)",
-          "NumKills" in psd_layout and "RevivedPoints" in psd_layout,
-          f"{len(psd_layout)} fields found")
+    print("\n== reflection-derived layouts ==")
+    report(health.check_reflection_anchors(pm, alloc, targets))
 
     print("\n== Squad-class field offsets ==")
-    # SQDeployable / SQVehicleSpawner / SQMapMarker / SQProjectile —
-    # hardcoded *_OFFSETS dicts. Verify they still align by reading via
-    # reflection and comparing.
-    def offsets_match(class_name: str, hardcoded: dict[str, int],
-                      kind: str = "Class") -> tuple[bool, list[str]]:
-        h = arr.find_by_name(class_name, class_name=kind,
-                             alloc=alloc, limit=1)
-        if not h:
-            return False, [f"class {class_name!r} not found"]
-        from .ue.reflection import get_class_layout
-        live = get_class_layout(pm, h[0][1], alloc)
-        problems = []
-        for fname, hardcoded_off in hardcoded.items():
-            p = live.get(fname)
-            if p is None:
-                problems.append(f"{fname}: not reflected")
-            elif p.offset != hardcoded_off:
-                problems.append(
-                    f"{fname}: hardcoded {hardcoded_off:#x} != live {p.offset:#x}")
-        return len(problems) == 0, problems
-
     # A Squad update that shifts a struct layout is silent: the reader keeps
     # reading the old offset, gets neighbouring bytes, and ships plausible-looking
-    # garbage. `offsets_match` catches it by reading each offset back through live
-    # reflection — so every group we hardcode is listed in one place. The table
-    # set is shared with the fleet health signal (`health.hardcoded_offset_tables`)
-    # so this human command and the machine-readable `run_doctor` can never
-    # disagree about which offsets "correct" means.
-    from .health import check_required_names, hardcoded_offset_tables
-    for cls, kind, optional, table in hardcoded_offset_tables():
-        if optional and not arr.find_by_name(cls, class_name=kind,
-                                             alloc=alloc, limit=1):
-            # Not loaded in this level (no emplacement built, say) — absence
-            # is not drift for an optional type.
-            print(f"SKIP  {cls} hardcoded offsets: type not loaded")
+    # garbage. `check_offset_drift` catches it by reading each offset back through
+    # live reflection — so every group we hardcode is listed in one place, and
+    # the fleet health signal checks that same list. An optional type that is not
+    # loaded in this level (no emplacement built, say) is skipped, not drift.
+    table_drift, table_skipped = health.check_offset_drift(
+        pm, arr, alloc, targets)
+    for s in table_skipped:
+        print(f"  SKIP {s['class']} hardcoded offsets: {s['reason']}")
+    for cls, _kind, _optional, table in health.hardcoded_offset_tables():
+        if any(s["class"] == cls for s in table_skipped):
             continue
-        passed, problems = offsets_match(cls, table, kind)
+        problems = [f"{d['field']}: {d['problem']}"
+                    + (f" (hardcoded {d['expected']:#x} != live {d['live']:#x})"
+                       if isinstance(d.get("expected"), int)
+                       and isinstance(d.get("live"), int) else "")
+                    for d in table_drift if d["class"] == cls]
         check(f"{cls} hardcoded offsets ({len(table)} fields)",
-              passed, "; ".join(problems))
+              not problems, "; ".join(problems))
 
     # Reflection-only reads have no constant to drift, but a Squad RENAME
     # makes them vanish from recordings silently — fail-safe and dark. These
     # rows turn that into a visible failure. A type that isn't loaded yet
     # (no medic item / emplacement in the level) is reported as skipped.
-    name_drift, name_skipped = check_required_names(pm, arr, alloc)
+    name_drift, name_skipped = health.check_required_names(
+        pm, arr, alloc, targets)
     for s in name_skipped:
-        print(f"SKIP  required names on {s['class']}: {s['reason']}")
+        print(f"  SKIP required names on {s['class']}: {s['reason']}")
     check(f"required reflection names ({len(name_drift)} missing)",
           not name_drift,
           "; ".join(f"{d['class']}.{d['field']}" for d in name_drift))
 
     # Lane graph layout: DesignOutgoingLinks ArrayProperty offset on
-    # SQGraphInitializerComponent + the FSQDesignLink struct shape.
+    # SQGraphInitializerComponent + the FSQDesignLink struct shape, plus the
+    # RAAS visualizer's RouteIndex. Mode-aware: the pieces a layer genuinely
+    # lacks are skipped, which is why these constants were never table rows.
     print("\n== Lane graph (AAS/RAAS) ==")
-    gi_hits = arr.find_by_name("SQGraphInitializerComponent",
-                               class_name="Class", alloc=alloc, limit=1)
-    if not gi_hits:
-        check("SQGraphInitializerComponent class present", False,
-              "class not found in GUObjectArray")
-    else:
-        from .ue.reflection import get_class_layout
-        gi_layout = get_class_layout(pm, gi_hits[0][1], alloc)
-        dol = gi_layout.get("DesignOutgoingLinks")
-        check(f"DesignOutgoingLinks @ +{LANE_GRAPH_OFFSETS['DesignOutgoingLinks']:#x}",
-              dol is not None and dol.offset == LANE_GRAPH_OFFSETS["DesignOutgoingLinks"],
-              f"got {dol.offset if dol else None}")
-        # ArrayProperty.Inner at FProperty+0x78 (UE 5.7) → must resolve to
-        # a StructProperty whose Struct is named 'SQDesignLink'.
-        link_struct_addr = 0
-        if dol is not None:
-            inner_addr = pm.read_u64(dol.addr + 0x78)
-            if inner_addr:
-                from .ue.reflection import read_fproperty, read_fstructproperty_struct
-                inner = read_fproperty(pm, inner_addr, alloc)
-                check("DesignOutgoingLinks inner is StructProperty SQDesignLink",
-                      inner is not None and inner.type_name == "StructProperty",
-                      f"got {inner.type_name if inner else None}")
-                if inner and inner.type_name == "StructProperty":
-                    link_struct_addr = read_fstructproperty_struct(pm, inner_addr)
-                    nm_b = pm.try_read(link_struct_addr + UOBJ_NAME_PRIVATE, 8)
-                    if nm_b is None:
-                        check("DesignOutgoingLinks inner Struct == 'SQDesignLink'",
-                              False, "could not read the struct's FName")
-                    else:
-                        ci, num = _s.unpack("<II", nm_b)
-                        sname = alloc.fname_to_str(ci, num)
-                        check("DesignOutgoingLinks inner Struct == 'SQDesignLink'",
-                              sname == "SQDesignLink", f"got {sname!r}")
-            else:
-                check("DesignOutgoingLinks ArrayProperty inner ptr (+0x78)",
-                      False, "null inner")
-        # SQDesignLink (16 B): NodeA@+0x00 / NodeB@+0x08
-        if link_struct_addr:
-            link_layout = get_class_layout(pm, link_struct_addr, alloc)
-            na = link_layout.get("NodeA")
-            nb = link_layout.get("NodeB")
-            check("FSQDesignLink layout (NodeA@+0x00, NodeB@+0x08)",
-                  (na is not None and nb is not None
-                   and na.offset == LANE_LINK_NODEA_OFF
-                   and nb.offset == LANE_LINK_NODEB_OFF
-                   and na.type_name == "ObjectProperty"
-                   and nb.type_name == "ObjectProperty"),
-                  f"NodeA@{na.offset if na else None} NodeB@{nb.offset if nb else None}")
+    report(health.check_lane_graph(pm, alloc, targets))
 
     # Marker FastArraySerializer element stride. Player-placed markers are
     # read from SQMapMarkerManagerComponent.MarkerArray.Items with a BRUTE-
@@ -1901,58 +1779,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # struct would silently misread every marker. Verify the property chain
     # + the element size against live reflection.
     print("\n== Marker FastArray stride ==")
-    from .squad.snapshot import (MARKER_MGR_MARKER_ARRAY_OFFSET,
-                                 MARKER_ARRAY_ITEMS_OFFSET, MARKER_ITEM_SIZE)
-    from .ue.reflection import (find_field_by_name_with_super,
-        read_fstructproperty_struct, read_fproperty, read_ustruct_header)
-    mm = arr.find_by_name("SQMapMarkerManagerComponent", class_name="Class",
-                          alloc=alloc, limit=1)
-    if not mm:
-        check("SQMapMarkerManagerComponent class present", False, "not found")
-    else:
-        mm_layout = get_class_layout(pm, mm[0][1], alloc)
-        marr = mm_layout.get("MarkerArray")
-        marr_ok = (marr is not None
-                   and marr.offset == MARKER_MGR_MARKER_ARRAY_OFFSET
-                   and marr.type_name == "StructProperty")
-        check(f"MarkerArray StructProperty @ {MARKER_MGR_MARKER_ARRAY_OFFSET:#x}",
-              marr_ok,
-              f"got {marr.type_name if marr else None} @ "
-              f"{marr.offset if marr else 0:#x}")
-        # marr_ok came from the class layout; this is a second, independent
-        # lookup, so it can come back None on a transient read failure even
-        # when the layout said the field is there.
-        ff = (find_field_by_name_with_super(pm, mm[0][1], "MarkerArray", alloc)
-              if marr_ok else None)
-        if marr_ok and ff is None:
-            check("MarkerArray re-resolves for the Items walk", False,
-                  "field vanished between the layout read and the lookup")
-        if ff is not None:
-            fa_struct = read_fstructproperty_struct(pm, ff)
-            fa_layout = get_class_layout(pm, fa_struct, alloc)
-            items = fa_layout.get("Items")
-            items_ok = (items is not None
-                        and items.offset == MARKER_ARRAY_ITEMS_OFFSET
-                        and items.type_name == "ArrayProperty")
-            check(f"MarkerArray.Items ArrayProperty @ {MARKER_ARRAY_ITEMS_OFFSET:#x}",
-                  items_ok, f"got {items.type_name if items else None} @ "
-                  f"{items.offset if items else 0:#x}")
-            if items is not None and items_ok:
-                inner_addr = pm.read_u64(items.addr + 0x78)
-                inner = read_fproperty(pm, inner_addr, alloc) if inner_addr else None
-                if inner and inner.type_name == "StructProperty":
-                    elem = read_fstructproperty_struct(pm, inner_addr)
-                    info = read_ustruct_header(pm, elem, alloc)
-                    check(f"marker item stride == {MARKER_ITEM_SIZE} bytes",
-                          info.properties_size == MARKER_ITEM_SIZE,
-                          f"live element size {info.properties_size}")
-                else:
-                    check("MarkerArray.Items inner is StructProperty", False,
-                          f"got {inner.type_name if inner else None}")
+    report(health.check_marker_stride(pm, alloc, targets))
 
-    # ComponentToWorld at +0x210 — pick any unattached actor, verify its
-    # cached translation matches the RelativeLocation we read separately.
-    print("\n== ComponentToWorld at SceneComponent +0x210 ==")
+    # ComponentToWorld — the cached world transform must agree with the
+    # RelativeLocation of any unattached actor. The human command can afford
+    # to discover its own sample; the machine doctor is handed one from the
+    # serve loop's snapshot. Same check function either way.
+    print(f"\n== ComponentToWorld at SceneComponent "
+          f"+{health.SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF:#x} ==")
     from .squad.metadata import Metadata
     from .squad.snapshot import build_snapshot, resolve_paths
     paths = resolve_paths(pm, arr, alloc)
@@ -1960,25 +1794,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # reflects reality — the merge only runs when metadata is present. Metadata
     # only ADDS fields, so the raw-offset assertions above/below are unaffected.
     snap = build_snapshot(pm, arr, alloc, paths=paths, metadata=Metadata.load())
-    matches = 0
-    total = 0
-    for v in snap.get("vehicles", []):
-        if v.get("attached") or not v.get("position"):
-            continue
-        total += 1
-        root = pm.try_read(int(v["id"], 16)
-                           + paths.actor_root_component_off, 8)
-        if not root:
-            continue
-        rp = _s.unpack("<Q", root)[0]
-        ctw = read_fvector(pm, rp + paths.scene_component_to_world_translation_off)
-        rl = read_fvector(pm, rp + paths.scene_relative_location_off)
-        if ctw and rl and ctw.x == rl.x and ctw.y == rl.y and ctw.z == rl.z:
-            matches += 1
-    check("ComponentToWorld.Translation matches RelativeLocation "
-          "on unattached vehicles",
-          total > 0 and matches == total,
-          f"{matches}/{total}")
+    report(health.check_component_to_world(
+        pm, alloc, targets, _c2w_sample(snap, limit=health.C2W_MAX_SAMPLES)))
 
     # Stats-collector singletons (captures/defenses/fobsBuilt/fobsDestroyed/
     # vehicleDamage/suppliesDelivered). These are hardcoded struct layouts —
@@ -1993,12 +1810,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
               + (f"resolved @ {cls_addr:#x}" if cls_addr
                  else "not loaded this tick (map init / Jensen?)"))
     # Snapshot already spliced collector counters onto players. What that can
-    # and cannot prove is `_collector_field_verdicts`' whole subject: a value
+    # and cannot prove is `collector_field_verdicts`' whole subject: a value
     # (zero included) proves the offsets resolve, an absence proves nothing
     # because the counters are event-gated, and only two fields of one
     # collector disagreeing is drift.
     any_collector = any(paths.collector_classes.values())
-    for f, (verdict, detail) in _collector_field_verdicts(
+    for f, (verdict, detail) in collector_field_verdicts(
             snap.get("players") or []).items():
         label = f"collector field '{f}' readable"
         if not any_collector:

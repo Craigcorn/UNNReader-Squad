@@ -7,6 +7,38 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The machine doctor now runs the checks only a human could run. Four of
+  the doctor's checks - the reflection walker's own assumptions, the lane
+  graph, the marker array's element stride, and the ComponentToWorld
+  transform under every position the reader reports - lived inside the
+  `sqreader doctor` command and nowhere else. On a managed instance
+  nobody can type that command, so on exactly the deployment that cannot
+  look for itself those four could break and the health signal would
+  still read green; the take-hit drift went unnoticed for months for
+  this precise reason. The checks moved into health.py, both faces call
+  the same functions, and the human command is now only a formatter -
+  the two can no longer disagree. Every one of them can also say "I
+  could not measure this": a layer with no lane graph, an AAS layer with
+  no RAAS visualizer, an empty vehicle sample. Those skips are reported
+  as skips, never as drift, because a check that cries wolf every five
+  minutes is a check that gets ignored. The position check reads live
+  vehicles handed to it by whoever called - the serve loop passes ones
+  from the snapshot it just built - so the health path never walks the
+  object array or builds a snapshot to check itself. And it got faster
+  while gaining work: resolving every class in one batched walk instead
+  of one walk per name, with the resolved addresses re-validated and
+  reused between check-ins, took a check-in's doctor from 156 ms to
+  12 ms measured live - 91 ms on the first run of a process, which is
+  the one that still has to walk. A drift verdict is never reported off
+  reused addresses - it re-resolves from scratch first, so the shortcut
+  can make the doctor quicker but never wrong.
+- The check-in now says which checks could not measure anything. A
+  report of "ok" used to cover both "everything was checked and it is
+  fine" and "three checks never ran"; the second is a coverage hole
+  that looks exactly like a pass. The payload carries a capped list of
+  the checks that skipped, so a situational skip reads as content and a
+  chronic one reads as the bug it is. Additive - the schema string does
+  not move and an older central ignores the field.
 - The damage-event struct moved and the reader read past it. Some Squad
   update shifted SQSoldier.LastTakeHitInfo from 0x24c8 to 0x24e8, and
   the memory-side damage enrichment - hit timestamps, damage type, the

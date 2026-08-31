@@ -11,7 +11,10 @@ FOB: fobsBuilt 1, suppliesDelivered 3000, defenses 32. The offsets resolve.
 """
 from __future__ import annotations
 
-from sqreader.cli import COLLECTOR_FIELD_SOURCE, _collector_field_verdicts
+from sqreader.health import (
+    COLLECTOR_FIELD_SOURCE,
+    collector_field_verdicts as _collector_field_verdicts,
+)
 
 FIELDS = tuple(COLLECTOR_FIELD_SOURCE)
 
