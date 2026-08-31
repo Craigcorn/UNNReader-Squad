@@ -32,13 +32,13 @@ from typing import Any, NamedTuple
 
 # USceneComponent.ComponentToWorld.Translation. ComponentToWorld is a private
 # C++ member — not a UPROPERTY — so reflection cannot resolve it by name and
-# `resolve_paths` hardcodes this same +0x210. That is precisely why it needs a
+# `resolve_paths` hardcodes this same offset. That is precisely why it needs a
 # VALUE check instead of a table row: this one constant sits under every
 # position the reader reports, and nothing else in the doctor would notice it
 # moving. It lives here rather than in snapshot.py because a class table cannot
 # express a private member, and the offset-pack mechanism (module-level globals
 # in snapshot.py) never reaches the literal inside `resolve_paths` either.
-SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF = 0x210
+SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF = 0x200
 
 # The ComponentToWorld check judges live values, so it needs a quorum and a
 # tolerance. Fewer than this many readable unattached vehicles means "nothing

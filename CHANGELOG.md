@@ -6,6 +6,22 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The first real Squad update since the doctor grew teeth, and it bit
+  everything at once. The server auto-updated on a restart; within one
+  cycle of re-attaching, the hardened doctor reported all 48 casualties:
+  47 named constants (deployables, rally points, seats, vehicle arrays,
+  FOB pool, controller fields - and LastTakeHitInfo, moved for the
+  second build in a row) plus the one constant no table can watch: the
+  transform translation, caught by the value check when every sampled
+  vehicle disagreed with its own RelativeLocation. That one mattered
+  most - the FTransform shifted 0x210 -> 0x200, so every recorded
+  position was silently the Z coordinate and garbage until the fix. All
+  48 values refreshed exactly as the doctor dictated, verified by a
+  byte-level dump of the new transform layout. Recordings between the
+  server's update and this deploy carry junk positions and are excluded
+  from positional use.
+
 ### Added
 - The machine doctor now judges the stats collectors too. Their counters
   live in private C++ structures reflection cannot see, so the only

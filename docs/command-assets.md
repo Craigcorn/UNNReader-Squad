@@ -17,7 +17,9 @@ The lifecycle is an actor swap between two blueprint twins:
   (commander-visible) - the two classes have byte-identical 98-field
   layouts, so **the class name is the only pending/approved discriminator**
   (a `Request` bool at +0x330 reads 1 on both; `Distance`/`AddDistance`
-  are dead scratch vars; the icon component's `Size` is 32.0 - UI pixels).
+  read 0.0 on request markers - but are NOT dead: on the asset-geometry
+  markers they carry the footprint, see "Per-call actors"; the icon
+  component's `Size` is 32.0 - UI pixels).
   There is a ~1-tick coexistence window at the swap (the source of the
   brief disappear/reappear seen in the replay viewer).
 - Fuses, measured: a pending request lives **61 s**; an unused approved
@@ -67,8 +69,17 @@ Key reflected fields (past the AActor boilerplate):
 | `CommandIntervals` | +0x308 | FastArraySerializer; `Items` at absolute +0x410 |
 | `LastCategoryGameTime` | +0x420 | TArray, empty until first use, then per-category game-time of last call - **the cooldown state** (remaining = interval − (gameTime − lastUse)) |
 | `TeamCommands` | +0x430 | per-team commands object |
-| `NomineeStatus` | +0x438 | FastArraySerializer; `Items` at absolute +0x540; one entry appeared at vote start containing the nominee's PlayerState pointer plus a probable tally; persists after the vote resolves |
+| `NomineeStatus` | +0x438 | FastArraySerializer; `Items` at absolute +0x540. Entry DECODED offline from the captured vote (2026-08-31): nominee's `SQPlayerState*` at entry+0x10, **live vote tally (i32) at entry+0x18** — observed 1 at vote start (self-vote), 2 when the SL voted ~4 s in, with the array replication key ticking in lockstep. Voter IDENTITIES are absent from the first 32 bytes; whether they hide deeper needs a wider slice (R4a). Entry persists after resolution |
 | `CurrentCommander` | +0x5b8 | -> the commander's `SQPlayerState`; null when unclaimed - **the authoritative claimed-commander source** |
+
+**Vote lifecycle, decoded from the captured window (2026-08-31)**: a
+commander vote opens a **60-second window** — `bVoteInProgress` flips to 1,
+`CommanderVoteTimestamp` stamps the game-time, and `CommanderVoteTimer`
+counts down from 60 once per second (a per-tick recordable countdown).
+Resolution lands exactly at timer expiry: `bVoteInProgress` back to 0,
+timer to 0, and `CurrentCommander` set in the same instant. The whole
+lifecycle — start, live tally per nominee, countdown, resolution — is
+per-tick state in one actor.
 
 **Confirmed recorder bug**: the shipped commander-identity read treats
 `TeamState.CommanderState` as a PlayerState, reads empty strings off the
@@ -78,10 +89,12 @@ address. **Fix: one hop through `CurrentCommander` before the identity
 read** - the hop was verified live (resolved the sitting commander's
 name). Bugfix, not a format debate.
 
-Individual SL votes: whether per-voter identity exists server-side is
-still unknown - the captured vote window awaits offline decode of the
-nominee entry, and test R4a (a contested replacement vote with staggered
-voting) is designed to crack the entry format either way.
+Individual SL votes: the decode settled the core question — the server
+keeps **per-nominee tallies with precise timing, not per-voter ballots**
+(none in the entry's first 32 bytes). Individual attribution therefore
+comes from correlating tally-increment timestamps with announced voters
+(the staggered protocol), unless a wider entry slice in R4a reveals a
+voter list deeper in the struct.
 
 ## Per-asset action configs (`CommandAction_*` blueprint CDOs)
 
@@ -133,6 +146,20 @@ observed live:
   `Projectile` +0x378. Semantics: the path runs from Origin toward the
   click point (target) for `Distance`; the actor advances along it during
   the active window.
+- **The asset markers carry their own geometry** (decoded offline
+  2026-08-31 from the captured raws): the marker BP's `Distance` (+0x320,
+  f64) and `AddDistance` (+0x338, f64) — 0.0 on request markers — encode
+  the footprint on the geometry markers:
+
+  | Marker | Distance | AddDistance |
+  |---|---|---|
+  | `CommandRadius` (UAV) | 10000 = 100 m circle radius | 0 |
+  | `CommandLine` (strafe) | 6000 = 60 m run length | 0 |
+  | `CommandPath` (creep) | 45000 = 450 m path length (matches the actor's fire plan exactly) | 7500 = 75 m drop scatter |
+
+  Position + facing + these two named, reflected properties fully define
+  every asset's footprint — no endpoint vectors exist in the actor raws,
+  and none are needed.
 - Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) exist around HABs
   and command vehicles - noted, not yet explored.
 - **No commander action writes a single server-log line** (proven
@@ -146,10 +173,15 @@ observed live:
    flight or a barrage enters the wire except the radius/line/path
    markers' positions. The full fire-plan geometry (origin/target/length,
    shells, scatter) and the commander attribution live only on the actor.
-2. **Command markers record no geometry fields** - `arrowLength`/
-   `arrowHeading` come back null for the line/path markers (the fields
-   populate for squad move-order markers), so a strafe line's direction
-   and length are unrecorded.
+2. **Command markers record no geometry fields today** - `arrowLength`/
+   `arrowHeading` come back null for the line/path markers. SOLVED IN
+   PRINCIPLE by the offline decode: the geometry lives in the marker's
+   own `Distance`/`AddDistance` properties plus its facing - reading
+   those for `Command*` markers in the existing marker path (reflected
+   names, ~3 reads per command marker, near-zero cost) closes the gap
+   without any command-actor stream. The actor stream remains relevant
+   only for stats-side detail (shell counts, `CurrentBarrage` progress,
+   the commander-attribution pointer).
 3. Per-team commander state (identity fix + vote flag + cooldown state)
    and vote/asset events - storage measured ahead of design at
    **+0.25 %/match, ~0.009 ms/tick** (house canonicalized-zstd method,
@@ -165,11 +197,13 @@ observed live:
 | R1 | Edge-stand: place SL request, stand a soldier on the circle's edge, measure marker->soldier distance | solo, 2 min | exact request-circle radius; calibrates the map's real grid size |
 | R2 | Same edge-stand on a different layer | solo, 2 min, any visit | whether the circle is constant or map-scaled (the FOB-radius concern) |
 | R3 | Other-faction asset sweep: opposing team claims commander (opening the menu likely suffices to load their `CommandAction_*` CDOs), then sweep | one player on the other team | the irregular factions' full asset rulebook |
-| R4a | Replacement vote: a second SL votes out the incumbent, votes staggered ~10 s apart and announced | full squad quorum | contested `NomineeStatus` entries (entry stride + per-nominee tally -> individual-vote decode); `CurrentCommander` A->B swap |
+| R4a | Replacement vote: a second SL votes out the incumbent, votes staggered ~10 s apart and announced. Probe prep: widen the nominee slice (AUX_ELEM_BYTES) to hunt a voter list past entry+0x20 | full squad quorum | contested entries (stride via two nominees; whether voter identity exists deeper); `CurrentCommander` A->B swap |
 | R4b | Step-down / disconnect | commander | the clean clear to null |
 | R5 | Passive: after using one cat-1 asset, note when the other cat-1 asset shows available | nothing extra | which cooldown gate wins (per-action vs category) |
 
-Owed offline analysis on the archived captures: decode the nominee entry
-from the recorded vote window; decode the strafe `CommandLine` and UAV
-`CommandRadius` geometry from the instance raws. Then the capture proposal
-goes to review with the usual measured costs.
+Offline analysis: **done 2026-08-31** — the nominee entry (identity +0x10,
+tally +0x18, no voter list in the sampled bytes), the vote lifecycle
+(60 s window, per-second countdown, resolution semantics), and the marker
+geometry (`Distance`/`AddDistance` carry every asset's footprint) are all
+decoded above. Next: the capture proposal goes to review with the usual
+measured costs.
