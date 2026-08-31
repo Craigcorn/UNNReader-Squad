@@ -769,7 +769,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     _checkin_restarts = (fleet.bump_restarts(stats_db_path.parent)
                          if push_active and stats_db_path is not None else 0)
 
-    def _checkin(sample_actors: list[int] | None = None) -> None:
+    def _checkin(sample_actors: list[int] | None = None,
+                 sample_players: list[dict] | None = None) -> None:
         if not push_active or push_creds is None or push_backlog is None:
             return
         try:
@@ -777,7 +778,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                                  restarts=_checkin_restarts,
                                  uptime_sec=time.time() - started,
                                  channel=_checkin_channel,
-                                 sample_actors=sample_actors)
+                                 sample_actors=sample_actors,
+                                 sample_players=sample_players)
             ingest_client.checkin(
                 push_creds, telem, seq=ingest_client._next_seq(push_backlog))
         except Exception as _ce:
@@ -817,15 +819,16 @@ def cmd_serve(args: argparse.Namespace) -> int:
                   f"v{_committed.get('version')} ({len(_n)} offsets) at boot",
                   file=sys.stderr)
 
-    def _selfheal(sample_actors: list[int] | None = None):
+    def _selfheal(sample_actors: list[int] | None = None,
+                  sample_players: list[dict] | None = None):
         """One self-heal attempt: if the reader has DRIFTED and central offers a
         newer signed pack for our build, apply it in-process, verify with doctor,
         and commit — or roll back. Returns the re-resolved paths on a successful
         apply, else None. Best-effort; never raises out to the loop.
 
-        The same actor sample the check-in used goes into both doctor calls, so
-        the gate that decides to heal and the gate that decides the heal worked
-        are measuring the same things."""
+        The same actor and player samples the check-in used go into both doctor
+        calls, so the gate that decides to heal and the gate that decides the
+        heal worked are measuring the same things."""
         if not (_offset_autoheal and push_active and push_creds is not None
                 and _checkin_build_sha and _offset_state_dir is not None
                 and push_backlog is not None):
@@ -835,7 +838,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             from .squad.snapshot import (
                 apply_offset_overrides, resolve_paths, revert_offset_overrides)
             if health.run_doctor(pm, arr, alloc,
-                                 sample_actors=sample_actors
+                                 sample_actors=sample_actors,
+                                 sample_players=sample_players
                                  ).get("state") != "drift":
                 return None      # only self-heal a genuinely drifted reader
             minv = _oc.active_version(_offset_state_dir, _checkin_build_sha)
@@ -848,7 +852,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             new_paths = resolve_paths(pm, arr, alloc)
             caches.reset()
             if health.run_doctor(pm, arr, alloc,
-                                 sample_actors=sample_actors
+                                 sample_actors=sample_actors,
+                                 sample_players=sample_players
                                  ).get("state") == "ok":
                 _oc.save_active(_offset_state_dir, _checkin_build_sha,
                                 got["version"], got["offsets"])
@@ -1338,8 +1343,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 # built — the ComponentToWorld check needs live actors and this
                 # path may never go looking for its own.
                 _c2w = _c2w_sample(snap)
-                _checkin(_c2w)
-                _healed = _selfheal(_c2w)
+                _players = snap.get("players") or []
+                _checkin(_c2w, _players)
+                _healed = _selfheal(_c2w, _players)
                 if _healed is not None:
                     paths = _healed
                     if worker is not None:

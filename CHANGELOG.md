@@ -6,6 +6,20 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The machine doctor now judges the stats collectors too. Their counters
+  live in private C++ structures reflection cannot see, so the only
+  drift check possible is by value - and the value check needs players,
+  which the machine path deliberately never goes and gets. The serve
+  loop now hands over the player list from the snapshot it already
+  holds, the same way it hands over vehicles for the position check, and
+  the collector verdicts run on every check-in in pure Python - zero
+  memory reads, sub-tenth-millisecond. Only a sibling desync (one field
+  of a collector entry read while its array-mate did not) is drift;
+  event-gated absence skips, an empty server skips, and no snapshot at
+  all contributes nothing - not even a skip, so the payload's skipped
+  field keeps meaning something.
+
 ### Fixed
 - The machine doctor now runs the checks only a human could run. Four of
   the doctor's checks - the reflection walker's own assumptions, the lane

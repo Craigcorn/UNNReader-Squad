@@ -75,7 +75,8 @@ def gather_offline(*, reason: str, build_sha: str | None, restarts: int,
 
 def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
            restarts: int, uptime_sec: float, channel: str,
-           sample_actors: list[int] | None = None) -> dict[str, Any]:
+           sample_actors: list[int] | None = None,
+           sample_players: list[dict] | None = None) -> dict[str, Any]:
     """Assemble the check-in telemetry over the reader's own open handles.
 
     `health.run_doctor` walks the live class layouts (cheap) and classifies the
@@ -85,7 +86,8 @@ def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
     `sample_actors` is passed straight through to the doctor: a handful of
     actor addresses the CALLER already holds, so the value-based
     ComponentToWorld check can run without this path ever building a snapshot
-    of its own.
+    of its own. `sample_players` is its collector-check sibling — the
+    snapshot's player dicts, judged in pure Python, zero reads.
 
     `skipped` names the checks that could not measure anything this time.
     Situational skips are fine and self-resolving — an empty server, a layer
@@ -94,7 +96,8 @@ def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
     everything measured" from "ok, but three checks never ran". Additive, so
     the schema string does not move.
     """
-    doc = health.run_doctor(pm, arr, alloc, sample_actors=sample_actors)
+    doc = health.run_doctor(pm, arr, alloc, sample_actors=sample_actors,
+                            sample_players=sample_players)
     skipped = [str(c.get("check")) for c in (doc.get("checks") or [])
                if c.get("state") == "skipped" and c.get("check")]
     return {

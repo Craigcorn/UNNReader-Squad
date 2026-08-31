@@ -1021,7 +1021,8 @@ def _assert(out: CheckOutcome, label: str, ok: bool, detail: str, *,
 # ----- the machine signal ---------------------------------------------------
 
 def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
-                sample_actors: list[int] | None
+                sample_actors: list[int] | None,
+                sample_players: list[dict] | None = None
                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every check, in one pass over already-resolved targets.
 
@@ -1051,7 +1052,8 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
     for outcome in (check_reflection_anchors(pm, alloc, targets),
                     check_lane_graph(pm, alloc, targets),
                     check_marker_stride(pm, alloc, targets),
-                    check_component_to_world(pm, alloc, targets, sample_actors)):
+                    check_component_to_world(pm, alloc, targets, sample_actors),
+                    check_collector_fields(sample_players)):
         drift.extend(outcome.drift)
         for s in outcome.skipped:
             checks.append({"check": s["check"], "state": "skipped",
@@ -1067,7 +1069,8 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
 
 
 def run_doctor(pm: Any, arr: Any, alloc: Any, *,
-               sample_actors: list[int] | None = None) -> dict[str, Any]:
+               sample_actors: list[int] | None = None,
+               sample_players: list[dict] | None = None) -> dict[str, Any]:
     """Machine-readable health of the reader against the LIVE process.
 
     Caller passes already-resolved anchors (arr=GUObjectArray, alloc=FNamePool)
@@ -1079,6 +1082,12 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
     nothing to hand over and it is the only way the ComponentToWorld check can
     run without building a snapshot of its own — which this path must never
     do. Without it that one check is skipped and says so.
+
+    `sample_players` is the same idea for the collector verdicts: the
+    snapshot's player dicts, already carrying the spliced collector stats —
+    the check is pure Python over them, zero memory reads. None means the
+    caller has no snapshot; the check then contributes nothing at all (not
+    even a skip — see `check_collector_fields`).
 
     Returns {state, ok, drift, checks, reason?} where state is:
       * "ok"      — every hardcoded offset still matches live reflection
@@ -1106,7 +1115,8 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
         return {"state": "unknown", "ok": True, "drift": [], "checks": checks,
                 "reason": "SQPlayerState unresolved (server empty / map loading)"}
 
-    drift, checks = _run_checks(pm, alloc, targets, sample_actors)
+    drift, checks = _run_checks(pm, alloc, targets, sample_actors,
+                                sample_players)
     if drift and targets.from_cache:
         # Never report drift on cached addresses. Re-resolving costs one walk
         # and happens only on the way to an alarm, so the cache can make the
@@ -1116,7 +1126,8 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
             return {"state": "unknown", "ok": True, "drift": [],
                     "checks": [],
                     "reason": "SQPlayerState unresolved (server empty / map loading)"}
-        drift, checks = _run_checks(pm, alloc, targets, sample_actors)
+        drift, checks = _run_checks(pm, alloc, targets, sample_actors,
+                                    sample_players)
     return {
         "state": "ok" if not drift else "drift",
         "ok": not drift,

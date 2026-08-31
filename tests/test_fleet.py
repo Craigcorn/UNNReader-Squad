@@ -306,6 +306,47 @@ def test_collector_fields_only_fail_is_drift():
     assert health.check_collector_fields(None) == health.CheckOutcome([], [], [])
 
 
+def test_run_doctor_carries_collector_drift_via_sample_players(monkeypatch):
+    """The wired path: a sibling-desync in the passed player sample must
+    reach state=drift; passing no sample must contribute nothing at all —
+    not even a skip, so the payload's skipped field stays meaningful."""
+    for fn in ("check_offset_drift", "check_required_names",
+               "check_struct_fields"):
+        monkeypatch.setattr(health, fn, _no_drift)
+    for fn in ("check_reflection_anchors", "check_lane_graph",
+               "check_marker_stride"):
+        monkeypatch.setattr(health, fn,
+                            lambda *a: health.CheckOutcome([], [], []))
+    arr = _Arr(resolves={"SQPlayerState"})
+    desynced = [{"stats": {"fobsBuilt": 3, "captures": 2, "defenses": 0}}]
+    d = health.run_doctor(None, arr, _OkAlloc(), sample_players=desynced)
+    assert d["state"] == "drift"
+    assert any(x["field"] == "suppliesDelivered" for x in d["drift"])
+    # No sample -> silent no-op, and an empty server -> a visible skip.
+    d = health.run_doctor(None, arr, _OkAlloc())
+    assert d["state"] == "ok"
+    assert not any("collector" in str(c) for c in d["checks"])
+    d = health.run_doctor(None, arr, _OkAlloc(), sample_players=[])
+    assert d["state"] == "ok"
+    assert any(c.get("state") == "skipped" and "collector" in str(c)
+               for c in d["checks"])
+
+
+def test_gather_passes_sample_players_through(monkeypatch):
+    seen = {}
+
+    def fake_run_doctor(pm, arr, alloc, *, sample_actors=None,
+                        sample_players=None):
+        seen["players"] = sample_players
+        return {"state": "ok", "ok": True, "drift": [], "checks": []}
+
+    monkeypatch.setattr(health, "run_doctor", fake_run_doctor)
+    monkeypatch.setattr(squad_build, "engine_version", lambda *a: None)
+    fleet.gather(None, None, None, build_sha=None, restarts=0, uptime_sec=1,
+                 channel="t", sample_players=[{"stats": {}}])
+    assert seen["players"] == [{"stats": {}}]
+
+
 # ---- run_doctor composition ----------------------------------------------
 
 def test_run_doctor_carries_a_moved_checks_drift(monkeypatch):
@@ -615,7 +656,7 @@ def test_gather_passes_the_actor_sample_through(monkeypatch):
     position transform without building a snapshot of its own."""
     seen = {}
 
-    def fake(pm, arr, alloc, *, sample_actors=None):
+    def fake(pm, arr, alloc, *, sample_actors=None, sample_players=None):
         seen["sample"] = sample_actors
         return {"state": "ok", "ok": True, "drift": [], "checks": []}
 
