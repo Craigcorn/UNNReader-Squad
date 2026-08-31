@@ -93,9 +93,6 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
     that introduces it. A constant stays out only for a stated reason, and
     then it goes in this register:
 
-      * AMMO_WEP_OFFSETS — read off `AmmoWep_*_C` blueprint actors; no single
-        UClass to check against and the declaring base class is unverified.
-        Verify the base class live, then promote here.
       * COLLECTOR_OFFSETS — private C++ members, not UPROPERTIES at all, so
         reflection cannot resolve them by name in any Squad build. Validated
         instead by the value-based collector verdicts
@@ -121,7 +118,8 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         member with no property name to check; `check_component_to_world`
         verifies it by value against live vehicles instead."""
     from .squad.snapshot import (
-        AACTOR_OWNER_OFFSET, DEPLOYABLE_OFFSETS, FOB_RESOURCE_OFFSETS,
+        AACTOR_OWNER_OFFSET, AMMO_WEP_OFFSETS,
+        DEPLOYABLE_OFFSETS, FOB_RESOURCE_OFFSETS,
         MARKER_MGR_MARKER_ARRAY_OFFSET, PC_PLAYER_STATE_OFFSET,
         PC_PLAYER_STATS_INDEX_OFFSET, PC_RECENT_VOICE_CHANNEL_OFFSET,
         VEHICLE_SPAWNER_OFFSETS,
@@ -156,6 +154,16 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
          {"LastTakeHitInfo": SQ_SOLDIER_TAKE_HIT_INFO_OFFSET}),
         # AActor.Owner — read directly to join ammo pools to their vehicle.
         ("Actor", "Class", False, {"Owner": AACTOR_OWNER_OFFSET}),
+        # The resource pools logistics trucks and combat vehicles carry. The
+        # reader reads them off `AmmoWep_*_C` blueprint actors, which is why
+        # they sat unwatched with "no single UClass to check against" next to
+        # them — but every one of those blueprints inherits the same native
+        # class. Walked the super-chain of all seven AmmoWep_* classes live
+        # (2026-08-31): AmmoWep_*_C -> AmmoResourceWeapon_C -> SQAmmoResource
+        # -> SQVehicleResource, and SQVehicleResource is where all five
+        # properties are DECLARED, at exactly the hardcoded offsets. Native,
+        # so required.
+        ("SQVehicleResource", "Class", False, dict(AMMO_WEP_OFFSETS)),
         ("SQVehicleSeatComponent", "Class", False, {
             "SeatPawn":      SQ_SEATCOMP_SEAT_PAWN_OFFSET,
             "SeatedPlayer":  SQ_SEATCOMP_SEATED_PLAYER_OFFSET,

@@ -32,6 +32,16 @@ follows [Semantic Versioning](https://semver.org/).
   the one that still has to walk. A drift verdict is never reported off
   reused addresses - it re-resolves from scratch first, so the shortcut
   can make the doctor quicker but never wrong.
+- The vehicle ammo pools are watched at last. Their five offsets - how
+  much a logistics truck is carrying, how fast it drops it, which
+  inventory it belongs to - were read off blueprint actors, and the
+  register said there was no single class to check them against. There
+  is: walking the super-chain of every AmmoWep blueprint alive on a
+  server lands on SQVehicleResource, a native class, which declares all
+  five at exactly the offsets the reader uses. Now watched like
+  everything else, which also means a signed offset pack can repair
+  them, and the last "cannot check this" entry in the register that
+  had a real answer is gone.
 - Doctor now checks inside the damage-event struct, and a class rename
   can no longer hide behind "not loaded". Two holes, one shape. The
   first: offsets addressed relative to a struct rather than a class -
