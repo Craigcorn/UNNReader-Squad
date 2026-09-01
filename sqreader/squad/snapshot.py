@@ -381,6 +381,15 @@ MARKER_ITEM_OFFSETS = {
 # --------------------------------------------------------------------------
 _BAKED_OFFSETS: dict[str, Any] | None = None
 
+#: Names currently overridden by an applied signed pack ("CONST" or
+#: "DICT.KEY" spelling, exactly as the pack carried them). autoresolve
+#: consults this so a pack outranks the binary: a pack is operator intent,
+#: served precisely for the cases the binary answers wrongly or not at all —
+#: and the self-heal gates already revert a pack that fails to clear drift,
+#: a verdict that would be unreadable if autoresolve rewrote the same names
+#: underneath it.
+_ACTIVE_OVERRIDES: set[str] = set()
+
 
 def _overridable_offsets() -> tuple[set[str], set[str]]:
     """(scalar constant names, offset-dict names) a signed pack may override."""
@@ -432,11 +441,13 @@ def apply_offset_overrides(pack: dict[str, int]) -> list[str]:
         elif key in scalars:
             g[key] = val
             applied.append(key)
+    _ACTIVE_OVERRIDES.update(applied)
     return applied
 
 
 def revert_offset_overrides() -> None:
     """Restore every offset constant to its baked-in original value."""
+    _ACTIVE_OVERRIDES.clear()
     if _BAKED_OFFSETS is None:
         return
     g = globals()
@@ -465,8 +476,12 @@ def revert_offset_overrides() -> None:
 # startup and makes the whole class of failure go away. What remains
 # hardcoded is only what reflection genuinely cannot see.
 #
-# This runs BEFORE the signed offset pack, so an operator-served pack still
-# wins — the pack exists for the offsets below that reflection can't reach.
+# An operator-served pack still wins: this fork applies packs before
+# resolve_paths runs, so autoresolve SKIPS every name the active pack
+# overrode (_ACTIVE_OVERRIDES) instead of rewriting it from reflection —
+# the pack exists precisely for the cases the binary answers wrongly or
+# not at all, and the self-heal gates judge whether the PACK cleared the
+# drift, a verdict autoresolve must not blur.
 # --------------------------------------------------------------------------
 
 #: Scalar constants that are plain UPROPERTYs: (constant, UClass, field).
@@ -561,6 +576,8 @@ def autoresolve_offsets(pm: ProcessMemory, found: dict[str, tuple[Any, int]],
         return layouts[cls]
 
     def note(name: str, was: int, now: int) -> None:
+        if name in _ACTIVE_OVERRIDES:
+            return                        # a served pack owns this name
         if isinstance(now, int) and 0 < now < 0x100000 and now != was:
             g[name] = now
             changed[name] = (was, now)
@@ -576,6 +593,8 @@ def autoresolve_offsets(pm: ProcessMemory, found: dict[str, tuple[Any, int]],
         if not isinstance(d, dict) or not lay:
             continue
         for key in list(d):
+            if f"{dict_name}.{key}" in _ACTIVE_OVERRIDES:
+                continue                  # a served pack owns this entry
             f = lay.get(key)
             if f is None or not isinstance(f.offset, int):
                 continue

@@ -141,6 +141,40 @@ def test_declared_gaps_still_match_the_table():
         assert g[name] - g[dict_name][key] == gap, (name, dict_name, key)
 
 
+# --- a served pack outranks the binary -----------------------------------
+
+def test_a_pack_override_outranks_the_binary(monkeypatch):
+    """A pack is operator intent, served precisely for the cases reflection
+    answers wrongly. autoresolve must not rewrite a packed name — the
+    self-heal gates judge whether the PACK cleared the drift, and that
+    verdict is unreadable if the binary's answer lands underneath it."""
+    packed = sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x100
+    sn.apply_offset_overrides({"SQ_VEHCOMP_HEALTH_OFFSET": packed,
+                               "RALLY_OFFSETS.Team": 0x999})
+    found = _layouts(monkeypatch, {
+        "SQVehicleComponent": {"Health": packed + 0x30},
+        "SQSquadRallyPoint": {"Team": 0x444},
+    })
+    moved = sn.autoresolve_offsets(None, found, None)
+    assert sn.SQ_VEHCOMP_HEALTH_OFFSET == packed
+    assert sn.RALLY_OFFSETS["Team"] == 0x999
+    assert "SQ_VEHCOMP_HEALTH_OFFSET" not in moved
+    assert "RALLY_OFFSETS.Team" not in moved
+
+
+def test_a_reverted_pack_hands_the_name_back(monkeypatch):
+    """Once the pack is rolled back the binary answers again — otherwise a
+    bad pack would leave its names frozen at the baked values forever."""
+    sn.apply_offset_overrides(
+        {"SQ_VEHCOMP_HEALTH_OFFSET": sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x100})
+    sn.revert_offset_overrides()
+    to = sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x30
+    found = _layouts(monkeypatch, {"SQVehicleComponent": {"Health": to}})
+    moved = sn.autoresolve_offsets(None, found, None)
+    assert sn.SQ_VEHCOMP_HEALTH_OFFSET == to
+    assert "SQ_VEHCOMP_HEALTH_OFFSET" in moved
+
+
 # --- refusing to make things worse ---------------------------------------
 
 def test_an_absent_class_changes_nothing(monkeypatch):
