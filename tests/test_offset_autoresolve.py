@@ -84,22 +84,61 @@ def test_nothing_moves_when_nothing_moved(monkeypatch):
 # --- the fields reflection cannot see ------------------------------------
 
 def test_an_unreflected_neighbour_travels_with_its_anchor(monkeypatch):
-    """SQVehicleComponent.State is a C++ member sitting 4 bytes past Health.
-    Reflection never reports it, so it moves by however far Health moved —
-    otherwise it would be read out of the middle of the float beside it."""
-    gap = sn.SQ_VEHCOMP_STATE_OFFSET - sn.SQ_VEHCOMP_HEALTH_OFFSET
-    to = sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x30
-    found = _layouts(monkeypatch, {"SQVehicleComponent": {"Health": to}})
+    """SQVehicleSeatComponent's anim-state int is a C++ member 8 bytes below
+    SeatPawn. Reflection never reports it, so it moves by the declared gap
+    when its anchor moves — otherwise it would be read out of whatever
+    field the update slid underneath it."""
+    to = sn.SQ_SEATCOMP_SEAT_PAWN_OFFSET + 0x30
+    found = _layouts(monkeypatch, {"SQVehicleSeatComponent": {"SeatPawn": to}})
     sn.autoresolve_offsets(None, found, None)
-    assert sn.SQ_VEHCOMP_STATE_OFFSET == to + gap
+    assert sn.SQ_SEATCOMP_ANIM_STATE_OFFSET == to - 0x8
 
 
 def test_an_anchor_that_did_not_move_leaves_its_neighbour_alone(monkeypatch):
-    before = sn.SQ_VEHCOMP_STATE_OFFSET
+    before = sn.SQ_SEATCOMP_ANIM_STATE_OFFSET
     found = _layouts(monkeypatch, {
-        "SQVehicleComponent": {"Health": sn.SQ_VEHCOMP_HEALTH_OFFSET}})
+        "SQVehicleSeatComponent": {"SeatPawn": sn.SQ_SEATCOMP_SEAT_PAWN_OFFSET}})
     sn.autoresolve_offsets(None, found, None)
-    assert sn.SQ_VEHCOMP_STATE_OFFSET == before
+    assert sn.SQ_SEATCOMP_ANIM_STATE_OFFSET == before
+
+
+def test_a_dict_anchored_constant_rides_its_entry(monkeypatch):
+    """The deployable placer slots are unnamed privates a fixed distance past
+    DEPLOYABLE_OFFSETS["Health"]. When the dict entry moves, they move by the
+    declared gap — this is the fork's replacement for upstream's runtime
+    baked-vs-live shift, which is zero by definition in a refreshed table."""
+    to = sn.DEPLOYABLE_OFFSETS["Health"] + 0x30
+    ps_before = sn.SQ_DEPLOYABLE_PLACER_PS_OFFSET
+    found = _layouts(monkeypatch, {"SQDeployable": {"Health": to}})
+    sn.autoresolve_offsets(None, found, None)
+    assert sn.SQ_DEPLOYABLE_PLACER_PS_OFFSET == ps_before + 0x30
+    assert sn.SQ_DEPLOYABLE_PLACER_CTRL_OFFSET == \
+        sn.SQ_DEPLOYABLE_PLACER_PS_OFFSET - 0x8
+
+
+def test_a_named_field_needs_no_anchor(monkeypatch):
+    """VehicleComponentState looked like a raw member until live reflection
+    named it (2026-09-01). As a reflected scalar the binary answers for the
+    field itself — even when its old anchor, Health, is absent entirely."""
+    to = sn.SQ_VEHCOMP_STATE_OFFSET + 0x30
+    found = _layouts(monkeypatch, {
+        "SQVehicleComponent": {"VehicleComponentState": to}})
+    moved = sn.autoresolve_offsets(None, found, None)
+    assert sn.SQ_VEHCOMP_STATE_OFFSET == to
+    assert moved["SQ_VEHCOMP_STATE_OFFSET"][1] == to
+
+
+def test_declared_gaps_still_match_the_table():
+    """Generation consistency: every anchored constant must sit exactly its
+    declared gap from its anchor IN THE SOURCE TABLE. A source refresh that
+    moves an anchor without its never-read neighbour reopens the trap this
+    fork already fell into once (a stale ANIM_STATE landing on the refreshed
+    SeatedPlayer offset) — this is the test that makes a half-refresh loud."""
+    g = vars(sn)
+    for name, anchor, gap in sn._ANCHORED_SCALARS:
+        assert g[name] - g[anchor] == gap, (name, anchor)
+    for name, dict_name, key, gap in sn._ANCHORED_TO_DICT_ENTRY:
+        assert g[name] - g[dict_name][key] == gap, (name, dict_name, key)
 
 
 # --- refusing to make things worse ---------------------------------------

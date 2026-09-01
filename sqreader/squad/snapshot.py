@@ -276,11 +276,17 @@ SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF = 0x0ab8
 # → USceneComponent → UActorComponent → UObject, size=800). Six own
 # props identify the seat's role + occupant:
 SQ_SEATCOMP_SEAT_CONFIG_OFFSET    = 0x240  # FStructProperty (seat name etc.)
-SQ_SEATCOMP_ANIM_STATE_OFFSET     = 0x2d0  # int32
+# ANIM_STATE and FORCE_OCCUPIED are declared-but-never-read raw members.
+# They are still kept generation-consistent with their reflected anchors
+# (SeatPawn -0x8 / SeatedSoldier +0x8 — the gaps in _ANCHORED_SCALARS),
+# because a value from a previous build sitting in this table is how the
+# 2026-08-31 refresh briefly left ANIM_STATE equal to the NEW SeatedPlayer
+# offset — a collision waiting to mislead the next derivation.
+SQ_SEATCOMP_ANIM_STATE_OFFSET     = 0x2c0  # int32
 SQ_SEATCOMP_SEAT_PAWN_OFFSET      = 0x2c8  # SQVehicleSeat* — the seat pawn
 SQ_SEATCOMP_SEATED_PLAYER_OFFSET  = 0x2d0  # APlayerState* of occupant
 SQ_SEATCOMP_SEATED_SOLDIER_OFFSET = 0x2d8  # SQSoldier* of occupant
-SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET = 0x2f0  # bool
+SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET = 0x2e0  # bool
 
 # SQVehicleSeat.SeatHealth — read off the SeatPawn (one indirection
 # from the seat component). +0x4d0 on the SQVehicleSeat pawn.
@@ -479,6 +485,14 @@ _REFLECTED_SCALARS: tuple[tuple[str, str, str], ...] = (
     ("SQ_VWEAPON_MAGAZINES_OFFSET",        "SQVehicleWeapon", "Magazines"),
     ("SQ_VWEAPON_VEHICLE_TURRET_OFFSET",   "SQVehicleWeapon", "VehicleTurret"),
     ("SQ_SOLDIER_TAKE_HIT_INFO_OFFSET",    "SQSoldier", "LastTakeHitInfo"),
+    # Named after all — both sat in upstream's anchored tier until live
+    # reflection named them (CachedVehicleInventory 2026-08-30,
+    # VehicleComponentState 2026-09-01). A name beats an anchor: the binary
+    # answers for the field itself, not for a neighbour it hopefully tracks.
+    ("SQ_VEHCOMP_STATE_OFFSET",            "SQVehicleComponent",
+     "VehicleComponentState"),
+    ("SQ_TURRET_INVENTORY_OFFSET",         "SQVehicleSeat",
+     "CachedVehicleInventory"),
 )
 
 #: Offset dicts whose every key is a UPROPERTY name on one UClass.
@@ -491,16 +505,30 @@ _REFLECTED_DICTS: tuple[tuple[str, str], ...] = (
 )
 
 #: Constants reflection cannot see, each sitting a fixed distance from one
-#: that it can. The distance is taken from the BAKED table rather than
-#: written here, so it stays true by construction: whatever gap held when
-#: these were derived by hand is the gap that gets re-applied.
-#: (constant, anchor constant)
-_ANCHORED_SCALARS: tuple[tuple[str, str], ...] = (
+#: that it can. The gap is DECLARED beside the pair — it is the measurement
+#: itself, recorded the day the pair was derived. Upstream recomputes it from
+#: the baked table (baked[name] - baked[anchor]) instead, which is only sound
+#: while both baked values are the same generation — and this fork refreshes
+#: its source tables to the live layout after every drift report, so a
+#: refresh that moves the anchor but not its never-read neighbour silently
+#: poisons a recomputed gap. test_offset_autoresolve asserts the declared
+#: gaps still match the table, which is what makes a half-refresh loud.
+#: (constant, anchor constant, gap)
+_ANCHORED_SCALARS: tuple[tuple[str, str, int], ...] = (
     # C++ members packed around their reflected neighbours.
-    ("SQ_SEATCOMP_ANIM_STATE_OFFSET",     "SQ_SEATCOMP_SEAT_PAWN_OFFSET"),
-    ("SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET", "SQ_SEATCOMP_SEATED_SOLDIER_OFFSET"),
-    ("SQ_VEHCOMP_STATE_OFFSET",           "SQ_VEHCOMP_HEALTH_OFFSET"),
-    ("SQ_TURRET_INVENTORY_OFFSET",        "SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET"),
+    ("SQ_SEATCOMP_ANIM_STATE_OFFSET",     "SQ_SEATCOMP_SEAT_PAWN_OFFSET", -0x8),
+    ("SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET", "SQ_SEATCOMP_SEATED_SOLDIER_OFFSET",
+     0x8),
+)
+
+#: The same idea for constants anchored to a watched DICT entry. The placer
+#: pair rides SQDeployable's named run: gaps measured live 2026-09-01
+#: (ErrorTable +0x10/+0x18, equivalently Health +0xCC/+0xD4), the same
+#: relationship that held before the v10.5.3 shift.
+#: (constant, dict name, key, gap)
+_ANCHORED_TO_DICT_ENTRY: tuple[tuple[str, str, str, int], ...] = (
+    ("SQ_DEPLOYABLE_PLACER_PS_OFFSET",   "DEPLOYABLE_OFFSETS", "Health", 0xd4),
+    ("SQ_DEPLOYABLE_PLACER_CTRL_OFFSET", "DEPLOYABLE_OFFSETS", "Health", 0xcc),
 )
 
 
@@ -556,14 +584,17 @@ def autoresolve_offsets(pm: ProcessMemory, found: dict[str, tuple[Any, int]],
                 d[key] = f.offset
 
     # Anchored constants come last: they need the resolved anchor value.
-    baked = (_BAKED_OFFSETS or {}).get("scalars", {})
-    for name, anchor_name in _ANCHORED_SCALARS:
-        if name not in baked or anchor_name not in baked:
-            continue
+    for name, anchor_name, gap in _ANCHORED_SCALARS:
         if anchor_name not in changed:
             continue                      # the anchor didn't move, nor did this
-        delta = baked[name] - baked[anchor_name]
-        note(name, g[name], g[anchor_name] + delta)
+        note(name, g[name], g[anchor_name] + gap)
+
+    for name, dict_name, key, gap in _ANCHORED_TO_DICT_ENTRY:
+        if f"{dict_name}.{key}" not in changed:
+            continue
+        d = g.get(dict_name)
+        if isinstance(d, dict) and isinstance(d.get(key), int):
+            note(name, g[name], d[key] + gap)
 
     return changed
 
@@ -868,12 +899,14 @@ DEPLOYABLE_OFFSETS = {
 # distance from its tail: ErrorTable +0x10 / +0x18 (equivalently
 # Health +0xCC / +0xD4). The 2026-08-31 Squad update moved the whole block
 # -0x18 (ErrorTable 0x500 -> 0x4e8, measured live 2026-09-01), and these two
-# moved with it. Re-derive after a drift report the way they were first
-# found: probe a live deployable for a pointer that resolves (directly, or
-# via the controller) to a current player's name — a stale value mostly
-# degrades to null through that same validation, but junk that resolves
-# through the controller chain CAN fabricate a short "name", which is why
-# these live here under the fleet test rather than as dataclass defaults.
+# moved with it. _ANCHORED_TO_DICT_ENTRY re-applies that relationship at
+# startup whenever reflection reports Health moved; confirm a shift the way
+# the pair was first found — probe a live deployable for a pointer that
+# resolves (directly, or via the controller) to a current player's name. A
+# stale value mostly degrades to null through that same validation, but junk
+# that resolves through the controller chain CAN fabricate a short "name",
+# which is why these live here under the fleet test rather than as dataclass
+# defaults.
 SQ_DEPLOYABLE_PLACER_PS_OFFSET   = 0x0500  # SQPlayerState* (durable)
 SQ_DEPLOYABLE_PLACER_CTRL_OFFSET = 0x04f8  # its APlayerController*
 
@@ -1628,8 +1661,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     # only sound while the baked table still holds the values the placer pair
     # was derived against — and this fork refreshes its tables to the live
     # layout after every drift report, which makes the computed shift zero by
-    # definition. The constants above carry the corrected values instead; the
-    # generalized dict-entry anchor replaces this hunk properly.
+    # definition. _ANCHORED_TO_DICT_ENTRY carries the relationship with the
+    # gap declared instead, applied inside autoresolve_offsets like every
+    # other anchor.
     return SnapshotPaths(
         sq_player_state_class=sq_player_state_class_addr,
         sq_soldier_class=sq_soldier_class_addr,
@@ -1796,6 +1830,12 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
             "bIsSpawningEnabled", "bIsBleeding", "bHasBeenOverrun",
             "EstimatedWorldTimeOfDeath",
         ]),
+        # Bound explicitly, not left to the dataclass defaults: a default is
+        # frozen at import time, so a startup autoresolve (or a served pack)
+        # that moves the module constants would never reach the paths the
+        # reader actually reads through.
+        deployable_placer_ps_off=SQ_DEPLOYABLE_PLACER_PS_OFFSET,
+        deployable_placer_ctrl_off=SQ_DEPLOYABLE_PLACER_CTRL_OFFSET,
         # SQVehicle TArray offsets (chain-walk picks up the ones defined
         # on the SQVehicleSeat parent too — VehicleComponents / Cached).
         vehicle_array_offsets=grab(vh_layout, [

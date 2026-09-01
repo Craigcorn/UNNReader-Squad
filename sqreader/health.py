@@ -113,10 +113,11 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
       * SQ_DEPLOYABLE_PLACER_PS_OFFSET / SQ_DEPLOYABLE_PLACER_CTRL_OFFSET —
         unnamed private fields past SQDeployable's named run; no build has
         ever reflected them, so there is no name to check. They are anchored
-        to the named tail (ErrorTable +0x10/+0x18) and re-measured by live
-        probe whenever the doctor reports SQDeployable drift; the read path
-        additionally validates every candidate pointer by resolving it to a
-        current player's name.
+        to the named tail (ErrorTable +0x10/+0x18 ≡ Health +0xCC/+0xD4):
+        snapshot's _ANCHORED_TO_DICT_ENTRY moves them at startup the moment
+        reflection reports Health moved, a live probe confirms after any
+        shift, and the read path additionally validates every candidate
+        pointer by resolving it to a current player's name.
       * STRUCT-INTERNAL offsets with no property name — MARKER_ITEM_SIZE and
         the per-item MARKER_ITEM_OFFSETS are a brute-forced stride into an
         unnamed element struct, so there is nothing to resolve by name;
