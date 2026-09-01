@@ -1567,6 +1567,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     alloc = _resolve_fname_pool(pm, binary_id)
     print(f"pid = {pid}")
 
+    # Resolve paths FIRST. This is what re-derives the drifted offset
+    # constants from the running binary, and doctor's job is to report on the
+    # offsets the reader will actually use — not on the values that happen to
+    # be typed into snapshot.py. Checking before the correction would fail on
+    # every Squad update while the reader was in fact fine.
+    from .squad.snapshot import resolve_paths
+    paths = resolve_paths(pm, arr, alloc)
+
     ok = True
     def check(label, condition, detail=""):
         nonlocal ok
@@ -1783,10 +1791,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # ComponentToWorld at +0x210 — pick any unattached actor, verify its
     # cached translation matches the RelativeLocation we read separately.
-    print("\n== ComponentToWorld at SceneComponent +0x210 ==")
+    print(f"\n== ComponentToWorld at SceneComponent "
+          f"+{paths.scene_component_to_world_translation_off:#x} ==")
     from .squad.metadata import Metadata
-    from .squad.snapshot import build_snapshot, resolve_paths
-    paths = resolve_paths(pm, arr, alloc)
+    from .squad.snapshot import build_snapshot
     # Enrich (metadata != None) so the static cap-zone geometry check below
     # reflects reality — the merge only runs when metadata is present. Metadata
     # only ADDS fields, so the raw-offset assertions above/below are unaffected.
@@ -1889,8 +1897,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print()
     print("PASS  doctor: every hardcoded offset still matches the live "
           "binary." if ok else
-          "FAIL  doctor: at least one offset has drifted — Squad may "
-          "have updated. Re-derive values with scripts/dump_struct_layout.py.")
+          "FAIL  doctor: an offset is wrong and could not be re-derived "
+          "from the binary. Dump the layout with "
+          "scripts/dump_struct_layout.py, or serve a signed offset pack.")
     return 0 if ok else 1
 
 

@@ -411,6 +411,260 @@ def revert_offset_overrides() -> None:
             d.update(baked)
 
 
+# --------------------------------------------------------------------------
+# Re-derive drifted offsets from the running binary
+#
+# A Squad update moves struct fields, and the constants above then point at
+# the wrong bytes. That is not a crash — it is worse. The reader keeps
+# running, keeps recording, and writes plausible-looking garbage: after
+# v10.5.3 every position in every recording came out as
+# `{x: <junk>, y: 0, z: 1}` while /health stayed green and the tick loop
+# reported 100+ players. Nothing tells you until someone opens a replay.
+#
+# Most of these fields are UPROPERTYs, which means the binary is carrying
+# their real offsets in its own reflection data. Reading them from there
+# instead of from a table written months ago costs one class-layout walk at
+# startup and makes the whole class of failure go away. What remains
+# hardcoded is only what reflection genuinely cannot see.
+#
+# This runs BEFORE the signed offset pack, so an operator-served pack still
+# wins — the pack exists for the offsets below that reflection can't reach.
+# --------------------------------------------------------------------------
+
+#: Scalar constants that are plain UPROPERTYs: (constant, UClass, field).
+_REFLECTED_SCALARS: tuple[tuple[str, str, str], ...] = (
+    ("SQ_SEATCOMP_SEAT_CONFIG_OFFSET",     "SQVehicleSeatComponent", "SeatConfig"),
+    ("SQ_SEATCOMP_SEAT_PAWN_OFFSET",       "SQVehicleSeatComponent", "SeatPawn"),
+    ("SQ_SEATCOMP_SEATED_PLAYER_OFFSET",   "SQVehicleSeatComponent", "SeatedPlayer"),
+    ("SQ_SEATCOMP_SEATED_SOLDIER_OFFSET",  "SQVehicleSeatComponent", "SeatedSoldier"),
+    ("SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET",  "SQVehicleSeat", "SeatHealth"),
+    ("SQ_VEHICLE_COMPONENTS_OFFSET",       "SQVehicleSeat", "VehicleComponents"),
+    ("SQ_VEHICLE_CACHED_ENGINE_OFFSET",    "SQVehicleSeat", "CachedVehicleEngine"),
+    ("SQ_VEHICLE_TURRETS_OFFSET",          "SQVehicle", "VehicleTurrets"),
+    ("SQ_VEHCOMP_HEALTH_OFFSET",           "SQVehicleComponent", "Health"),
+    ("SQ_VEHCOMP_MAX_HEALTH_OFFSET",       "SQVehicleComponent", "MaxHealth"),
+    ("SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET", "SQVehicleComponent", "NormalizedHealth"),
+    ("SQ_VWEAPON_MAGAZINES_OFFSET",        "SQVehicleWeapon", "Magazines"),
+    ("SQ_VWEAPON_VEHICLE_TURRET_OFFSET",   "SQVehicleWeapon", "VehicleTurret"),
+    ("SQ_SOLDIER_TAKE_HIT_INFO_OFFSET",    "SQSoldier", "LastTakeHitInfo"),
+)
+
+#: Offset dicts whose every key is a UPROPERTY name on one UClass.
+_REFLECTED_DICTS: tuple[tuple[str, str], ...] = (
+    ("DEPLOYABLE_OFFSETS", "SQDeployable"),
+    ("RALLY_OFFSETS", "SQSquadRallyPoint"),
+    ("MARKER_OFFSETS", "SQMapMarker"),
+    ("VEHICLE_SPAWNER_OFFSETS", "SQVehicleSpawner"),
+    ("PROJECTILE_OFFSETS", "SQProjectile"),
+)
+
+#: Constants reflection cannot see, each sitting a fixed distance from one
+#: that it can. The distance is taken from the BAKED table rather than
+#: written here, so it stays true by construction: whatever gap held when
+#: these were derived by hand is the gap that gets re-applied.
+#: (constant, anchor constant)
+_ANCHORED_SCALARS: tuple[tuple[str, str], ...] = (
+    # C++ members packed around their reflected neighbours.
+    ("SQ_SEATCOMP_ANIM_STATE_OFFSET",     "SQ_SEATCOMP_SEAT_PAWN_OFFSET"),
+    ("SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET", "SQ_SEATCOMP_SEATED_SOLDIER_OFFSET"),
+    ("SQ_VEHCOMP_STATE_OFFSET",           "SQ_VEHCOMP_HEALTH_OFFSET"),
+    ("SQ_TURRET_INVENTORY_OFFSET",        "SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET"),
+)
+
+
+def autoresolve_offsets(pm: ProcessMemory, found: dict[str, tuple[Any, int]],
+                        alloc: FNameEntryAllocator) -> dict[str, tuple[int, int]]:
+    """Re-derive every reflectable offset constant from the live binary.
+
+    `found` is the class map `resolve_paths` already built, so this costs no
+    extra GUObjectArray walk. Returns {name: (was, now)} for whatever moved,
+    which the caller logs — a silent correction is nearly as bad as a silent
+    breakage, because the next person to debug this needs to know the table
+    in the source is not what ran.
+
+    Never raises. A class that isn't loaded yet, or a field reflection can't
+    see, leaves its constant exactly as it was.
+    """
+    _bake_offsets()
+    g = globals()
+    changed: dict[str, tuple[int, int]] = {}
+
+    layouts: dict[str, dict[str, Any]] = {}
+
+    def layout(cls: str) -> dict[str, Any]:
+        if cls not in layouts:
+            addr = found[cls][1] if cls in found else 0
+            try:
+                layouts[cls] = get_class_layout(pm, addr, alloc) if addr else {}
+            except Exception:
+                layouts[cls] = {}
+        return layouts[cls]
+
+    def note(name: str, was: int, now: int) -> None:
+        if isinstance(now, int) and 0 < now < 0x100000 and now != was:
+            g[name] = now
+            changed[name] = (was, now)
+
+    for name, cls, field_name in _REFLECTED_SCALARS:
+        f = layout(cls).get(field_name)
+        if f is not None:
+            note(name, g[name], f.offset)
+
+    for dict_name, cls in _REFLECTED_DICTS:
+        d = g.get(dict_name)
+        lay = layout(cls)
+        if not isinstance(d, dict) or not lay:
+            continue
+        for key in list(d):
+            f = lay.get(key)
+            if f is None or not isinstance(f.offset, int):
+                continue
+            if f.offset != d[key] and 0 < f.offset < 0x100000:
+                changed[f"{dict_name}.{key}"] = (d[key], f.offset)
+                d[key] = f.offset
+
+    # Anchored constants come last: they need the resolved anchor value.
+    baked = (_BAKED_OFFSETS or {}).get("scalars", {})
+    for name, anchor_name in _ANCHORED_SCALARS:
+        if name not in baked or anchor_name not in baked:
+            continue
+        if anchor_name not in changed:
+            continue                      # the anchor didn't move, nor did this
+        delta = baked[name] - baked[anchor_name]
+        note(name, g[name], g[anchor_name] + delta)
+
+    return changed
+
+
+def discover_component_to_world(pm: ProcessMemory, paths: "SnapshotPaths",
+                                root_addrs: "list[int]") -> int | None:
+    """Find USceneComponent's cached world FTransform by looking for it.
+
+    ComponentToWorld is a raw C++ member, so reflection is no help and the
+    offset has to be a number — but it does not have to be a number written
+    down a year ago. On a component with no attach parent the world
+    transform IS the relative one, so the offset can be recognised rather
+    than remembered: read RelativeLocation (which reflection does resolve),
+    then look for those same three doubles elsewhere in the object.
+
+    Returns the offset, or None when the samples were too few or disagreed —
+    in which case the caller keeps whatever it had. Guessing here would put
+    junk coordinates into a recording, which is the exact failure this
+    function exists to end.
+    """
+    rel_off = paths.scene_relative_location_off
+    votes: dict[int, int] = {}
+    tested = 0
+    for root in root_addrs:
+        if tested >= 24:
+            break
+        try:
+            if pm.read_u64(root + paths.scene_attach_parent_off):
+                continue              # attached: world != relative, tells us nothing
+            rel = struct.unpack("<3d", pm.read(root + rel_off, 24))
+            # A component sitting at the origin matches far too much.
+            if not any(abs(c) > 1.0 for c in rel):
+                continue
+            if not all(_math.isfinite(c) and abs(c) < 1e7 for c in rel):
+                continue
+            buf = pm.read(root + _C2W_SEARCH_START, _C2W_SEARCH_LEN)
+        except Exception:
+            continue
+        tested += 1
+        for off in range(0, len(buf) - 24, 8):
+            cand = struct.unpack_from("<3d", buf, off)
+            if all(abs(cand[i] - rel[i]) < 0.5 for i in range(3)):
+                votes[_C2W_SEARCH_START + off] = votes.get(
+                    _C2W_SEARCH_START + off, 0) + 1
+
+    if tested < 4:
+        return None
+    # RelativeLocation matches itself. It is a true answer for these samples
+    # and a wrong one for every attached component, which is most of them.
+    votes.pop(rel_off, None)
+    if not votes:
+        return None
+    best, hits = max(votes.items(), key=lambda kv: kv[1])
+    # Unanimous or nothing: a partial match means the samples disagree, and
+    # the recording is better served by the old value than a coin flip.
+    return best if hits == tested else None
+
+
+#: Where to look for the world transform. Wide enough to survive a shift of
+#: a few hundred bytes, narrow enough that a stray triple of doubles matching
+#: a position by accident stays vanishingly unlikely across 24 components.
+_C2W_SEARCH_START = 0x100
+_C2W_SEARCH_LEN = 0x500
+
+
+def verify_component_to_world(pm: ProcessMemory, paths: "SnapshotPaths",
+                              actor_addrs: "list[int]") -> None:
+    """Check the world-transform offset against live actors, once, and fix it.
+
+    Called from the snapshot build with actors it already has in hand, so it
+    costs a few reads on one tick and nothing afterwards. The check is the
+    cheap half: confirm the offset currently in use reproduces
+    RelativeLocation on unattached components. Only when that fails does the
+    search run.
+
+    Silent on success. It is deliberately loud on a correction, because the
+    thing being corrected is invisible in the output — wrong coordinates look
+    exactly like right ones until someone opens the replay.
+    """
+    if paths.component_to_world_verified:
+        return
+    roots: list[int] = []
+    for a in actor_addrs:
+        if len(roots) >= 32:
+            break
+        try:
+            r = pm.read_u64(a + paths.actor_root_component_off)
+        except Exception:
+            continue
+        if r:
+            roots.append(r)
+    if len(roots) < 4:
+        return                       # too early in the map; try again next tick
+
+    cur = paths.scene_component_to_world_translation_off
+    agree = tested = 0
+    for r in roots:
+        try:
+            if pm.read_u64(r + paths.scene_attach_parent_off):
+                continue
+            rel = struct.unpack(
+                "<3d", pm.read(r + paths.scene_relative_location_off, 24))
+            if not any(abs(c) > 1.0 for c in rel):
+                continue
+            got = struct.unpack("<3d", pm.read(r + cur, 24))
+        except Exception:
+            continue
+        tested += 1
+        agree += all(abs(got[i] - rel[i]) < 0.5 for i in range(3))
+
+    if tested >= 4 and agree == tested:
+        paths.component_to_world_verified = True
+        return
+    if tested < 4:
+        return
+
+    found = discover_component_to_world(pm, paths, roots)
+    if found is None:
+        print(f"[!] ComponentToWorld at {cur:#x} does not match "
+              f"RelativeLocation ({agree}/{tested}) and the search was "
+              f"inconclusive — positions may be wrong. Run `doctor`.",
+              file=sys.stderr)
+        paths.component_to_world_verified = True   # don't re-scan every tick
+        return
+    print(f"[+] ComponentToWorld moved {cur:#x} -> {found:#x} "
+          f"(confirmed on {tested} unattached components) — Squad has been "
+          f"updated; positions are being read from the new offset.",
+          file=sys.stderr)
+    paths.scene_component_to_world_translation_off = found
+    paths.scene_component_to_world_rotation_off = found - 0x20
+    paths.component_to_world_verified = True
+
+
 # AmmoWep_*_C — the "weapon-shaped" resource pool actors a vehicle owns.
 # Logi trucks carry two of these (e.g. AmmoWep_1000_C for supply + ammo
 # they can drop), combat vehicles carry one for their built-in ammo
@@ -986,6 +1240,9 @@ class SnapshotPaths:
     # — consumers do `(byte & mask) != 0` rather than guessing bit 0.
     # Placed at the end of the dataclass so default_factory doesn't trip
     # field-ordering on the required `_off` fields above.
+    # Set once verify_component_to_world has confirmed (or corrected) the
+    # world-transform offset against live actors. Nothing else may set it.
+    component_to_world_verified: bool = False
     ps_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
     gs_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
     soldier_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -1003,12 +1260,15 @@ class SnapshotPaths:
     actor_instigator_off: int | None = None
     pawn_playerstate_off: int | None = None
     # The direct placer slots on SQDeployable are UNNAMED private fields —
-    # reflection can't see them (the named neighbours end at +0x500 ErrorTable),
-    # so they're hardcoded from a live probe (current Squad build): +0x0518 =
-    # SQPlayerState* (durable), +0x0510 = its APlayerController*. If a Squad
-    # update drifts them, re-derive with a read-only memory probe: scan a live
-    # deployable's fields for a pointer that resolves (directly, or via
-    # actor_instigator/pawn_playerstate) to a current player's name.
+    # reflection can't see them (the named neighbours end at ErrorTable), so
+    # they were hardcoded from a live probe: +0x0518 = SQPlayerState*
+    # (durable), +0x0510 = its APlayerController*.
+    #
+    # They sit inside the same run of fields as SQDeployable.Health, so
+    # resolve_paths moves them by however far Health moved rather than
+    # leaving them behind. v10.5.3 shifted that block -0x18 and these two
+    # with it (0x518 -> 0x500, 0x510 -> 0x4f8, confirmed by probing live
+    # deployables for a pointer that resolves to a current player).
     deployable_placer_ps_off: int = 0x0518
     deployable_placer_ctrl_off: int = 0x0510
     # Reflection-derived FOB resource-pool offsets (Ammo / Construction /
@@ -1083,12 +1343,35 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # SQSoldierMovement — the character movement component that holds the
         # real sprint Stamina/StaminaMax floats (two-hop off the soldier).
         "SQSoldierMovement": "Class",
+        # Carried by autoresolve_offsets, not read directly here: their
+        # field offsets are hardcoded constants and these are the classes
+        # whose reflection data corrects them.
+        "SQVehicleSeatComponent": "Class",
+        "SQVehicleSeat": "Class",
+        "SQVehicleComponent": "Class",
+        "SQVehicleWeapon": "Class",
+        "SQProjectile": "Class",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
     if missing:
         raise RuntimeError(
             f"classes not found in GUObjectArray: {', '.join(missing)}")
+
+    # Before anything reads a hardcoded offset, ask the binary what its
+    # struct layout actually is. See autoresolve_offsets.
+    try:
+        moved = autoresolve_offsets(pm, found, alloc)
+    except Exception as exc:                       # never fatal
+        print(f"[!] offset autoresolve failed ({exc}); using baked values",
+              file=sys.stderr)
+        moved = {}
+    if moved:
+        print(f"[+] re-derived {len(moved)} offset(s) from the live binary "
+              f"— Squad has changed since these were written:", file=sys.stderr)
+        for name in sorted(moved):
+            was, now = moved[name]
+            print(f"      {name:38s} {was:#06x} -> {now:#06x}", file=sys.stderr)
 
     def _addr(name: str) -> int:
         return found[name][1] if name in found else 0
@@ -1178,6 +1461,18 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     pc_voice_channel_off = (pc_layout["RecentVoiceChannel"].offset
                             if "RecentVoiceChannel" in pc_layout
                             else PC_RECENT_VOICE_CHANNEL_OFFSET)
+    # The two unnamed placer pointers ride along with the named field they
+    # sit next to. Anchoring beats a constant: the offset that is right today
+    # is the one the binary just told us about, not the one in this file.
+    _placer_ps, _placer_ctrl = 0x0518, 0x0510
+    _baked_health = ((_BAKED_OFFSETS or {}).get("dicts", {})
+                     .get("DEPLOYABLE_OFFSETS", {}).get("Health"))
+    _live_health = dep_layout["Health"].offset if "Health" in dep_layout else None
+    if _baked_health and _live_health and _live_health != _baked_health:
+        shift = _live_health - _baked_health
+        _placer_ps += shift
+        _placer_ctrl += shift
+
     return SnapshotPaths(
         sq_player_state_class=sq_player_state_class_addr,
         sq_soldier_class=sq_soldier_class_addr,
@@ -1305,8 +1600,13 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         scene_relative_location_off=scene_layout["RelativeLocation"].offset,
         scene_relative_rotation_off=scene_layout["RelativeRotation"].offset,
         scene_attach_parent_off=scene_layout["AttachParent"].offset,
-        scene_component_to_world_translation_off=0x210,
-        scene_component_to_world_rotation_off=0x210 - 0x20,
+        # Last known good; corrected against the live process on the first
+        # snapshot (see verify_component_to_world). Squad v10.5.3 moved this
+        # from 0x210 to 0x200, and because nothing checked, every position in
+        # every recording became `{x: junk, y: 0, z: 1}` while the agent
+        # reported itself healthy.
+        scene_component_to_world_translation_off=0x200,
+        scene_component_to_world_rotation_off=0x200 - 0x20,
         # Reflection-derived deployable + FOB offsets (see dataclass docs).
         deployable_offsets=grab(dep_layout, [
             "InitialTeam", "OwningFob", "Team", "bIsFob", "bPlaced",
@@ -1319,6 +1619,8 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
             "bIsSpawningEnabled", "bIsBleeding", "bHasBeenOverrun",
             "EstimatedWorldTimeOfDeath",
         ]),
+        deployable_placer_ps_off=_placer_ps,
+        deployable_placer_ctrl_off=_placer_ctrl,
         # SQVehicle TArray offsets (chain-walk picks up the ones defined
         # on the SQVehicleSeat parent too — VehicleComponents / Cached).
         vehicle_array_offsets=grab(vh_layout, [
@@ -3754,6 +4056,13 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                             "arrowLength":  arrow_len,
                             "arrowHeading": arrow_hdg,
                         })
+    # Everything below reads a world position, so the offset it reads from
+    # gets checked against reality first. Vehicles and rally points are the
+    # right sample: they sit out in the world with no attach parent, which is
+    # the case where the world transform must equal the relative one.
+    verify_component_to_world(
+        pm, paths, [a for a, _ in vehicles_raw] + [a for a, _ in rally_points_raw])
+
     deployables = [
         read_deployable(pm, alloc, paths, d_addr,
                         class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc))
