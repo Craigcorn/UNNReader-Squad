@@ -731,6 +731,34 @@ follows [Semantic Versioning](https://semver.org/).
   rather than guessed. Measured on real production recordings through the
   recorder's own compression: 84-104 KB a match, 0.20-0.21% of the file.
 
+## [1.4.5] - 2026-09-01
+
+### Fixed
+- Squad v10.5.3 moved most of the struct fields the reader's hardcoded
+  offsets point at, and the reader did not notice. It kept running, kept
+  reporting itself healthy, and kept recording - writing matches in which
+  every position was `{x: junk, y: 0, z: 1}`. Rally points, vehicle and
+  seat health, turret magazines, and deployable placer attribution were
+  wrong in the same way. Anyone on 1.4.3 or 1.4.4 with Squad v10.5.3 has
+  recordings from that window that cannot be repaired; new ones are
+  correct from the moment this version starts.
+- Offsets are now re-derived from the running binary instead of being
+  read out of a table. Most of the fields involved are UPROPERTYs, so the
+  binary was carrying their real offsets all along; `resolve_paths` reads
+  them at startup and prints what it corrected. The few that reflection
+  cannot see move with a reflected neighbour rather than being left
+  behind.
+- ComponentToWorld - the one that ruined the positions - has neither
+  reflection nor a neighbour to anchor to, so the snapshot now recognises
+  it instead: on a component with no attach parent the world transform is
+  the relative one, which reflection does resolve. The offset is checked
+  against live actors before it is used, and searched for only if the
+  check fails. A split vote keeps the old value; a wrong coordinate in an
+  archive is permanent, a stale one is not.
+- `doctor` resolves paths before it judges them, so it reports on the
+  offsets the reader will actually use rather than on the constants in
+  the source. Cap-zone geometry matching recovers with the positions.
+
 ## [1.4.4] - 2026-08-19
 
 ### Added
