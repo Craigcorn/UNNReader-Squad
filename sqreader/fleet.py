@@ -76,7 +76,8 @@ def gather_offline(*, reason: str, build_sha: str | None, restarts: int,
 def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
            restarts: int, uptime_sec: float, channel: str,
            sample_actors: list[int] | None = None,
-           sample_players: list[dict] | None = None) -> dict[str, Any]:
+           sample_players: list[dict] | None = None,
+           paths: Any = None) -> dict[str, Any]:
     """Assemble the check-in telemetry over the reader's own open handles.
 
     `health.run_doctor` walks the live class layouts (cheap) and classifies the
@@ -95,12 +96,18 @@ def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
     exactly like a pass, and without this field central cannot tell "ok,
     everything measured" from "ok, but three checks never ran". Additive, so
     the schema string does not move.
+
+    `paths` rides through to the doctor: it makes the transform check judge
+    the offset IN USE, and it is where the doctor reads the self-repaired
+    drift that becomes `stale_source` — health stays "ok" when autoresolve
+    corrected everything, so without this field a Squad update the reader
+    healed itself through would never reach a human at all. Additive too.
     """
     doc = health.run_doctor(pm, arr, alloc, sample_actors=sample_actors,
-                            sample_players=sample_players)
+                            sample_players=sample_players, paths=paths)
     skipped = [str(c.get("check")) for c in (doc.get("checks") or [])
                if c.get("state") == "skipped" and c.get("check")]
-    return {
+    out = {
         "schema": SCHEMA_CHECKIN,
         "agent_version": __version__,
         "platform": platform.system(),
@@ -113,3 +120,7 @@ def gather(pm: Any, arr: Any, alloc: Any, *, build_sha: str | None,
         "uptime_sec": int(uptime_sec),
         "channel": channel,
     }
+    stale = doc.get("stale_source") or {}
+    if stale:
+        out["stale_source"] = dict(sorted(stale.items())[:30])
+    return out

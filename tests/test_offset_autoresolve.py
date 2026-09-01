@@ -141,6 +141,29 @@ def test_declared_gaps_still_match_the_table():
         assert g[name] - g[dict_name][key] == gap, (name, dict_name, key)
 
 
+# --- the corrected drift stays visible ------------------------------------
+
+def test_stale_source_lists_what_autoresolve_corrected(monkeypatch):
+    """A silent correction is nearly as bad as a silent breakage: the source
+    table rots while every doctor face reads green. stale_source_offsets is
+    the accounting — (source, running) for exactly the names the resolver
+    moved."""
+    to = sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x30
+    found = _layouts(monkeypatch, {"SQVehicleComponent": {"Health": to}})
+    sn.autoresolve_offsets(None, found, None)
+    stale = sn.stale_source_offsets()
+    assert stale["SQ_VEHCOMP_HEALTH_OFFSET"] == (to - 0x30, to)
+
+
+def test_a_pack_difference_is_not_a_stale_source():
+    """A served pack also diverges from the baked table — deliberately.
+    Reporting it as a stale source would tell a human to 'refresh' the source
+    to values central already owns and versioned."""
+    sn.apply_offset_overrides(
+        {"SQ_VEHCOMP_HEALTH_OFFSET": sn.SQ_VEHCOMP_HEALTH_OFFSET + 0x100})
+    assert "SQ_VEHCOMP_HEALTH_OFFSET" not in sn.stale_source_offsets()
+
+
 # --- a served pack outranks the binary -----------------------------------
 
 def test_a_pack_override_outranks_the_binary(monkeypatch):

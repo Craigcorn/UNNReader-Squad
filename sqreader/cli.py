@@ -779,7 +779,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                                  uptime_sec=time.time() - started,
                                  channel=_checkin_channel,
                                  sample_actors=sample_actors,
-                                 sample_players=sample_players)
+                                 sample_players=sample_players,
+                                 paths=paths)
             ingest_client.checkin(
                 push_creds, telem, seq=ingest_client._next_seq(push_backlog))
         except Exception as _ce:
@@ -839,7 +840,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 apply_offset_overrides, resolve_paths, revert_offset_overrides)
             if health.run_doctor(pm, arr, alloc,
                                  sample_actors=sample_actors,
-                                 sample_players=sample_players
+                                 sample_players=sample_players,
+                                 paths=paths
                                  ).get("state") != "drift":
                 return None      # only self-heal a genuinely drifted reader
             minv = _oc.active_version(_offset_state_dir, _checkin_build_sha)
@@ -853,7 +855,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             caches.reset()
             if health.run_doctor(pm, arr, alloc,
                                  sample_actors=sample_actors,
-                                 sample_players=sample_players
+                                 sample_players=sample_players,
+                                 paths=new_paths
                                  ).get("state") == "ok":
                 _oc.save_active(_offset_state_dir, _checkin_build_sha,
                                 got["version"], got["offsets"])
@@ -1828,7 +1831,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # only ADDS fields, so the raw-offset assertions above/below are unaffected.
     snap = build_snapshot(pm, arr, alloc, paths=paths, metadata=Metadata.load())
     report(health.check_component_to_world(
-        pm, alloc, targets, _c2w_sample(snap, limit=health.C2W_MAX_SAMPLES)))
+        pm, alloc, targets, _c2w_sample(snap, limit=health.C2W_MAX_SAMPLES),
+        translation_off=paths.scene_component_to_world_translation_off))
 
     # Stats-collector singletons (captures/defenses/fobsBuilt/fobsDestroyed/
     # vehicleDamage/suppliesDelivered). These are hardcoded struct layouts —
@@ -1901,8 +1905,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"  INFO capzone static geometry: no live zones / lane objectives "
               f"to match on this layer ({layer_nm or '?'})")
 
+    # The drift that self-repaired. Everything above judged the offsets IN
+    # USE, so a Squad update the resolver corrected still prints PASS — this
+    # section is where that update becomes visible to the human, and the
+    # refresh script is what retires each line from it.
+    from .squad.snapshot import stale_source_offsets
+    stale: dict[str, tuple[int, int]] = dict(stale_source_offsets())
+    if paths.component_to_world_corrected:
+        stale["SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF"] = \
+            paths.component_to_world_corrected
+    if stale:
+        print(f"\n== source constants corrected at startup "
+              f"({len(stale)}) ==")
+        for name in sorted(stale):
+            was, now = stale[name]
+            print(f"  STALE {name:42s} source {was:#06x} -> running {now:#06x}")
+        print("  the reader is fine; the SOURCE is behind. Refresh the "
+              "constants to the running values and this section empties.")
+
     print()
-    print("PASS  doctor: every hardcoded offset still matches the live "
+    print("PASS  doctor: every offset in use still matches the live "
           "binary." if ok else
           "FAIL  doctor: an offset is wrong and could not be re-derived "
           "from the binary. Dump the layout with "

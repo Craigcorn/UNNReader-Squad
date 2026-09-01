@@ -336,7 +336,7 @@ def test_gather_passes_sample_players_through(monkeypatch):
     seen = {}
 
     def fake_run_doctor(pm, arr, alloc, *, sample_actors=None,
-                        sample_players=None):
+                        sample_players=None, paths=None):
         seen["players"] = sample_players
         return {"state": "ok", "ok": True, "drift": [], "checks": []}
 
@@ -501,6 +501,63 @@ def test_struct_fields_call_a_renamed_hop_drift_and_a_dead_read_a_skip(
                and "transient" in s["reason"] for s in skipped)
 
 
+def test_self_repaired_drift_reaches_the_report_as_stale_source(monkeypatch):
+    """Autoresolve makes a Squad update invisible to the drift list — state
+    stays ok because the offsets IN USE are right. stale_source is what keeps
+    that from meaning invisible to humans: the corrected names ride the same
+    report, and the transform correction (which lives in paths, not in a
+    module constant) is folded in beside them. This is the field the standing
+    acceptance test reads now."""
+    import sqreader.squad.snapshot as snap
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
+    monkeypatch.setattr(
+        snap, "stale_source_offsets",
+        lambda: {"SQ_VEHCOMP_HEALTH_OFFSET": (0x758, 0x728)})
+
+    class _Paths:
+        scene_component_to_world_translation_off = 0x200
+        component_to_world_corrected = (0x210, 0x200)
+
+    d = health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc(),
+                          paths=_Paths())
+    assert d["state"] == "ok"
+    assert d["stale_source"]["SQ_VEHCOMP_HEALTH_OFFSET"] == [0x758, 0x728]
+    assert (d["stale_source"]["SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF"]
+            == [0x210, 0x200])
+
+
+def test_doctor_judges_the_transform_offset_in_use(monkeypatch):
+    """If the first-snapshot verify moved ComponentToWorld, the value check
+    must judge the moved offset. Condemning the module default instead would
+    flip a healthy reader to drift — and send self-heal chasing a pack for
+    the one offset no pack can carry (it lives in paths, not in snapshot's
+    overridable globals)."""
+    seen = {}
+
+    def fake_c2w(pm, alloc, targets, sample, *, translation_off=None):
+        seen["off"] = translation_off
+        return health.CheckOutcome([], [], [])
+
+    monkeypatch.setattr(health, "check_component_to_world", fake_c2w)
+    monkeypatch.setattr(health, "check_offset_drift", _no_drift)
+    monkeypatch.setattr(health, "check_required_names", _no_drift)
+    monkeypatch.setattr(health, "check_struct_fields", _no_drift)
+    monkeypatch.setattr(health, "check_reflection_anchors",
+                        lambda *a: health.CheckOutcome([], [], []))
+
+    class _Paths:
+        scene_component_to_world_translation_off = 0x1F0
+        component_to_world_corrected = None
+
+    health.run_doctor(None, _Arr(resolves={"SQPlayerState"}), _OkAlloc(),
+                      paths=_Paths())
+    assert seen["off"] == 0x1F0
+
+
 def test_struct_field_drift_reaches_run_doctor(monkeypatch):
     monkeypatch.setattr(health, "check_offset_drift", _no_drift)
     monkeypatch.setattr(health, "check_required_names", _no_drift)
@@ -661,7 +718,8 @@ def test_gather_passes_the_actor_sample_through(monkeypatch):
     position transform without building a snapshot of its own."""
     seen = {}
 
-    def fake(pm, arr, alloc, *, sample_actors=None, sample_players=None):
+    def fake(pm, arr, alloc, *, sample_actors=None, sample_players=None,
+             paths=None):
         seen["sample"] = sample_actors
         return {"state": "ok", "ok": True, "drift": [], "checks": []}
 

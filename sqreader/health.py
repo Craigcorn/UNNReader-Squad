@@ -1038,12 +1038,18 @@ def _assert(out: CheckOutcome, label: str, ok: bool, detail: str, *,
 
 def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
                 sample_actors: list[int] | None,
-                sample_players: list[dict] | None = None
+                sample_players: list[dict] | None = None,
+                c2w_translation_off: int | None = None,
                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every check, in one pass over already-resolved targets.
 
     Order: the offset tables and required names first (unchanged), then the
-    checks that used to be human-only. Returns (drift, checks)."""
+    checks that used to be human-only. Returns (drift, checks).
+
+    `c2w_translation_off` is the transform offset IN USE (paths carries any
+    first-snapshot correction); judging the module default instead would
+    condemn a reader whose recordings are right — and send self-heal chasing
+    a pack for an offset no pack can carry."""
     drift: list[dict[str, Any]] = []
     checks: list[dict[str, Any]] = []
 
@@ -1068,7 +1074,12 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
     for outcome in (check_reflection_anchors(pm, alloc, targets),
                     check_lane_graph(pm, alloc, targets),
                     check_marker_stride(pm, alloc, targets),
-                    check_component_to_world(pm, alloc, targets, sample_actors),
+                    check_component_to_world(
+                        pm, alloc, targets, sample_actors,
+                        translation_off=(
+                            c2w_translation_off
+                            if c2w_translation_off is not None
+                            else SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF)),
                     check_collector_fields(sample_players)):
         drift.extend(outcome.drift)
         for s in outcome.skipped:
@@ -1086,7 +1097,8 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
 
 def run_doctor(pm: Any, arr: Any, alloc: Any, *,
                sample_actors: list[int] | None = None,
-               sample_players: list[dict] | None = None) -> dict[str, Any]:
+               sample_players: list[dict] | None = None,
+               paths: Any = None) -> dict[str, Any]:
     """Machine-readable health of the reader against the LIVE process.
 
     Caller passes already-resolved anchors (arr=GUObjectArray, alloc=FNamePool)
@@ -1105,12 +1117,27 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
     caller has no snapshot; the check then contributes nothing at all (not
     even a skip — see `check_collector_fields`).
 
-    Returns {state, ok, drift, checks, reason?} where state is:
-      * "ok"      — every hardcoded offset still matches live reflection
-      * "drift"   — at least one offset moved / a class vanished (Squad patched us)
+    `paths` is the serve loop's resolved SnapshotPaths (the human command
+    passes its own). It carries the transform offset IN USE — including any
+    first-snapshot ComponentToWorld correction — so the value check judges
+    what the reader actually reads through, and it carries the correction
+    itself for the stale-source report. None keeps the module default, which
+    is right only for a caller that never ran resolve_paths.
+
+    Returns {state, ok, drift, checks, stale_source?, reason?} where state is:
+      * "ok"      — every offset IN USE still matches live reflection
+      * "drift"   — at least one offset moved and could NOT be re-derived
+                    (Squad patched us past self-repair)
       * "unknown" — the core class can't be resolved yet (server empty / map
                     loading); NOT reported as drift, so a loading server never
                     triggers a false "broken" alarm.
+
+    `stale_source` is the drift that DID self-repair: {constant: [source,
+    running]} for every offset autoresolve (or the first-snapshot transform
+    verify) corrected away from the source table. It never flips state — the
+    recordings are right — but it is the signal that the source needs its
+    refresh, and central losing it would mean a Squad update no human ever
+    hears about. The standing acceptance test reads THIS field now.
     """
     checks: list[dict[str, Any]] = []
 
@@ -1131,8 +1158,9 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
         return {"state": "unknown", "ok": True, "drift": [], "checks": checks,
                 "reason": "SQPlayerState unresolved (server empty / map loading)"}
 
+    c2w_off = getattr(paths, "scene_component_to_world_translation_off", None)
     drift, checks = _run_checks(pm, alloc, targets, sample_actors,
-                                sample_players)
+                                sample_players, c2w_translation_off=c2w_off)
     if drift and targets.from_cache:
         # Never report drift on cached addresses. Re-resolving costs one walk
         # and happens only on the way to an alarm, so the cache can make the
@@ -1143,10 +1171,20 @@ def run_doctor(pm: Any, arr: Any, alloc: Any, *,
                     "checks": [],
                     "reason": "SQPlayerState unresolved (server empty / map loading)"}
         drift, checks = _run_checks(pm, alloc, targets, sample_actors,
-                                    sample_players)
-    return {
+                                    sample_players, c2w_translation_off=c2w_off)
+    report: dict[str, Any] = {
         "state": "ok" if not drift else "drift",
         "ok": not drift,
         "drift": drift,
         "checks": checks,
     }
+    # The self-repaired drift — see the docstring. Gathered LAST so it
+    # reflects whatever resolve/heal activity preceded this call.
+    from .squad.snapshot import stale_source_offsets
+    stale = dict(stale_source_offsets())
+    corrected = getattr(paths, "component_to_world_corrected", None)
+    if corrected:
+        stale["SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF"] = tuple(corrected)
+    if stale:
+        report["stale_source"] = {k: list(v) for k, v in sorted(stale.items())}
+    return report

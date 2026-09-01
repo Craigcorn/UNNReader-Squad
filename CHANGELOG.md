@@ -6,6 +6,26 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Merged upstream 1.4.5, which makes the reader re-derive every
+  reflectable offset from the running binary at startup and recognise
+  the position transform against live actors instead of remembering it -
+  drift that used to wait for a human now repairs itself before the
+  first snapshot. Three fork-side guarantees ride on top. A served
+  offset pack outranks the binary's answer, because a pack is operator
+  intent and the self-heal gates must be able to judge the pack itself.
+  Anchor gaps for the members reflection cannot see are declared beside
+  each pair rather than recomputed from the baked table, because this
+  fork refreshes its tables and a half-refresh would poison a recomputed
+  gap - a test now fails the moment the source table stops honouring a
+  declared gap. And self-repaired drift stays loud: the doctor reports
+  every correction as `stale_source` (source value -> running value) in
+  the check-in and the human command, so a Squad update the reader
+  healed itself through still reaches a human within one check-in - the
+  standing acceptance test reads that field now. The doctor also judges
+  the transform offset in use rather than the module default, so a
+  corrected reader is not condemned for its own repair.
+
 ### Fixed
 - The 48-casualty refresh missed two, and upstream's 1.4.5 diff is what
   found them: both constants sat outside every watch table, so the doctor

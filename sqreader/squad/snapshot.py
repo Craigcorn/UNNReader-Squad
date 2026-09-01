@@ -460,6 +460,34 @@ def revert_offset_overrides() -> None:
             d.update(baked)
 
 
+def stale_source_offsets() -> dict[str, tuple[int, int]]:
+    """{name: (source, running)} for every offset whose running value no
+    longer matches the source table — in practice, what autoresolve corrected
+    at startup. This is the drift signal the check-in must keep carrying now
+    that the reader repairs itself: the RECORDINGS are fine, the SOURCE is
+    stale, and whoever is live goes and runs the refresh. Pack-owned names
+    are excluded — a served difference is operator state, not a stale source.
+    Empty until _bake_offsets has run (resolve_paths runs it first thing)."""
+    if _BAKED_OFFSETS is None:
+        return {}
+    g = globals()
+    out: dict[str, tuple[int, int]] = {}
+    for n, v in _BAKED_OFFSETS["scalars"].items():
+        cur = g.get(n)
+        if n not in _ACTIVE_OVERRIDES and isinstance(cur, int) and cur != v:
+            out[n] = (v, cur)
+    for dn, baked in _BAKED_OFFSETS["dicts"].items():
+        d = g.get(dn)
+        if not isinstance(d, dict):
+            continue
+        for k, v in baked.items():
+            cur = d.get(k)
+            if (f"{dn}.{k}" not in _ACTIVE_OVERRIDES
+                    and isinstance(cur, int) and cur != v):
+                out[f"{dn}.{k}"] = (v, cur)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Re-derive drifted offsets from the running binary
 #
@@ -744,6 +772,7 @@ def verify_component_to_world(pm: ProcessMemory, paths: "SnapshotPaths",
           file=sys.stderr)
     paths.scene_component_to_world_translation_off = found
     paths.scene_component_to_world_rotation_off = found - 0x20
+    paths.component_to_world_corrected = (cur, found)
     paths.component_to_world_verified = True
 
 
@@ -1372,6 +1401,11 @@ class SnapshotPaths:
     # Set once verify_component_to_world has confirmed (or corrected) the
     # world-transform offset against live actors. Nothing else may set it.
     component_to_world_verified: bool = False
+    # (was, now) when the first-snapshot verify MOVED the offset — the one
+    # correction stale_source_offsets cannot see, because the transform
+    # offset lives in paths rather than as a module constant. The doctor
+    # folds it into the same stale-source report.
+    component_to_world_corrected: tuple[int, int] | None = None
     ps_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
     gs_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
     soldier_bool_masks: dict[str, tuple[int, int]] = field(default_factory=dict)
