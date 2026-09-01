@@ -309,7 +309,12 @@ SQ_VEHICLE_CACHED_ENGINE_OFFSET      = 0x04a0
 # we need are at:
 SQ_VEHCOMP_HEALTH_OFFSET             = 0x0728  # FloatProperty
 SQ_VEHCOMP_MAX_HEALTH_OFFSET         = 0x0618  # FloatProperty
-SQ_VEHCOMP_STATE_OFFSET              = 0x075c  # EnumProperty (Healthy/Damaged/Destroyed)
+# VehicleComponentState is a NAMED EnumProperty (Healthy/Damaged/Destroyed)
+# packed right after Health — reflection resolves it by name (verified live
+# 2026-09-01), so it is watched like any named field. Was 0x075c until the
+# 2026-08-31 Squad update; the stale offset read a neighbouring byte (176)
+# as a component state.
+SQ_VEHCOMP_STATE_OFFSET              = 0x072c
 SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET  = 0x06f4  # FloatProperty (0..1)
 
 # SQVehicleWeapon inherits SQWeapon_Effects → SQWeapon → SQEquipableItem.
@@ -603,6 +608,20 @@ DEPLOYABLE_OFFSETS = {
     "InitialHealth": 0x0428,    # float
     "Health":        0x042c,    # float
 }
+
+# The direct placer slots on SQDeployable are UNNAMED private fields, so no
+# table can watch them by name. They sit just past the named run, at a fixed
+# distance from its tail: ErrorTable +0x10 / +0x18 (equivalently
+# Health +0xCC / +0xD4). The 2026-08-31 Squad update moved the whole block
+# -0x18 (ErrorTable 0x500 -> 0x4e8, measured live 2026-09-01), and these two
+# moved with it. Re-derive after a drift report the way they were first
+# found: probe a live deployable for a pointer that resolves (directly, or
+# via the controller) to a current player's name — a stale value mostly
+# degrades to null through that same validation, but junk that resolves
+# through the controller chain CAN fabricate a short "name", which is why
+# these live here under the fleet test rather than as dataclass defaults.
+SQ_DEPLOYABLE_PLACER_PS_OFFSET   = 0x0500  # SQPlayerState* (durable)
+SQ_DEPLOYABLE_PLACER_CTRL_OFFSET = 0x04f8  # its APlayerController*
 
 # FOB radio resource pool. These offsets are on BP_BaseFobCreator_C —
 # the base for every FOB radio variant (BP_FOBRadio_AFU_C, _TLF_C, …).
@@ -1060,15 +1079,10 @@ class SnapshotPaths:
     # transient pawn path; pc_playerstate_off resolves the controller path.
     actor_instigator_off: int | None = None
     pawn_playerstate_off: int | None = None
-    # The direct placer slots on SQDeployable are UNNAMED private fields —
-    # reflection can't see them (the named neighbours end at +0x500 ErrorTable),
-    # so they're hardcoded from a live probe (current Squad build): +0x0518 =
-    # SQPlayerState* (durable), +0x0510 = its APlayerController*. If a Squad
-    # update drifts them, re-derive with a read-only memory probe: scan a live
-    # deployable's fields for a pointer that resolves (directly, or via
-    # actor_instigator/pawn_playerstate) to a current player's name.
-    deployable_placer_ps_off: int = 0x0518
-    deployable_placer_ctrl_off: int = 0x0510
+    # The direct placer slots — see SQ_DEPLOYABLE_PLACER_*_OFFSET for the
+    # derivation (unnamed privates anchored to the named tail).
+    deployable_placer_ps_off: int = SQ_DEPLOYABLE_PLACER_PS_OFFSET
+    deployable_placer_ctrl_off: int = SQ_DEPLOYABLE_PLACER_CTRL_OFFSET
     # Reflection-derived FOB resource-pool offsets (Ammo / Construction /
     # MaxAmmo / bSieged / …) off BP_BaseFobCreator_C. Also drifted (by a
     # DIFFERENT amount than the SQDeployable block — +0x38 vs +0x18),
@@ -1904,9 +1918,10 @@ def _read_placer_ps(pm: ProcessMemory, paths: SnapshotPaths,
                     d_addr: int) -> tuple[int, str] | None:
     """Resolve a deployable's placer to (playerstate_addr, name), or None.
 
-    Tries three slots, most-durable first: the direct SQPlayerState* (+0x0518),
-    then AActor.Instigator (pawn) -> PlayerState, then the placer controller
-    (+0x0510) -> PlayerState. Every step is null-guarded — a wrong offset or a
+    Tries three slots, most-durable first: the direct SQPlayerState*
+    (SQ_DEPLOYABLE_PLACER_PS_OFFSET), then AActor.Instigator (pawn) ->
+    PlayerState, then the placer controller (SQ_DEPLOYABLE_PLACER_CTRL_OFFSET)
+    -> PlayerState. Every step is null-guarded — a wrong offset or a
     stale/despawned placer just yields None (no guess). The caller caches the
     first live hit because these links null out once the placer despawns.
     """

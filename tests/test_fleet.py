@@ -544,7 +544,12 @@ def test_every_readable_hardcoded_offset_is_watched():
         "LANE_LINK_SIZE", "LANE_VISUALIZER_ROUTE_INDEX_OFF",
         # Declared but never read — nothing can drift through them.
         "MARKER_ITEM_OFFSETS", "SQ_SEATCOMP_ANIM_STATE_OFFSET",
-        "SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET", "SQ_VEHCOMP_STATE_OFFSET",
+        "SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET",
+        # Unnamed private fields past SQDeployable's named run — no property
+        # name exists to watch. Anchored to the named tail (ErrorTable
+        # +0x10/+0x18) and value-validated at read time by the placer-name
+        # chain; the register in hardcoded_offset_tables carries the story.
+        "SQ_DEPLOYABLE_PLACER_PS_OFFSET", "SQ_DEPLOYABLE_PLACER_CTRL_OFFSET",
         # Derived: MARKER_MGR_MARKER_ARRAY_OFFSET + MARKER_ARRAY_ITEMS_OFFSET,
         # and both halves are watched (class tier + struct tier).
         "MARKER_ITEMS_ABS_OFFSET",

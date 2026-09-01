@@ -103,9 +103,20 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         RAAS visualizer is absent on AAS layers BY DESIGN — tabling it would
         report drift on half the map rotation).
       * MARKER_ITEM_OFFSETS, SQ_SEATCOMP_ANIM_STATE_OFFSET,
-        SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET, SQ_VEHCOMP_STATE_OFFSET — declared
-        but never read, so nothing can drift through them. Watch them the day
-        they are first read.
+        SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET — declared but never read, so
+        nothing can drift through them. Watch them the day they are first
+        read. (SQ_VEHCOMP_STATE_OFFSET sat in this bullet wrongly — it has
+        been read into every component record since 1.4.0, and the mislabel
+        is how it missed the 2026-08-31 refresh. It turned out to be the
+        named EnumProperty VehicleComponentState, so it is a watched row
+        below now.)
+      * SQ_DEPLOYABLE_PLACER_PS_OFFSET / SQ_DEPLOYABLE_PLACER_CTRL_OFFSET —
+        unnamed private fields past SQDeployable's named run; no build has
+        ever reflected them, so there is no name to check. They are anchored
+        to the named tail (ErrorTable +0x10/+0x18) and re-measured by live
+        probe whenever the doctor reports SQDeployable drift; the read path
+        additionally validates every candidate pointer by resolving it to a
+        current player's name.
       * STRUCT-INTERNAL offsets with no property name — MARKER_ITEM_SIZE and
         the per-item MARKER_ITEM_OFFSETS are a brute-forced stride into an
         unnamed element struct, so there is nothing to resolve by name;
@@ -135,7 +146,7 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         SQ_VEHICLE_COMPONENTS_OFFSET, SQ_VEHICLE_SEATS_OFFSET,
         SQ_VEHICLE_TURRETS_OFFSET, SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET,
         SQ_VEHCOMP_HEALTH_OFFSET, SQ_VEHCOMP_MAX_HEALTH_OFFSET,
-        SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET,
+        SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET, SQ_VEHCOMP_STATE_OFFSET,
         SQ_VWEAPON_MAGAZINES_OFFSET, SQ_VWEAPON_VEHICLE_TURRET_OFFSET,
     )
     return [
@@ -186,6 +197,10 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
             "Health":           SQ_VEHCOMP_HEALTH_OFFSET,
             "MaxHealth":        SQ_VEHCOMP_MAX_HEALTH_OFFSET,
             "NormalizedHealth": SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET,
+            # Read since 1.4.0 but unwatched until 2026-09-01, when it turned
+            # out to be a named property after all — the register bullet
+            # above tells that story.
+            "VehicleComponentState": SQ_VEHCOMP_STATE_OFFSET,
         }),
         ("SQVehicleWeapon", "Class", False, {
             "Magazines":     SQ_VWEAPON_MAGAZINES_OFFSET,

@@ -7,6 +7,22 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The 48-casualty refresh missed two, and upstream's 1.4.5 diff is what
+  found them: both constants sat outside every watch table, so the doctor
+  had no way to dictate their new values. The deployable placer slots
+  (unnamed private fields - now SQ_DEPLOYABLE_PLACER_*_OFFSET) moved -0x18
+  with the SQDeployable block; the stale slots mostly degraded attribution
+  to null through the read path's name validation, but junk that resolved
+  through the controller chain could fabricate a short "name" as a placer.
+  And SQ_VEHCOMP_STATE_OFFSET - which the register wrongly called never
+  read - has fed every component record since 1.4.0, and read a
+  neighbouring byte as a component state after the update. Both re-measured
+  live: the state field turned out to be the named EnumProperty
+  VehicleComponentState, so it is a watched table row now; the placer pair
+  are module constants under the fleet test, anchored to the named tail
+  (ErrorTable +0x10/+0x18) with the derivation written down. Recordings
+  between the server's update and this deploy carry junk component states
+  and untrustworthy placer attribution, and are excluded from those uses.
 - The first real Squad update since the doctor grew teeth, and it bit
   everything at once. The server auto-updated on a restart; within one
   cycle of re-attaching, the hardened doctor reported all 48 casualties:
