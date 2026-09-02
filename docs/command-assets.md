@@ -1,12 +1,18 @@
 # Command assets — exploration findings
 
-Status: **exploration paused, findings banked** · live sessions on the test
-server 2026-08-30 (solo dry-run + a 5-player commander session, cut short by
-an unrelated server crash). Everything below is live-verified against Squad
-v10.x unless marked open. Raw probe captures (per-tick instance snapshots,
-class layout dumps, the vote window) are archived off-repo for the pending
-offline analysis. Offsets quoted are the values verified that day - any
-implementation resolves them by reflection name, never by constant.
+Status: **exploration complete bar one item (bomb detonation location, see
+the open-questions table); implementation planning can begin** · live
+sessions on the test server 2026-08-30/31 (solo dry-run, a 5-player
+commander session, both radius measurements) and 2026-09-02 (a second
+5-player session across two layers and three factions: every remaining
+test on the checklist), plus offline decodes of the archived captures.
+Everything below is live-verified against Squad v10.x unless marked open.
+Offsets quoted are the values verified on the day - any implementation
+resolves them by reflection name, never by constant (the 2026-08-31 Squad
+update moved every quoted constant and reflection absorbed all of it; the
+09-02 session found `CurrentCommander` moved again, 0x5b8 -> 0x598, caught
+only by re-deriving before the session). Player names are deliberately
+absent from this document.
 
 ## Request markers (SL -> commander requests)
 
@@ -46,13 +52,16 @@ the asset. Proven **absent from server memory** - checked the marker
 actors, the map-icon component, the category configs (FText name/desc
 blobs) and the action configs; nothing encodes it. It is client UI.
 
-Evidence so far on its size: a creep-barrage start point placed by eye "at
-the circle's edge" measured 26.4 m from the marker center; the circle
-visually fills about one grid subdivision. Whether that means a ~25 m
-radius, and whether it scales per map (the FOB-radius precedent says
-per-layer scaling exists in this game), are the open questions tests R1/R2
-answer precisely. Until then the viewer treats it as a display constant
-with a documented uncertainty, not a recorded fact.
+**MEASURED AND CLOSED (R1+R2, 2026-08-31): radius = 50 m, constant across
+maps.** Two edge-stands - soldier placed on the circle's drawn edge,
+marker-to-soldier distance read from memory - measured 49.95 m on
+Al Basrah and 50.20 m on Fool's Road: the design value is plainly 50 m
+(5000 cm), and it does NOT scale with the map (unlike FOB radii). The
+100 m diameter exactly fills one grid subdivision, confirming the
+standard 300 m grid; the earlier 26.4 m creep-origin datum was eyeball
+placement INSIDE the circle, not evidence about its size. The viewer
+draws a 50 m circle around approved requests as a documented game
+constant - nothing to record.
 
 ## Commander state (`SQCommanderState`, one per team, always present)
 
@@ -70,7 +79,7 @@ Key reflected fields (past the AActor boilerplate):
 | `LastCategoryGameTime` | +0x420 | TArray, empty until first use, then per-category game-time of last call - **the cooldown state** (remaining = interval − (gameTime − lastUse)) |
 | `TeamCommands` | +0x430 | per-team commands object |
 | `NomineeStatus` | +0x438 | FastArraySerializer; `Items` at absolute +0x540. Entry DECODED offline from the captured vote (2026-08-31): nominee's `SQPlayerState*` at entry+0x10, **live vote tally (i32) at entry+0x18** — observed 1 at vote start (self-vote), 2 when the SL voted ~4 s in, with the array replication key ticking in lockstep. Voter IDENTITIES are absent from the first 32 bytes; whether they hide deeper needs a wider slice (R4a). Entry persists after resolution |
-| `CurrentCommander` | +0x5b8 | -> the commander's `SQPlayerState`; null when unclaimed - **the authoritative claimed-commander source** |
+| `CurrentCommander` | +0x5b8 (08-30 build) / +0x598 (09-02 build) | -> the commander's `SQPlayerState`; null when unclaimed - **the authoritative claimed-commander source**. Re-verified live 09-02 resolving both teams' commanders by name |
 
 **Vote lifecycle, decoded from the captured window (2026-08-31)**: a
 commander vote opens a **60-second window** — `bVoteInProgress` flips to 1,
@@ -89,12 +98,24 @@ address. **Fix: one hop through `CurrentCommander` before the identity
 read** - the hop was verified live (resolved the sitting commander's
 name). Bugfix, not a format debate.
 
-Individual SL votes: the decode settled the core question — the server
-keeps **per-nominee tallies with precise timing, not per-voter ballots**
-(none in the entry's first 32 bytes). Individual attribution therefore
-comes from correlating tally-increment timestamps with announced voters
-(the staggered protocol), unless a wider entry slice in R4a reveals a
-voter list deeper in the struct.
+Individual SL votes: **closed 09-02.** Three further votes were captured
+with 96-byte entry slices (a contested claim, an unopposed enemy claim, and
+a replacement vote): the server keeps **per-nominee tallies with precise
+timing and no per-voter ballots anywhere in the entry** — the bytes past
+each tally are zero. Individual attribution is only ever possible by
+correlating tally-increment timestamps with announced voters. Entry
+stride was confirmed from a genuine two-nominee pair (a teammate
+contesting the claim and losing 2-0 before switching teams to claim the
+other side), and the nominee's PlayerState pointer is recognisably present
+in each entry.
+
+**Replacement and removal (R4a/R4b, 09-02):** a second SL can start a
+replacement vote against a sitting commander; the array carries both
+nominees and on resolution `CurrentCommander` swaps A->B in place (observed:
+challenger 2, incumbent 0). A voluntary **step-down clears
+`CurrentCommander` to null with no vote in progress and no vote cooldown
+armed** — the seat is immediately claimable again. A team switch by the
+sitting commander behaves as a step-down on the old team.
 
 ## Per-asset action configs (`CommandAction_*` blueprint CDOs)
 
@@ -104,26 +125,54 @@ Static per-asset rulebook, read off the class defaults. Reflected fields:
 +0x138, `MaximumDistance` +0x13c (plus DisplayName/Description/Texture/
 CommandActor/MapMarkerClass pointers).
 
-Values swept on the USMC layer (only the loaded faction's actions exist -
-see R3):
+**Load trigger (R3, 09-02): a faction's `CommandAction_*` classes load when
+its commander claim RESOLVES** — 8 CDOs with the irregular faction present
+but commanderless, 11 the moment their vote landed. The catalog therefore
+fills itself: every faction's first commander claim hands over its
+rulebook, and a probe (or the reader) sees the classes appear. Values
+swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
 
 | Action | cat | enroute | active | cooldown | minDist | maxDist |
 |---|---|---|---|---|---|---|
-| UAV MQ9 (USMC) | 0 | 30 s | 300 s | 600 s | 100 m | 250 m |
+| UAV MQ9 (USMC) / UAV TB2 (AFU) | 0 | 30 s | 300 s | 600 s | 100 m | 250 m |
 | UAV (base) | 0 | 20 s | 300 s | 600 s | 100 m | 250 m |
-| F/A-18 strafe (all variants) | 1 | 15 s | 32 s | 900 s | 20 m | 60 m |
-| A-10 strafe | 1 | 15 s | 32 s | 900 s | 20 m | 60 m |
-| Artillery creep (USMC) | 1 | 60 s | 60 s | 1800 s | 175 m | 450 m |
-| Artillery barrage (USMC) | 1 | 60 s | 60 s | 1800 s | 50 m | 150 m |
+| Drone (irregular) | 0 | 10 s | **600 s** | 600 s | **no distance fields at all** — commander-piloted, nothing to pre-place |
+| F/A-18, A-10, SU-25 gun/rocket strafes | 1 | 15 s | 32 s | 900 s | 20 m | 60 m |
+| SU-25 (AFU) / CF-18 **bomb** strafes | 1 | 15 s | 32 s | 900 s | 20 m | **120 m** |
+| Artillery creep (USMC / AFU / base) | 1 | 60 s | 60 s | 1800 s | 175 m | 450 m |
+| Artillery barrage (USMC / AFU / base) | 1 | 60 s | 60 s | 1800 s | 50 m | 150 m |
+| Mortar barrage (INS / IMF) | 1 | 30 s | 60 s | 1200 s | **75 m = 75 m** — fixed, non-resizable footprint |
 
 - **`min/maxDist` is asset geometry, not a placement leash** - verified on
-  the creep: placed at max range, the live actor's `Distance` read exactly
-  45000 (450 m), the config's `MaximumDistance`.
-- Category intervals (600/900) and per-action cooldowns coexist and
-  disagree for artillery (1800 vs the category's 900) - which gate wins is
-  open (test R5, passive observation).
-- The UAV needs no request marker (player-confirmed); strikes and
-  artillery are marker-based.
+  the creep (placed at max range, the live actor's `Distance` read exactly
+  45000) and again on the bomb strafe (aim separation 12000 at max).
+- The UAV and the drone need no request marker (player-confirmed);
+  strikes and artillery are marker-based.
+- Every asset family observed so far self-classifies through the same
+  pattern (action CDO + `BP_CommandActor_*` + a geometry marker or a
+  pawn). Only three factions have been swept; unseen factions still
+  record correctly by design, and their configs join the catalog on their
+  first commander claim.
+
+**Cooldowns (R5, 09-02).** Both layers are real and both are captured:
+- The **category gate is shared across assets**: calling the strafe
+  stamped `LastCategoryGameTime[1]` (= 108343.2 game-seconds, at the exact
+  tick the strike marker spawned) and the player observed every other
+  cat-1 asset's timer jump at once. `CommanderCategories` carries the
+  intervals (600 s cat 0, 900 s cat 1).
+- **Cooldowns anchor to the call, not the asset's fate**: the drone was
+  shot down a minute after its call and the UI showed ~9 minutes
+  remaining — 600 s from the call, unchanged by the death; no redeploy
+  within the window.
+- Per-action `CooldownDuration` (900/1200/1800 within one 900 s category)
+  and `CommandIntervals` (a FastArray that carried one game-time stamp,
+  106721.7, plausibly the new-commander extension the manager's
+  `ActionCooldownExtensionOnNewCommander` describes) coexist with the
+  category gate; the observed "+10 minutes" on artillery after a strafe
+  fits a 15-minute category gate landing on a pre-existing ~5-minute
+  residual. Recordable state is complete either way: the viewer's
+  "ready in X" = max(category gate, per-action gate), with the per-action
+  source pinned during implementation.
 
 ## Per-call actors (what an asset use spawns)
 
@@ -156,23 +205,89 @@ observed live:
   | `CommandRadius` (UAV) | 10000 = 100 m circle radius | 0 |
   | `CommandLine` (strafe) | 6000 = 60 m run length | 0 |
   | `CommandPath` (creep) | 45000 = 450 m path length (matches the actor's fire plan exactly) | 7500 = 75 m drop scatter |
+  | `CommandRadius_C` (mortar barrage) | 7500 = 75 m fixed footprint | 4500 = 45 m outer danger band |
+  | `CommandLineRadius` (precision bombs) | the chosen aim separation (44.75-120 m) | 0 |
 
-  Position + facing + these two named, reflected properties fully define
-  every asset's footprint — no endpoint vectors exist in the actor raws,
-  and none are needed.
+  **Four archetypes** — circle, line, path (with a scatter band), and
+  point-pair — every one expressed through the same two named, reflected
+  properties plus position and facing. No endpoint vectors exist in the
+  actor raws, and none are needed. Piloted assets (the drone) spawn no
+  footprint marker at all; their geometry is the live pawn.
+- **Mortar barrage (irregular factions, 09-02)**: `BP_CommandActor_Mortar_Radius_C`
+  (106 fields, same family as the creep actor: `Max Drop Radius`, `Shells
+  Per Barrage`, `Barrage Count`...) plus `BP_MapMarker_CommandRadius_C`
+  carrying `Distance = 7500` (the config's fixed 75 m footprint) and
+  `AddDistance = 4500` (a 45 m outer band — the in-game UI draws two rings:
+  the called area and a wider danger band). CDO defaults: 10 shells x 8
+  barrages per call.
+- **Strike aircraft are actors (09-02)**: the SU-25 command actor is a
+  **shootable 1000 HP pawn** flying at 190 m/s (`Flight Speed 19000`) with
+  `MaxShots = 2` for the bomb variant; the F/A-18 actor shares the family
+  (128-field layouts both). Every CAS call therefore puts a trackable,
+  killable aircraft in memory for its ~32 s active window.
+- **Grach precision bombing (AFU, 09-02)**: config-wise a strafe-family
+  variant (`CommandAction_SU25AFU_CASStrafe_Bombs_C`) whose 20-120 m bounds
+  are the allowed **aim separation**. It spawns a fourth marker archetype,
+  `BP_MapMarker_CommandLineRadius_C` (`Distance` = the chosen separation:
+  44.75, 45.76 and 120.0 m across three calls; `AddDistance` 0), the
+  aircraft actor, and **two `BP_Projectile_500lb_Bomb_C` projectiles that
+  ARE in the recorded projectile stream** — with `firer` = the commander,
+  `explosiveBaseDamage 250`, and full flight paths: a straight glide from
+  ~325 m out along the aim bearing, constant sink, `hasImpacted` flipping
+  as the actor freezes for ~55 frames at its rest point. The bomb's own
+  config (dumped mid-flight) explains the in-game circles: primary
+  `ExplosiveDamageOuterRadius 10000` (100 m, falling to 5 damage) and
+  `SecondaryExplosion` inner 1500 / outer 4500 (15 m / 45 m, base 2000)
+  — the UI's inner circle is the 45 m secondary band, the outer is the
+  100 m bound, centred on the two aim points. **Observed across all three
+  calls: the two projectiles came to rest 23.8, 26.2 and 26.25 m apart,
+  near the START of the aim line, regardless of a 44.75 or 120 m commanded
+  spread** — consistent with a fixed release interval (~0.14 s at 190 m/s)
+  rather than bombs steering to the two circles. What that means for the
+  explosions is THE remaining open item (see below).
+- **The drone (irregular factions, 09-02) is the one piloted asset**, and
+  it behaves like nothing else: the call spawns `BP_CommandActor_Drone_C`,
+  a transient spawner + item pair, and `BP_FlyingDrone_C` — a
+  **Character-based pawn (178 fields) with the standard possession chain**
+  (`PlayerState`, `Controller`, `LastHitBy`), position/yaw readable through
+  the normal root transform (flight tracked live at ~40 m per 4 s). It is
+  NOT an `SQVehicle`, so it is **invisible in recordings today** despite
+  being a ten-minute, pilot-controlled, shootable actor. Possession model:
+  de-possessing nulls `PlayerState`, `Controller` AND `PreviousController`
+  (an orphaned pawn), re-possessing restores them — so "piloted by" is
+  per-tick state with honest gaps, while the persistent owner is the
+  command actor's `DamageInstigatorController` (+ `Team`). Possession IS
+  logged (`OnPossess` lines with full identity); death is not: the pawn
+  despawns on kill, the command actor survives (`Action Destroyed` stays
+  0), the cooldown keeps its call-time anchor, and no redeploy is possible
+  inside the window. Drones cannot harm players — observation only — so
+  there is no drone-kill attribution question; a drone being shot down is
+  the attributable event (its `LastHitBy` rides the capture to the last
+  tick).
+- **Commander kill attribution flows through the existing causer chain
+  (R6, 09-02)**: a strafe wound event recorded `attacker` = the calling
+  commander with `causerWeapon` = the rocket class, and bombs carry the
+  commander as `firer`. The wire needs nothing new for commander kills.
 - Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) exist around HABs
-  and command vehicles - noted, not yet explored.
-- **No commander action writes a single server-log line** (proven
-  offset-controlled, same method as the medical finding). Memory is the
-  only source.
+  and command vehicles - noted, not explored (parked, R8).
+- **Commander actions write no server-log lines** — assets, votes,
+  cooldowns, drone death are all memory-only (proven offset-controlled).
+  The single exception is drone possession, which logs `OnPossess`.
 
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
-1. **Asset uses are invisible in recordings today.** The `BP_CommandActor_*`
-   actors are not vehicles, markers or projectiles, so nothing of a UAV
-   flight or a barrage enters the wire except the radius/line/path
-   markers' positions. The full fire-plan geometry (origin/target/length,
-   shells, scatter) and the commander attribution live only on the actor.
+1. **Asset uses are only partly visible in recordings today.** Present:
+   the geometry markers' type + position, and strike ordnance as
+   projectiles (rockets, bombs — with `firer` = the commander) whose kills
+   attribute through the existing causer chain. Absent: the geometry
+   markers' `Distance`/`AddDistance`/facing (gap 2), the fire-plan detail
+   on the command actors (shells, scatter, progress), the strike aircraft
+   actors, and — the strongest case — **the piloted drone pawn**: a
+   ten-minute pilot-controlled flight with no `SQVehicle` ancestry, so no
+   stream carries it. A small tracked-entity addition (class, position,
+   yaw, pilot via the possession chain, owner via the command actor) is
+   what closes this; the probe captured a complete flight for the cost
+   model.
 2. **Command markers record no geometry fields today** - `arrowLength`/
    `arrowHeading` come back null for the line/path markers. SOLVED IN
    PRINCIPLE by the offline decode: the geometry lives in the marker's
@@ -190,20 +305,43 @@ observed live:
 4. The commander-identity **bugfix** (one hop via `CurrentCommander`)
    stands apart from the debate - it repairs an already-shipped field.
 
-## Outstanding tests (return here)
+## Open questions — status after the 09-02 session
 
-| # | Test | Needs | Answers |
-|---|---|---|---|
-| R1 | Edge-stand: place SL request, stand a soldier on the circle's edge, measure marker->soldier distance | solo, 2 min | exact request-circle radius; calibrates the map's real grid size |
-| R2 | Same edge-stand on a different layer | solo, 2 min, any visit | whether the circle is constant or map-scaled (the FOB-radius concern) |
-| R3 | Other-faction asset sweep: opposing team claims commander (opening the menu likely suffices to load their `CommandAction_*` CDOs), then sweep | one player on the other team | the irregular factions' full asset rulebook |
-| R4a | Replacement vote: a second SL votes out the incumbent, votes staggered ~10 s apart and announced. Probe prep: widen the nominee slice (AUX_ELEM_BYTES) to hunt a voter list past entry+0x20 | full squad quorum | contested entries (stride via two nominees; whether voter identity exists deeper); `CurrentCommander` A->B swap |
-| R4b | Step-down / disconnect | commander | the clean clear to null |
-| R5 | Passive: after using one cat-1 asset, note when the other cat-1 asset shows available | nothing extra | which cooldown gate wins (per-action vs category) |
+Closed: **R1/R2** (50 m request circle, map-invariant), **R3** (load
+trigger + three factions swept), **R4a** (replacement vote, A->B swap,
+tallies-only confirmed), **R4b** (step-down clears to null), **R5**
+(category gate real and cross-asset; call-anchored cooldowns), **R6**
+(commander kill credit flows through the existing causer chain), **R7**
+(drone lifecycle + mortar barrage + precision bombs — the self-classifying
+pattern held across two new factions and a novel geometry).
 
-Offline analysis: **done 2026-08-31** — the nominee entry (identity +0x10,
-tally +0x18, no voter list in the sampled bytes), the vote lifecycle
-(60 s window, per-second countdown, resolution semantics), and the marker
-geometry (`Distance`/`AddDistance` carry every asset's footprint) are all
-decoded above. Next: the capture proposal goes to review with the usual
-measured costs.
+| # | Open item | Needs | What it decides | Blocks |
+|---|---|---|---|---|
+| **B1** | **Where a precision bomb actually detonates.** The two projectile actors came to rest 24-26 m apart near the aim line's start on all three calls — including the 120 m spread — yet the UI draws blast circles at both aim points. Nobody observed the explosions on the wide-spread call, and no bomb kill exists to cross-check. Either the rest points ARE the detonations (the second aim circle is a promise the aircraft does not keep), or damage/visuals are applied at the aim points and the projectile actors are decorative | one call with a volunteer standing in the FAR aim circle, or any bomb kill with a recorded victim position | How the viewer should render bombing runs: impacts at projectile rest points vs at aim points. **Does not block the recorder** — markers and projectiles are both recorded regardless; it gates only the viewer's interpretation | viewer rendering of bombs only |
+| R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
+
+Everything the recorder needs is settled. The capture proposal can be
+written now; B1 is a viewer-side question that one future observation
+closes.
+
+Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
+lifecycle and the marker geometry; 09-02 decoded the cooldown stamps, the
+bomb damage model and the three bombing trajectories, all recorded above.
+Both sessions' raw captures (per-tick instance snapshots, class layouts,
+log slices, the bomb config dump) are archived off-repo.
+
+## Harness notes (for whoever probes next)
+
+- The probe resolves every `SQCommanderState` offset by reflection at
+  startup — a field moved between sessions (`CurrentCommander`) and only a
+  pre-session re-derive caught it. Never launch a probe on last session's
+  offsets.
+- Raw-dump priority: `BP_CommandActor_*` must rank with the state actors.
+  On a layer dense with command zones and commander-variant vehicles the
+  mortar actor's per-tick raws were crowded out of the dump cap, costing
+  the direct fire-plan read (recovered from the CDO instead).
+- Short-lived blueprint classes (the bomb projectile lives only in flight)
+  need a trigger watcher: poll for the class, dump its CDO the instant it
+  exists. The bomb config was captured that way mid-flight.
+- Restart the probe after a layer change (class addresses churn); it
+  survives game-server restarts by re-attaching.
