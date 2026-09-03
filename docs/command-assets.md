@@ -1,7 +1,9 @@
 # Command assets — exploration findings
 
-Status: **exploration COMPLETE — every open item closed; implementation
-planning can begin** · live sessions on the test server 2026-08-30/31
+Status: **exploration COMPLETE — every item that gates the recorder or
+the viewer's correctness is closed (one cosmetic measurement, B2,
+remains); implementation planning can begin** · live sessions on the
+test server 2026-08-30/31
 (solo dry-run, a 5-player commander session, both radius measurements),
 2026-09-02 (a second 5-player session across two layers and three
 factions: every remaining test on the checklist) and 2026-09-03 (two
@@ -243,8 +245,9 @@ observed live:
   config (dumped mid-flight) explains the in-game circles: primary
   `ExplosiveDamageOuterRadius 10000` (100 m, falling to 5 damage) and
   `SecondaryExplosion` inner 1500 / outer 4500 (15 m / 45 m, base 2000)
-  — the UI's inner circle is the 45 m secondary band, the outer is the
-  100 m bound, centred on the two aim points. **Observed across five
+  — the map's two circles per aim point match that 45 m / 100 m pair by
+  ratio (≈0.45 in the 09-03 screenshot), though their absolute radii have
+  never been measured from the UI (B2 below). **Observed across five
   calls (three on 09-02, two on 09-03): the two projectiles come to rest
   6 m and 32 m along the aim line from its start, 24-27 m apart,
   regardless of the commanded spread (44.75, 45.76, 75.4 and 120 m) and
@@ -266,13 +269,27 @@ observed live:
   the primary origin, 354 at 37.5 m inside the secondary band, a parked
   helicopter 18 m from the second bomb destroyed. **The second aim circle
   is never serviced**: the in-game map draws an identical circle pair at
-  each aim point (large/small ratio ≈ 0.45, i.e. the 100 m / 45 m radii,
-  the second pair centred a little short of the line's end), yet every
-  bomb falls inside the FIRST pair's inner circle. A viewer should draw
-  the two recorded impact points with the config radii and the aim
-  line/circles only as what was requested. One detail left unexplained:
-  a soldier downed by the first blast, 12 m from the second bomb's rest
-  point and beside the helicopter it destroyed, recorded no second hit.
+  each aim point, and every bomb falls inside the FIRST pair's inner
+  circle. One detail left unexplained: a soldier downed by the first
+  blast, 12 m from the second bomb's rest point and beside the helicopter
+  it destroyed, recorded no second hit.
+
+  **Rendering rule (adopted 09-03, reviewed against the in-game map).**
+  Aim point 1 = the marker's position; aim point 2 = that position plus
+  `Distance` along the marker's facing (the facing matched the bombs'
+  approach bearing to within a degree); a dashed circle pair at each aim
+  point; the two impact points from the projectile rest positions where
+  `hasImpacted` set, drawn with the bomb config's radii; the call-in area
+  from the request marker (50 m). Provenance, so nobody mistakes the
+  picture for a read: position, facing and `Distance` are captured; aim
+  point 2 is derived from them; the circle radii are the config's 45 m /
+  100 m, *assumed* to be what the map draws (the ratio matches, the
+  absolute values are unmeasured). A rival reading — the line ending at
+  the far edge of the second inner circle, i.e. the second pair pulled
+  back by its own radius — was drawn and rejected: on this call it would
+  put the second centre within a metre of bomb 2, but on the two 45 m
+  calls it would stack both pairs on top of each other, and their inner
+  circles were observed to overlap only slightly.
 - **The drone (irregular factions, 09-02) is the one piloted asset**, and
   it behaves like nothing else: the call spawns `BP_CommandActor_Drone_C`,
   a transient spawner + item pair, and `BP_FlyingDrone_C` — a
@@ -360,10 +377,11 @@ the Grach entry above).
 
 | # | Open item | Needs | What it decides | Blocks |
 |---|---|---|---|---|
+| B2 | The map's bomb-circle radii and the second pair's exact centre are assumed (config 45 m / 100 m, centred on the aim points) | one edge-stand on the second inner circle during any Grach call, read the same way as the 50 m request circle | Whether the viewer's dashed circles match the in-game map exactly | viewer cosmetics only (low importance) |
 | R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
 
-Nothing gates the recorder or the viewer any more. The capture proposal
-can be written now.
+Nothing gates the recorder, and nothing gates the viewer's correctness;
+B2 is cosmetic. The capture proposal can be written now.
 
 Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
 lifecycle and the marker geometry; 09-02 decoded the cooldown stamps, the
