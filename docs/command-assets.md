@@ -188,7 +188,9 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   both reproduce from the formula). `IsDestroyedDuringActive` read 1 on
   the drone that was shot down. The "+10 minutes" reproduces exactly: at
   the strafe call the artillery items had 298.5 s left and the category
-  gate then read 900 s. Recordable state: the category stamps and
+  gate then read 900 s — but see the reopened item below: the gate's
+  effect on artillery rests on that one UI reading. Recordable state:
+  the category stamps and
   intervals plus, per item, the action class, `GameTimeAtCreation`,
   `CooldownTimeRemaining` and the destroyed flag; the viewer's "ready in"
   = max(category gate, item gate) − the frame's world clock.
@@ -234,6 +236,27 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   blanket 15:00; the 300 s new-commander re-stamp), and every finer
   point reproduces captured values. Its display-name table is a handy
   viewer mapping for the `CommandAction_*` classes.
+- **Category gate semantics — REOPENED 2026-09-04.** The claim that a
+  strike puts artillery on the 15-minute category timer rested on one
+  contemporaneous UI reading ("the artillery timers had 10 minutes
+  added"), which the player has since withdrawn after consulting other
+  players. What memory proves is narrower: every category-1 call writes
+  `LastCategoryGameTime[1]` (strafe 108343.2, mortar 108724.0, the three
+  bomb calls), `CommanderCategories[1].CooldownDuration` is 900 s, and
+  the artillery items' own stamps were untouched by the strafe. Whether
+  the game consults that stamp when a *different* category-1 asset is
+  requested was never tested directly — no artillery call was attempted
+  inside the 15 minutes after a strafe in any session. SquadCalc's
+  authors model the cross-effect (flat 15 min on the others); the
+  consulted players say there is none. **The recorder is unaffected
+  either way** — it records the stamp and the intervals; only the
+  viewer's "ready in" arithmetic depends on the answer, and it is
+  written as an interpretation to be pinned. Test that settles it in one
+  call (C1 in the open-questions table): with artillery's own cooldown
+  expired (≥ 30 min after the claim, unused), call a strafe and
+  immediately try artillery — blocked with 15:00 = gate real; allowed =
+  no cross-asset gate, and the stamp's meaning is re-derived from
+  whatever the game does next.
 
 ## Per-call actors (what an asset use spawns)
 
@@ -435,9 +458,10 @@ the Grach entry above).
 | # | Open item | Needs | What it decides | Blocks |
 |---|---|---|---|---|
 | B2 | The map's bomb-circle radii and the second pair's exact centre are assumed (config 45 m / 100 m, centred on the aim points) | one edge-stand on the second inner circle during any Grach call, read the same way as the 50 m request circle | Whether the viewer's dashed circles match the in-game map exactly | viewer cosmetics only (low importance) |
+| **C1** | Does the category stamp block a *different* category-1 asset (strafe -> artillery)? The only evidence was one UI reading, now withdrawn; SquadCalc says yes, the consulted players say no | one call: artillery ready, call a strafe, try artillery at once | The viewer's "ready in" arithmetic for strikes vs artillery. **Recorder unaffected** (stamps and intervals are recorded regardless) | viewer display only (medium — shown every time a commander uses an asset) |
 | R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
 
-Nothing gates the recorder, and nothing gates the viewer's correctness;
+Nothing gates the recorder. C1 gates one line of viewer arithmetic and
 B2 is cosmetic. The capture proposal can be written now.
 
 Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
