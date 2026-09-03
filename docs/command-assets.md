@@ -1,11 +1,13 @@
 # Command assets — exploration findings
 
-Status: **exploration complete bar one item (bomb detonation location, see
-the open-questions table); implementation planning can begin** · live
-sessions on the test server 2026-08-30/31 (solo dry-run, a 5-player
-commander session, both radius measurements) and 2026-09-02 (a second
-5-player session across two layers and three factions: every remaining
-test on the checklist), plus offline decodes of the archived captures.
+Status: **exploration COMPLETE — every open item closed; implementation
+planning can begin** · live sessions on the test server 2026-08-30/31
+(solo dry-run, a 5-player commander session, both radius measurements),
+2026-09-02 (a second 5-player session across two layers and three
+factions: every remaining test on the checklist) and 2026-09-03 (two
+precision-bombing calls with volunteers inside the blast area, closing the
+last item from the game's own damage records), plus offline decodes of
+the archived captures.
 Everything below is live-verified against Squad v10.x unless marked open.
 Offsets quoted are the values verified on the day - any implementation
 resolves them by reflection name, never by constant (the 2026-08-31 Squad
@@ -234,17 +236,43 @@ observed live:
   ARE in the recorded projectile stream** — with `firer` = the commander,
   `explosiveBaseDamage 250`, and full flight paths: a straight glide from
   ~325 m out along the aim bearing, constant sink, `hasImpacted` flipping
-  as the actor freezes for ~55 frames at its rest point. The bomb's own
+  as the actor freezes for ~20 s at its rest point (projectiles ride the
+  full frames only — the 4 Hz position frames carry players and vehicles
+  by design — but that linger means any full cadence captures the impact
+  point). The bomb's own
   config (dumped mid-flight) explains the in-game circles: primary
   `ExplosiveDamageOuterRadius 10000` (100 m, falling to 5 damage) and
   `SecondaryExplosion` inner 1500 / outer 4500 (15 m / 45 m, base 2000)
   — the UI's inner circle is the 45 m secondary band, the outer is the
-  100 m bound, centred on the two aim points. **Observed across all three
-  calls: the two projectiles came to rest 23.8, 26.2 and 26.25 m apart,
-  near the START of the aim line, regardless of a 44.75 or 120 m commanded
-  spread** — consistent with a fixed release interval (~0.14 s at 190 m/s)
-  rather than bombs steering to the two circles. What that means for the
-  explosions is THE remaining open item (see below).
+  100 m bound, centred on the two aim points. **Observed across five
+  calls (three on 09-02, two on 09-03): the two projectiles come to rest
+  6 m and 32 m along the aim line from its start, 24-27 m apart,
+  regardless of the commanded spread (44.75, 45.76, 75.4 and 120 m) and
+  regardless of whether the second aim point lies inside the tactical
+  call-in area** (09-03 call 2 had both points inside it, 42 m and 38 m
+  from the request marker; call 1 had the far point 72 m outside — same
+  result). Both bombs release within ~0.1 s of each other, 225-270 m
+  short of the line start at ~140 m altitude and ~172 m/s, glide ~1.7 s
+  and impact ~0.1 s apart.
+
+  **The rest points ARE the detonations (B1 closed 09-03).** The victims'
+  `LastTakeHitInfo` records carry the game's own radial-damage origins:
+  the secondary blast 9 cm horizontally from the first bomb's rest point
+  and 1 m above it, the primary blast 0.9 m from it and 10 m above it —
+  exactly the config's `SecondaryExplosionDistanceFromImpact 100` and
+  `ExplosiveDamageDistanceFromImpactNormal 1000` — and the server log
+  shows the radial-damage applications at the two impact ticks. The
+  radii are honoured as configured: the 5-point minimum at 97.6 m from
+  the primary origin, 354 at 37.5 m inside the secondary band, a parked
+  helicopter 18 m from the second bomb destroyed. **The second aim circle
+  is never serviced**: the in-game map draws an identical circle pair at
+  each aim point (large/small ratio ≈ 0.45, i.e. the 100 m / 45 m radii,
+  the second pair centred a little short of the line's end), yet every
+  bomb falls inside the FIRST pair's inner circle. A viewer should draw
+  the two recorded impact points with the config radii and the aim
+  line/circles only as what was requested. One detail left unexplained:
+  a soldier downed by the first blast, 12 m from the second bomb's rest
+  point and beside the helicopter it destroyed, recorded no second hit.
 - **The drone (irregular factions, 09-02) is the one piloted asset**, and
   it behaves like nothing else: the call spawns `BP_CommandActor_Drone_C`,
   a transient spawner + item pair, and `BP_FlyingDrone_C` — a
@@ -304,8 +332,19 @@ observed live:
    shape is agreed.
 4. The commander-identity **bugfix** (one hop via `CurrentCommander`)
    stands apart from the debate - it repairs an already-shipped field.
+5. **Radial-damage origins are readable and unrecorded (09-03).**
+   `SQSoldier.LastTakeHitInfo` (`FSQTakeHitInfo`, 464 bytes, fully
+   reflected) embeds a `RadialDamageEvent` whose `Origin` (3 x f64, struct
+   +0x190 on this build) and `Params` (base/min damage, inner/outer
+   radius, falloff; +0x178) the game fills for every explosion hit, with
+   `DamageEventClassID` (+0x20: 1000 on the radial hits seen, 1 point, 0
+   generic) saying which event block is live. The killfeed read stops at
+   the point-damage block today. Emitting `origin` on radial damage
+   events would give every grenade, mortar, IED and bomb hit its blast
+   location as memory truth — a candidate at ~24 bytes per radial event,
+   not proposed yet.
 
-## Open questions — status after the 09-02 session
+## Open questions — status after the 09-03 session
 
 Closed: **R1/R2** (50 m request circle, map-invariant), **R3** (load
 trigger + three factions swept), **R4a** (replacement vote, A->B swap,
@@ -313,22 +352,26 @@ tallies-only confirmed), **R4b** (step-down clears to null), **R5**
 (category gate real and cross-asset; call-anchored cooldowns), **R6**
 (commander kill credit flows through the existing causer chain), **R7**
 (drone lifecycle + mortar barrage + precision bombs — the self-classifying
-pattern held across two new factions and a novel geometry).
+pattern held across two new factions and a novel geometry), and **B1**
+(09-03: bombs detonate at the projectile rest points, 6 m and 32 m along
+the aim line; the second aim circle is never serviced, inside or outside
+the call-in area; proven by the victims' own radial-damage origins — see
+the Grach entry above).
 
 | # | Open item | Needs | What it decides | Blocks |
 |---|---|---|---|---|
-| **B1** | **Where a precision bomb actually detonates.** The two projectile actors came to rest 24-26 m apart near the aim line's start on all three calls — including the 120 m spread — yet the UI draws blast circles at both aim points. Nobody observed the explosions on the wide-spread call, and no bomb kill exists to cross-check. Either the rest points ARE the detonations (the second aim circle is a promise the aircraft does not keep), or damage/visuals are applied at the aim points and the projectile actors are decorative | one call with a volunteer standing in the FAR aim circle, or any bomb kill with a recorded victim position | How the viewer should render bombing runs: impacts at projectile rest points vs at aim points. **Does not block the recorder** — markers and projectiles are both recorded regardless; it gates only the viewer's interpretation | viewer rendering of bombs only |
 | R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
 
-Everything the recorder needs is settled. The capture proposal can be
-written now; B1 is a viewer-side question that one future observation
-closes.
+Nothing gates the recorder or the viewer any more. The capture proposal
+can be written now.
 
 Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
 lifecycle and the marker geometry; 09-02 decoded the cooldown stamps, the
-bomb damage model and the three bombing trajectories, all recorded above.
-Both sessions' raw captures (per-tick instance snapshots, class layouts,
-log slices, the bomb config dump) are archived off-repo.
+bomb damage model and the three bombing trajectories; 09-03 decoded the
+two detonation calls (10 Hz bomb tracks, the take-hit records, the
+placements), all recorded above. All three sessions' raw captures
+(per-tick instance snapshots, class layouts, log slices, the bomb config
+dump, the take-hit struct layout) are archived off-repo.
 
 ## Harness notes (for whoever probes next)
 
@@ -345,3 +388,16 @@ log slices, the bomb config dump) are archived off-repo.
   exists. The bomb config was captured that way mid-flight.
 - Restart the probe after a layer change (class addresses churn); it
   survives game-server restarts by re-attaching.
+- Detonation questions are answered by the victims, not the projectiles.
+  The 09-03 tracker ran at 10 Hz (reflection-resolved `RootComponent`,
+  the `bHasImpacted` bool mask, `Distance`/`AddDistance` on markers),
+  polled every soldier's `LastTakeHitInfo` timestamp and dumped the whole
+  struct on change, and wrote a 1 Hz placement roll-call of every soldier
+  — so a null result (nobody hit) reads against the aim geometry and a
+  wounded volunteer carries the blast origin. Reflection walks nested
+  structs: `read_fstructproperty_struct` + `get_class_layout` two levels
+  down gave the `RadialDamageEvent.Origin` offset in one startup pass.
+- Put the volunteer inside the band under test, not outside it. The first
+  09-03 call had the only volunteer 12 m beyond the outer radius and
+  proved nothing by itself; the second, with one soldier 44 m along the
+  line, closed the question in a single call.
