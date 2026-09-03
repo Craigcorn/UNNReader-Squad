@@ -217,6 +217,23 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   vote-cooldown timer** (int32, once per second): an exhaustive scan of
   every 4-byte field across 2,900-5,300 s of per-second captures, as int
   and as float, found no other.
+- **Cross-check against SquadCalc (2026-09-04; `github.com/sh4rkman/SquadCalc`,
+  v45.0.2, and its public layer data).** Its commander-asset model is a
+  single `delay` per asset in minutes — strike 15, artillery 30, mortar
+  20, UAV/drone 10, i.e. exactly the config `CooldownDuration` — used
+  both as the initial unavailability label ("Delayed: N min") and as the
+  asset's own timer when the user marks it used; marking any non-UAV
+  asset used sets every other non-UAV asset to a flat 15 min, and UAV /
+  drone assets neither trigger nor receive that. It does not track the
+  claim, a commander change, or the enroute/active windows. So it
+  independently agrees with the two-layer structure, the own-cooldown
+  values, the 15-minute strike/artillery gate, category 0 standing
+  apart, and full-cooldown unavailability after a claim; the memory
+  model is finer where they differ (effective = enroute + active +
+  cooldown; the category gate is the later of the two gates, not a
+  blanket 15:00; the 300 s new-commander re-stamp), and every finer
+  point reproduces captured values. Its display-name table is a handy
+  viewer mapping for the `CommandAction_*` classes.
 
 ## Per-call actors (what an asset use spawns)
 
