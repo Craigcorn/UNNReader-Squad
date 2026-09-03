@@ -168,33 +168,55 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   shot down a minute after its call and the UI showed ~9 minutes
   remaining — 600 s from the call, unchanged by the death; no redeploy
   within the window.
-- Per-action `CooldownDuration` (900/1200/1800 within one 900 s category)
-  and `CommandIntervals` (a FastArray that carried one game-time stamp,
-  106721.7, plausibly the new-commander extension the manager's
-  `ActionCooldownExtensionOnNewCommander` describes) coexist with the
-  category gate; the observed "+10 minutes" on artillery after a strafe
-  fits a 15-minute category gate landing on a pre-existing ~5-minute
-  residual. Recordable state is complete either way: the viewer's
-  "ready in X" = max(category gate, per-action gate), with the per-action
-  source pinned during implementation.
-- **New-commander gate (player-confirmed 2026-09-04; memory source to
-  pin).** Assets are not available the moment a claim resolves — each
-  must first run a cooldown from the claim — and a **change of commander
-  restarts these timers**: a different person taking the seat, including
-  a replacement vote won by the challenger. A replacement vote won by the
-  sitting commander does NOT restart them. This is consistent with the
-  manager's `ActionCooldownExtensionOnNewCommander` and with the single
-  stamp seen in `CommandIntervals` (106721.7 game-seconds, ~27 min before
-  the 09-02 strafe stamp — plausibly the claim time), and it explains why
-  `LastCategoryGameTime` stays empty after a claim: the initial gate is
-  NOT in the category array. The viewer rule becomes ready_at =
-  max(category gate, own cooldown, new-commander gate). To pin from the
-  09-02 captures during implementation: when the `CommandIntervals`
-  stamp appears relative to claim resolution, whether it re-stamps when
-  the challenger wins the replacement vote (captured) and not when the
-  incumbent keeps the seat (not captured — record the stamp, never infer
-  the reset), and whether the extension is one fixed value or each
-  asset's own cooldown.
+- **Per-asset state — decoded 2026-09-04 from the 09-02 captures, item
+  struct reflected live.** `CommandIntervals` is a FastArray
+  (`SQCommanderActionDataArray`) of 40-byte `SQCommandActionDataFASItem`
+  entries, one per action the team can call, each wrapping an
+  `SQCommandActionData`: `CommandActionData` (the action class, item
+  +0x10), `GameTimeAtCreation` (float, +0x18), `CooldownTimeRemaining`
+  (float, +0x1c), `IsDestroyedDuringActive` (bool, +0x20). The
+  arithmetic, verified to within a second against every captured value:
+  an action's **effective cooldown = Enroute + Active + Cooldown** from
+  its config (strafe 15+32+900 = 947 s, artillery 60+60+1800 = 1920 s,
+  drone 10+600+600 = 1210 s) and **ready_at = GameTimeAtCreation +
+  effective**. A call rewrites the item's `GameTimeAtCreation` to the
+  call time (the strafe item read 108343.2 = the category stamp; the
+  bomb item followed all three Grach calls). `CooldownTimeRemaining` is
+  NOT a live countdown: it stays 0 and is written once, at a commander
+  change, with the remaining time at that instant (the 09-02 step-down
+  wrote 689.5 s on the strafe item and 41.0 s on both artillery items —
+  both reproduce from the formula). `IsDestroyedDuringActive` read 1 on
+  the drone that was shot down. The "+10 minutes" reproduces exactly: at
+  the strafe call the artillery items had 298.5 s left and the category
+  gate then read 900 s. Recordable state: the category stamps and
+  intervals plus, per item, the action class, `GameTimeAtCreation`,
+  `CooldownTimeRemaining` and the destroyed flag; the viewer's "ready in"
+  = max(category gate, item gate) − the frame's world clock.
+- **New-commander gate — decoded 2026-09-04, matching the
+  player-confirmed rule.** Assets are not available when a claim
+  resolves: the game creates every action item at the claim with
+  `GameTimeAtCreation` back-dated by (Enroute + Active), so each asset
+  starts with exactly its `CooldownDuration` left (artillery 30 min,
+  strafes 15 min, drone/UAV 10 min — the items read claim − 120 s and
+  claim − 47 s on both captured claims: 1920 − 120 = 1800, 947 − 47 =
+  900). A **change of commander re-stamps the items**: when the
+  challenger won the 09-02 replacement vote, the sitting drone item
+  (long since ready) was re-stamped so that 300 s remained — the
+  manager's `ActionCooldownExtensionOnNewCommander = 300` (one sample;
+  whether an item with more than 300 s left keeps the larger value is
+  unobserved). A replacement vote won by the incumbent is
+  player-confirmed to change nothing and was not captured; the recorder
+  writes the stamps, never the rule. `LastCategoryGameTime` stays empty
+  until the first real call — the claim gate lives in the items, not the
+  category array. Manager config read live: `VotingTimeSeconds 60`,
+  `VoteCooldownTimeSeconds 300` (a real countdown — `VoteCooldownTimer`,
+  int at +0x2c8 — runs after every claim), `MinimumSquadSizeForVoting
+  2`, `MinimumSquadsRequiredForVoting 3`; `TeamCommands` is the
+  faction's action DataTable, not runtime state. **The only countdowns
+  anywhere in the commander state are the vote timer and the
+  vote-cooldown timer** (int32, once per second): an exhaustive scan of
+  every 4-byte field across 2,900-5,300 s of per-second captures, as int
+  and as float, found no other.
 
 ## Per-call actors (what an asset use spawns)
 
