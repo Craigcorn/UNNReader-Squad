@@ -39,10 +39,15 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   it — see CONTRIBUTING.md "Reverse-engineered offsets"; `tests/test_fleet.py`
   enforces it.
 - **Recordings are immutable; consumers are bi-versioned.** Old `.sqrx` files
-  must keep playing forever. Any wire-format change bumps the format version
-  and extends the Python↔TypeScript cross-language fixture
-  (`frontend/src/state/crosslang.test.mts`). The two decoders drifted silently
-  once (the 4 Hz bug); the fixture is why it can't happen again.
+  must keep playing forever. Adding a field to an existing record is not a
+  wire-format change (frames are raw JSON, unknown keys are ignored) — it
+  is documented in `docs/schema.md`, emitted only when present, and never
+  changes what an existing field means. A new top-level tracked list, a
+  container-layout change, or a change of meaning IS one: it bumps the
+  format version and extends the Python↔TypeScript cross-language fixture
+  (`frontend/src/state/crosslang.test.mts`; hand-extended — its generator
+  is upstream's). The two decoders drifted silently once (the 4 Hz bug);
+  the fixture is why it can't happen again.
 - **Frozen surfaces.** The built-in stats dashboard and the SQLite read API
   receive fixes only — no new features. New stats/product work happens on the
   SquidHub side.

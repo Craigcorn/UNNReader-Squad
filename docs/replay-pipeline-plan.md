@@ -1,7 +1,8 @@
 # The Replay Pipeline — plan (UNN)
 
 Status: phase 1 largely delivered · stats wishlist awaiting team reaction ·
-drafted 2026-08-28 · **read "Program state" below first when resuming**
+drafted 2026-08-28 · addendum 2026-09-03 · **read "Program state" below
+first when resuming**
 
 ## Program state — as of 2026-08-29
 
@@ -50,6 +51,23 @@ changelog's `[Unreleased]`; reports naming players live in
   it into CachedTubePitch). Recorded in the existing `turrets` shape plus
   an optional `pitch`. Viewer surfacing of ammo/aim/health-join polish is
   deferred at Craig's request ("UI later").
+
+**Addendum — as of 2026-09-03:**
+
+- Medical capture shipped and live-verified: a per-player `medical` block
+  while a healing item is held, plus `reviveEvents` from the server log;
+  the stats it enables are catalogued in `docs/medical-stats.md`.
+- The 2026-08-31 Squad update moved every hardcoded constant and the
+  actor transform; reflection absorbed all but one, the doctor caught the
+  rest within a cycle, and the doctor was then hardened to machine/human
+  parity (every hardcoded read watched, struct tier, batched resolution).
+  Upstream 1.4.5 merged on top (`b192740`).
+- Command-asset exploration complete across three live sessions
+  (`docs/command-assets.md`); the capture proposal is the next format
+  item. Vehicle weapon inventories (a `weapons` list per turret record)
+  are landing from a parallel session.
+- Viewer scalability measured against production-sized recordings — see
+  Phase 4; it changes the retention estimate in open question 2.
 
 **Open decisions (owner: Craig unless noted):**
 
@@ -147,21 +165,33 @@ that exist. Phase 4 is the designated parallel track.
   every gap found (prime suspect: the `unverified` shutdown-resume path). This
   is the proof that unlocks everything downstream, and it does **not** wait on
   the stats wishlist.
-- **Enrich the format** (wire v2 → v3): the fields the four blocked detectors
-  need — sprint stamina, `bFiring`/`bReloading`, `ShovelAction`, mine
+- **Enrich the format**: the fields the four blocked detectors need —
+  sprint stamina, `bFiring`/`bReloading`, `ShovelAction`, mine
   `OwnerPlayerState` — plus whatever the stats wishlist decides. Recording
-  gains are forever; gaps are forever too.
+  gains are forever; gaps are forever too. Enrichment is **additive**: a
+  new field on an existing record needs no version change, because the
+  file stores raw frames and every reader ignores keys it does not know
+  (earlier drafts called this "v3"; it is not a version number — see the
+  Glossary). What IS a versioned change: a new top-level tracked list, a
+  change to the file's layout, or a change to what an existing field
+  means (the last is never allowed).
 - **Seek index** in the format (or sidecar): per-frame byte offsets so the
-  viewer can later fetch ranges instead of whole files.
+  viewer can later fetch ranges instead of whole files. This is a
+  container-layout change — bundle it with any other container change so
+  old files are handled once (see Phase 4, viewer scalability).
 - **Seeding-layer exclusion**: config pattern list (default `*Seed*`); the
   recorder skips those matches entirely.
-- **Bi-versioned consumers**: Python encoder, browser decoder, and
-  `crosslang.test.mts` all extended; v2 recordings keep playing everywhere.
+- **Bi-versioned consumers** — when a versioned change happens: the
+  browser decoder and `crosslang.test.mts` are extended (the fixture is
+  hand-extended; its generator and the compact packer it mirrors are
+  upstream's private platform code, which the agent does not use), and
+  every recording made before the change keeps playing everywhere.
 - Tooling: `stats-backfill` reads `serverId` per recording from its meta
   instead of one `--server-id` flag per run.
 
 **Done when** N production matches show zero stats diff between live and
-replay-derived computation, and a v3 recording plays alongside a v2 one.
+replay-derived computation, and an enriched recording plays alongside a
+pre-enrichment one.
 
 ### Phase 2 — Platform ingest & serve (SquidHub repo; contract summary here)
 
@@ -188,6 +218,43 @@ kill-feed precompute into a worker. The structural one: chunked seek-on-demand
 loading using the Phase 1 index against presigned Range URLs — start latency
 and heap stop scaling with match length. UX on top of a smooth base.
 Everything except chunked loading can start any time.
+
+**Viewer scalability (measured 2026-09-03; decide after the format
+additions land).** The viewer parses every frame of a recording into
+objects, so memory scales with match length. Measured:
+
+| Recording | On disk | Frames parsed | Full frames | One full frame |
+|---|---|---|---|---|
+| Production, managed instance, 108-139 players, 32-48 min (5 matches) | 29-50 MB | 266-434 MB | 0.5/s | 270-300 KB, players 40-47 % |
+| Test box, this fork, 6-8 players, 2 h | ~300 MB | ~3 GB | 3/s | 130-140 KB, players 2-4 % |
+
+A 40-minute production match already becomes roughly a gigabyte of
+browser objects. This fork records about twice the full-frame rate on
+production hardware, adds 4 Hz position frames and every enrichment, so a
+full-length production match recorded here lands at two to three
+gigabytes of frames — past what a browser tab holds. Three remedies,
+none started:
+
+1. *Pace the full-frame builder to `--hz`.* The build worker free-runs;
+   `--hz` only sizes its caches, and the serve loop folds in every frame
+   it produces. At 110 players a build takes 1-2 s so this changes
+   nothing there; on a quiet server it triples the recording. Small
+   hygiene fix, low priority (Craig, 2026-09-03: not a concern for the
+   test server).
+2. *A compact packer.* Upstream's private platform packs frames so
+   unchanged sub-objects (players, vehicles) are sent once and reused in
+   the browser; the viewer already carries the decoder (`replayUnpack.ts`,
+   replay format 2) and a fixture to validate a re-implementation
+   against. Generic — it diffs objects and knows no field names, so
+   format additions cannot break it. Helps memory more than bandwidth
+   (zstd already removes ~10x on the wire).
+3. *Chunked loading* (above): bounds memory regardless of length, needs
+   the seek index — a container change.
+
+Decision rule: measure a production-sized match on the finished format,
+then choose 2, 3 or both. Choose the direction **before** the last format
+change lands, because 3's seek index must ride the same container bump
+as anything else that touches the file layout.
 
 ### Phase 5 — Stats redesign (SquidHub repo)
 
@@ -244,8 +311,13 @@ dormant live mode (snapshot buffer and render-delay machinery are intact).
    capture-zone participation, distance traveled. Format design waits on
    this; the parity harness does not.
 2. **Replay retention** (platform storage) — team discussion pending on disk
-   budget. ~15 MB/match ⇒ ~110 GB/year/server at 20 matches/day, less with
-   seeding excluded. Needed before the platform retention job is written.
+   budget. The original ~15 MB/match figure was wrong: five production
+   matches exported from the managed instance (2026-08-27, 32-48 min,
+   108-139 players) are **29-50 MB each**, and this fork's recorder roughly
+   doubles that (twice the full-frame rate, 4 Hz position frames,
+   enrichment) — plan on **60-100 MB/match ⇒ roughly half a terabyte per
+   server per year** at 20 matches/day with seeding excluded. Needed before
+   the platform retention job is written.
 3. **Alert delivery path** — direct Discord webhook from the agent vs routing
    through the platform. Parked; decide before the Phase 2 alert relay.
 4. **Production rollout path for the fork** — the public server currently runs
@@ -263,6 +335,10 @@ dormant live mode (snapshot buffer and render-delay machinery are intact).
   stats computed live during play and recomputed afterward from its recording
   alone: two databases, diffed row by row. The proof that a replay file is a
   complete record.
-- **v2 / v3** — recording wire-format version numbers. Today's files are v2;
-  enriched files become v3; old files stay v2 forever and every reader in this
-  repo handles both. The platform only ever ingests v3 (decision 4).
+- **Format versions** — the recording file's container is version 1
+  (`sqrx.py`); the compact replay stream the viewer can also decode is
+  replay format 2 (upstream's packer, which the agent does not use — it
+  serves raw frames). "v3" in earlier drafts meant "enriched recordings"
+  and is not a version number: additive fields change no version. The
+  platform ingests post-upgrade recordings (decision 4); old files keep
+  playing forever.
