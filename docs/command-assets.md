@@ -177,6 +177,24 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   residual. Recordable state is complete either way: the viewer's
   "ready in X" = max(category gate, per-action gate), with the per-action
   source pinned during implementation.
+- **New-commander gate (player-confirmed 2026-09-04; memory source to
+  pin).** Assets are not available the moment a claim resolves — each
+  must first run a cooldown from the claim — and a **change of commander
+  restarts these timers**: a different person taking the seat, including
+  a replacement vote won by the challenger. A replacement vote won by the
+  sitting commander does NOT restart them. This is consistent with the
+  manager's `ActionCooldownExtensionOnNewCommander` and with the single
+  stamp seen in `CommandIntervals` (106721.7 game-seconds, ~27 min before
+  the 09-02 strafe stamp — plausibly the claim time), and it explains why
+  `LastCategoryGameTime` stays empty after a claim: the initial gate is
+  NOT in the category array. The viewer rule becomes ready_at =
+  max(category gate, own cooldown, new-commander gate). To pin from the
+  09-02 captures during implementation: when the `CommandIntervals`
+  stamp appears relative to claim resolution, whether it re-stamps when
+  the challenger wins the replacement vote (captured) and not when the
+  incumbent keeps the seat (not captured — record the stamp, never infer
+  the reset), and whether the extension is one fixed value or each
+  asset's own cooldown.
 
 ## Per-call actors (what an asset use spawns)
 
