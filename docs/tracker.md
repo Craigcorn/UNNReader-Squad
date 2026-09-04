@@ -25,10 +25,14 @@ topic docs, the changelog, the session notes and the branch history since
 7. Rows are never deleted. A finished item keeps its final state; a
    decision, once made, moves to the "made" list at the end of table B
    with its date and where it is recorded.
-8. Two registers, one home per fact. The platform side keeps its own
-   register (W86). Program-wide decisions (table B) live here and are
-   referenced by id from the platform side; platform-only work lives there
-   and is referenced by id here. Neither restates the other's state.
+8. Two registers, one home per fact. Platform-side work is registered on
+   the team's development board (decided 2026-09-04): the Squidhub
+   project's "Game Integrations" milestone, every issue titled
+   "Squad Reader: …". Program-wide decisions (table B) live here and are
+   referenced by id from the board and the platform design doc; platform
+   work lives on the board and is referenced here by issue key. Neither
+   restates the other's state. Notes that cannot enter this public repo
+   live in the Misc folder on Craig's machine and are listed in W87.
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,
@@ -94,7 +98,7 @@ are on `Replay-Improvements`.
 | W52 | Upstream 1.4.5 merged and hardened (anchor gaps declared, served pack outranks the binary, `stale_source` telemetry) | verified; deployed to the box at b192740 (2026-09-02) | changelog; session note | merge upstream again after its next release |
 | W53 | Placer slots live confirmation on a populated match (the probe saw 0 players) | pending | session note doctor-hardening | first populated match with a fresh recording |
 | W54 | Upstream-offerable doctor findings (reflected `VehicleComponentState` and `CachedVehicleInventory`, declared gaps plus the gap-consistency test, the relative-move fix, dict-entry anchors) and the W21 fix once made | banked, not sent | session note doctor-hardening | offer as clean commits after the next upstream merge |
-| W55 | Offset central: UNN signs its own packs (platform is the authority, test box the verifier, the existing client the consumer) | decided with Craig ~2026-09-01; design in private notes; the prerequisite "intersection verdict" fix is not found in the branch under that name — status unverified | session note doctor-hardening | verify whether the prerequisite landed (feded6d is pack precedence, not the same thing); platform side is SquidHub work |
+| W55 | Offset central: UNN signs its own packs (platform is the authority, test box the verifier, the existing client the consumer) | decided with Craig ~2026-09-01; design in the Misc folder (W87), destined for the private repo; the prerequisite "intersection verdict" fix is not found in the branch under that name — status unverified | session note doctor-hardening; Misc `squidhub-offset-central-design.md` | verify whether the prerequisite landed (feded6d is pack precedence, not the same thing); platform side is SquidHub work |
 | W56 | The standing acceptance test: within one check-in of a Squad update the doctor reports everything that moved as `stale_source` | standing; passed twice (2026-08-31, and the update handled by W32) | session note doctor-hardening; changelog | whoever is live on the next update goes and looks |
 | W57 | HEAD-request support in the built-in HTTP server | task chip pending | session note test-server | any time |
 | W58 | Drift-automation lanes: an auto-refresh PR bot for the paperwork lane (`stale_source` → a PR carrying the resolver's measured was→now values, human-merged) complementing the pack central (W55), which rescues only unresolvable `drift` | discussed 2026-09-04 — the W32 update proved self-repair makes the rescue lane rare and the paperwork lane routine (the 6b2ed9f refresh was by hand exactly what the bot would have opened) | session note doctor-hardening; changelog Unreleased | Craig: decide scope and order — it is one of D9's seven proposals, recommended alongside severity classes as the first built; the doctor already emits the exact values, so the spec is mostly plumbing |
@@ -124,13 +128,14 @@ are on `Replay-Improvements`.
 
 | id | item | state | detail lives in | next |
 |---|---|---|---|---|
-| W80 | Phase 2, this repo's side: authenticated upload of finished recordings, the engine invocable per file, alerts relayed with their match id | not started | plan Phase 2; platform side: `docs/features/squad-replay-pipeline.md` in the private repo (see W86 for its state); platform ids: none yet | after the format additions |
+| W80 | Phase 2, this repo's side: authenticated upload of finished recordings, the engine invocable per file, alerts relayed with their match id | not started | plan Phase 2; platform side: `docs/features/squad-replay-pipeline.md` in the private repo (see W86 for its state); board issues: none yet | after the format additions |
 | W81 | Phase 3: record-only agent mode | not started; gated on Phase 2 dual-run parity | plan Phase 3 | after W80 |
 | W82 | Phase 5: stats redesign | not started (platform work) | plan Phase 5; platform doc as W80 | after W80 |
 | W83 | Phase 6: admin-only live view | not started | plan Phase 6; platform doc as W80 | last |
 | W84 | Early rollout of Phase 1 agents, which sets the history freeze line | blocked on D5 | plan "Agent-side infrastructure" | after D5 |
 | W85 | Platform retention job | blocked on D4 | plan open question 2 | after D4 |
-| W86 | Platform-side register and design-doc sync. Found 2026-09-04: the platform design doc (`docs/features/squad-replay-pipeline.md`, private repo) exists only on the unmerged branch `docs/squad-replay-pipeline` (one commit, 2026-08-28); it restates open decisions D1–D4 as its own open-items list, and carries two facts corrected here since (the retired "v3" label; storage math of 15 MB per match, since measured at 60–100 MB); the team board has no milestone or issue for the pipeline | found 2026-09-04; not started | this file; the platform doc | owner Craig with the platform team: merge the doc; replace its open-items list with pointers to D1–D4 and its stale facts with pointers to the plan; when Phase 2 starts, open a "Squad replay pipeline" milestone on the board with one issue per platform work item; then W80–W85 cite those ids |
+| W86 | Platform-side register and design-doc sync. Found 2026-09-04: the platform design doc (`docs/features/squad-replay-pipeline.md`, private repo) exists only on the unmerged branch `docs/squad-replay-pipeline` (one commit, 2026-08-28); it restates open decisions D1–D4 as its own open-items list, and carries two facts corrected here since (the retired "v3" label; storage math of 15 MB per match, since measured at 60–100 MB); the team board has no milestone or issue for the pipeline | found 2026-09-04; register decided the same day (the team board, "Game Integrations" milestone, "Squad Reader" title prefix); doc sync not started | this file; the platform doc | owner Craig with the platform team: merge the doc; replace its open-items list with pointers to D1–D4 and its two stale facts with pointers to the plan; open the first "Squad Reader" issue for that sync, then one per Phase 2 work item when Phase 2 starts; then W80–W85 cite the issue keys |
+| W87 | Private notes in the Misc folder (kept out of this public repo): the offset-central design, destined for the private repo beside the pipeline doc and carrying its own open questions plus the prerequisite fork fix (W55); the gamepanel host-networking change, applied live 2026-08-27 and committed to no repo; the 08-27 deployment findings write-up; three stat-feasibility reviews that feed Phase 5; the doctor-hardening plan; the 08-31 incident write-up (D9); the medical capture plan; the detector validation and attribution evidence reports; the speedhack verdict; parity reports | inventoried 2026-09-04; two stale status lines corrected (the doctor plan said awaiting go, the medical plan said ready to implement) | the Misc folder | the offset-central design moves to the private repo once reviewed, as a "Squad Reader" issue; the gamepanel change needs a repo home |
 
 ### Program hygiene
 
