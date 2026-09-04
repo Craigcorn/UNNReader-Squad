@@ -457,6 +457,15 @@ event list, any rule. The viewer derives "vote opened / resolved /
 won", "commander changed / stepped down" and every timer from the
 fields above by comparing frames.
 
+**Decision 3 (votes, agreed 2026-09-04): no event lines.** The recorder
+writes no "vote started / resolved / commander changed" records; the
+viewer and the stats engine derive them from the per-frame state above.
+A vote spans 60 s and a seat change is a per-frame field, so nothing
+can fall between frames, and an interpretation kept out of the file can
+be corrected later for every recording at once. Damage and revive
+events stay events because their signals are events in memory and in
+the log.
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
