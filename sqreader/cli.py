@@ -1816,6 +1816,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print("\n== Marker FastArray stride ==")
     report(health.check_marker_stride(pm, alloc, targets))
 
+    # Seat-inventory group stride. Every switchable vehicle weapon's ammo
+    # (and the driver / pilot guns) is read by stepping
+    # SQPawnInventoryComponent.Inventory in FSQWeaponGroupData-sized
+    # elements; the reader takes the live size, this keeps the fallback
+    # constant honest.
+    print("\n== Weapon group stride ==")
+    report(health.check_weapon_group_stride(pm, alloc, targets))
+
     # ComponentToWorld — the cached world transform must agree with the
     # RelativeLocation of any unattached actor. The human command can afford
     # to discover its own sample; the machine doctor is handed one from the

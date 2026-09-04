@@ -126,6 +126,11 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         MARKER_ARRAY_ITEMS_OFFSET) are no longer in this register: they are
         checked by `struct_field_tables` above. MARKER_ITEMS_ABS_OFFSET is
         the sum of two watched constants and needs no row of its own.
+        WEAPON_GROUP_SIZE is the same kind of stride, into a struct that
+        DOES have a name (FSQWeaponGroupData): `check_weapon_group_stride`
+        compares it with the reflected struct size, and the reader itself
+        takes the live size at resolve time so the constant is only the
+        no-reflection fallback.
       * SCENE_COMPONENT_TO_WORLD_TRANSLATION_OFF (this module) — a private C++
         member with no property name to check; `check_component_to_world`
         verifies it by value against live vehicles instead."""
@@ -139,7 +144,8 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         PROJECTILE_OFFSETS, RALLY_OFFSETS,
         SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF, SQ_DEPLOYABLE_VEHICLE_OWNING_OFF,
         SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF, SQ_SEATCFG_ATTACH_SOCKET_OFF,
-        SQ_INV_CURRENT_WEAPON_OFFSET, SQ_SEATCOMP_SEAT_CONFIG_OFFSET,
+        SQ_INV_CURRENT_WEAPON_OFFSET, SQ_INV_INVENTORY_OFFSET,
+        SQ_SEATCOMP_SEAT_CONFIG_OFFSET,
         SQ_SEATCOMP_SEAT_PAWN_OFFSET, SQ_SEATCOMP_SEATED_PLAYER_OFFSET,
         SQ_SEATCOMP_SEATED_SOLDIER_OFFSET, SQ_SOLDIER_TAKE_HIT_INFO_OFFSET,
         SQ_TURRET_INVENTORY_OFFSET,
@@ -194,6 +200,13 @@ def hardcoded_offset_tables() -> list[tuple[str, str, bool, dict[str, int]]]:
         # CurrentWeapon reflected at +0x1b8.
         ("SQVehicleInventoryComponent", "Class", False,
          {"CurrentWeapon": SQ_INV_CURRENT_WEAPON_OFFSET}),
+        # The parent that actually declares the inventory: the Inventory
+        # group array is the whole-loadout read (every switchable weapon's
+        # ammo, and the driver / pilot seat's guns), reflected live
+        # 2026-09-03. Its element struct is watched in struct_field_tables
+        # and its stride by check_weapon_group_stride.
+        ("SQPawnInventoryComponent", "Class", False,
+         {"Inventory": SQ_INV_INVENTORY_OFFSET}),
         ("SQVehicleComponent", "Class", False, {
             "Health":           SQ_VEHCOMP_HEALTH_OFFSET,
             "MaxHealth":        SQ_VEHCOMP_MAX_HEALTH_OFFSET,
@@ -280,9 +293,16 @@ def struct_field_tables() -> list[tuple[str, str, tuple[str, ...], bool,
         PDE_HIT_INFO_OFFSET, THI_ACTUAL_DAMAGE_OFFSET, THI_DAMAGE_CAUSER_OFFSET,
         THI_DAMAGE_TYPE_CLASS_OFFSET, THI_FLAGS_OFFSET,
         THI_PAWN_INSTIGATOR_OFFSET, THI_POINT_DAMAGE_EVENT_OFFSET,
-        THI_SERVER_TIMESTAMP_OFFSET,
+        THI_SERVER_TIMESTAMP_OFFSET, WEAPON_GROUP_OFFSETS,
     )
     return [
+        # FSQWeaponGroupData - the element of the Inventory ARRAY, which is
+        # the first hop here that goes through an ArrayProperty's inner
+        # struct rather than an inline StructProperty (check_struct_fields
+        # picks the hop by the field's reflected type). Every switchable
+        # weapon's ammo and the driver / pilot guns are read through these.
+        ("SQPawnInventoryComponent", "Class", ("Inventory",), False,
+         dict(WEAPON_GROUP_OFFSETS)),
         # FSQTakeHitInfo — every damage event the reader enriches. This struct
         # has ALREADY moved once (its base shifted 0x20 and the reader spent
         # months reading past it), so its internals are the last place that
@@ -574,7 +594,7 @@ def check_struct_fields(pm: Any, arr: Any, alloc: Any,
     BECAUSE reads are failing, so it must not turn a failed read into a
     fabricated verdict."""
     from .ue.reflection import (
-        find_field_by_name_with_super, get_class_layout,
+        find_field_by_name_with_super, get_class_layout, read_field_struct,
         read_fstructproperty_struct,
     )
     tg = _targets_for(pm, arr, alloc, targets)
@@ -601,8 +621,16 @@ def check_struct_fields(pm: Any, arr: Any, alloc: Any,
                 break
             ff = find_field_by_name_with_super(
                 pm, addr if i == 0 else struct_addr, hop, alloc)
-            struct_addr = (read_fstructproperty_struct(pm, ff)
-                           if ff is not None else 0)
+            # An inline struct hands over its Struct directly; an array of
+            # structs is one property deeper (ArrayProperty.Inner). The
+            # reflected type picks the move - reading +0x70 off an
+            # ArrayProperty is a different member and reflects as nothing.
+            if ff is None:
+                struct_addr = 0
+            elif getattr(layout[hop], "type_name", None) == "ArrayProperty":
+                struct_addr = read_field_struct(pm, ff, alloc)
+            else:
+                struct_addr = read_fstructproperty_struct(pm, ff)
             if not struct_addr:
                 skipped.append({"class": where,
                                 "reason": f"{hop} did not re-resolve "
@@ -853,6 +881,75 @@ def check_marker_stride(pm: Any, alloc: Any,
     return out
 
 
+def check_weapon_group_stride(pm: Any, alloc: Any,
+                              targets: DoctorTargets) -> CheckOutcome:
+    """The FSQWeaponGroupData element stride behind the seat-inventory walk.
+
+    Every switchable weapon's ammo (and the driver / pilot guns) is read by
+    stepping SQPawnInventoryComponent.Inventory in WEAPON_GROUP_SIZE-byte
+    elements. The reader takes the live size at resolve time, so a grown
+    struct cannot shear a running reader - but the fallback constant would
+    still ship the wrong walk on any build where the array does not reflect,
+    which is exactly what this check keeps honest. Same property-chain walk
+    as `check_marker_stride`, one hop shorter."""
+    from .squad.snapshot import SQ_INV_INVENTORY_OFFSET, WEAPON_GROUP_SIZE
+    from .ue.reflection import (
+        find_field_by_name_with_super, read_farrayproperty_inner,
+        read_fproperty, read_fstructproperty_struct, read_ustruct_header,
+    )
+    out = _empty()
+    inv = targets.addr("SQPawnInventoryComponent")
+    if not inv:
+        out.skipped.append({"check": "weapon group stride",
+                            "reason": "SQPawnInventoryComponent not loaded"})
+        return out
+    arr_prop = targets.layout("SQPawnInventoryComponent").get("Inventory")
+    arr_ok = (arr_prop is not None
+              and arr_prop.offset == SQ_INV_INVENTORY_OFFSET
+              and arr_prop.type_name == "ArrayProperty")
+    _assert(out, f"Inventory ArrayProperty @ {SQ_INV_INVENTORY_OFFSET:#x}",
+            arr_ok,
+            f"got {arr_prop.type_name if arr_prop else None} @ "
+            f"{arr_prop.offset if arr_prop else 0:#x}",
+            cls="SQPawnInventoryComponent", field="Inventory",
+            expected=SQ_INV_INVENTORY_OFFSET,
+            live=(arr_prop.offset if arr_prop else None),
+            problem="offset drift")
+    if not arr_ok:
+        return out
+    ff = find_field_by_name_with_super(pm, inv, "Inventory", alloc)
+    if ff is None:
+        out.skipped.append({"check": "weapon group stride",
+                            "reason": "Inventory did not re-resolve for the "
+                                      "element walk (transient read)"})
+        return out
+    inner_addr = read_farrayproperty_inner(pm, ff)
+    inner = read_fproperty(pm, inner_addr, alloc) if inner_addr else None
+    if inner is None or inner.type_name != "StructProperty":
+        _assert(out, "Inventory inner is StructProperty", False,
+                f"got {inner.type_name if inner else None}",
+                cls="SQPawnInventoryComponent", field="Inventory.Inner",
+                expected="StructProperty",
+                live=(inner.type_name if inner else None),
+                problem="weapon group is not a struct")
+        return out
+    group_struct = read_fstructproperty_struct(pm, inner_addr)
+    sname = _object_name(pm, alloc, group_struct)
+    _assert(out, "Inventory inner Struct == 'SQWeaponGroupData'",
+            sname == "SQWeaponGroupData", f"got {sname!r}",
+            cls="SQPawnInventoryComponent", field="Inventory.Inner.Struct",
+            expected="SQWeaponGroupData", live=sname,
+            problem="weapon group struct renamed")
+    info = read_ustruct_header(pm, group_struct, alloc)
+    _assert(out, f"weapon group stride == {WEAPON_GROUP_SIZE} bytes",
+            info.properties_size == WEAPON_GROUP_SIZE,
+            f"live element size {info.properties_size}",
+            cls="SQWeaponGroupData", field="Inventory.ElementSize",
+            expected=WEAPON_GROUP_SIZE, live=info.properties_size,
+            problem="weapon group stride drift")
+    return out
+
+
 def check_component_to_world(
         pm: Any, alloc: Any, targets: DoctorTargets,
         sample_actors: list[int] | None, *,
@@ -1074,6 +1171,7 @@ def _run_checks(pm: Any, alloc: Any, targets: DoctorTargets,
     for outcome in (check_reflection_anchors(pm, alloc, targets),
                     check_lane_graph(pm, alloc, targets),
                     check_marker_stride(pm, alloc, targets),
+                    check_weapon_group_stride(pm, alloc, targets),
                     check_component_to_world(
                         pm, alloc, targets, sample_actors,
                         translation_off=(

@@ -444,8 +444,17 @@ export function VehiclePanel() {
           const lo = vehicleLoadout(v.classShort);
 
           // Live turrets that actually carry ammo — the ones worth showing.
+          // A seat is armed when its selected weapon OR any weapon in its
+          // inventory reads ammo. The driver record (pilot guns, driver
+          // smoke) is kept out of the turret pool: it has no turret class
+          // to claim and must never fill a gunner row by position.
+          const isArmed = (t: VehicleTurret) =>
+            !!(t.magazines && t.magazines.length > 0)
+            || (t.weapons ?? []).some((w) => !!(w.magazines && w.magazines.length > 0));
+          const driverLive = (v.turrets ?? []).find(
+            (t) => t.seat === "driver" && isArmed(t)) ?? null;
           const liveArmed = (v.turrets ?? []).filter(
-            (t) => t.magazines && t.magazines.length > 0);
+            (t) => t.seat !== "driver" && isArmed(t));
           const byClass = new Map<string, VehicleTurret[]>();
           for (const t of liveArmed) {
             const k = classKey(t.className);
@@ -529,6 +538,32 @@ export function VehiclePanel() {
               isWeaponSeat: true }));
           }
 
+          // The driver / pilot seat's own weapons go to the seat-0 row (the
+          // catalog keys them 'Driver'); a vehicle whose seat 0 already
+          // claimed a turret gets a separate DRIVER row instead.
+          if (driverLive) {
+            const driverSwitchable = lo?.turrets["Driver"] ?? [];
+            const drv = rows.find((r) => r.key === "s0" || r.key === "x0");
+            if (drv && !drv.live) {
+              drv.live = driverLive;
+              drv.switchable = driverSwitchable;
+              drv.isWeaponSeat = true;
+            } else {
+              rows.push({ key: "drv", role: roleDisplay("Driver"),
+                occ: null, live: driverLive, switchable: driverSwitchable,
+                turretClass: null, isWeaponSeat: true });
+            }
+          }
+
+          // Per-weapon label: the switchable catalog when the class matches,
+          // else humanised / inferred from the class name.
+          const slotLabel = (r: Row, cls: string) => {
+            const m = r.switchable.find(
+              (w) => classKey(w.class) === classKey(cls));
+            return { name: m?.name ?? vehicleWeaponDisplayName(cls),
+                     type: m?.type ?? weaponTypeFromClass(cls) };
+          };
+
           // Active weapon label: the live currentWeapon class, named via the
           // switchable catalog when it matches, else humanised / inferred.
           const activeWeapon = (r: Row) => {
@@ -556,6 +591,10 @@ export function VehiclePanel() {
                 {rows.map((r) => {
                   const hasAmmo = !!(r.live?.magazines
                     && r.live.magazines.length > 0);
+                  // The whole inventory, when the recording carries it:
+                  // one line per weapon, the selected one marked. It
+                  // supersedes the single readout and the catalog chips.
+                  const slots = r.live?.weapons ?? [];
                   const { name: wepName, type: wepType } = activeWeapon(r);
                   return (
                     <div key={r.key} className={"vp-crew-row"
@@ -573,7 +612,7 @@ export function VehiclePanel() {
                           <span className="vp-crew-empty">empty</span>
                         ) : null}
                       </div>
-                      {wepName && (hasAmmo || r.isWeaponSeat) && (
+                      {wepName && !slots.length && (hasAmmo || r.isWeaponSeat) && (
                         <div className="vp-crew-wep">
                           <span className="vp-w-name">{wepName}</span>
                           {wepType && (
@@ -583,12 +622,37 @@ export function VehiclePanel() {
                           )}
                         </div>
                       )}
-                      {hasAmmo && (
+                      {hasAmmo && !slots.length && (
                         <AmmoReadout cur={r.live!.magazines!}
                           max={r.live!.magazinesMax ?? r.live!.magazines!}
                           type={wepType ?? "mg"} />
                       )}
-                      {r.isWeaponSeat && r.switchable.length > 1 && (
+                      {slots.length > 0 && (
+                        <div className="vp-crew-slots">
+                          {slots.map((w, wi) => {
+                            const { name: sn, type: st } = slotLabel(r, w.weaponClass);
+                            const armed = !!(w.magazines && w.magazines.length > 0);
+                            return (
+                              <div key={w.weaponClass + wi}
+                                   className={"vp-crew-slot" + (w.active ? " active" : "")}
+                                   title={w.active ? "selected" : undefined}>
+                                <div className="vp-crew-wep">
+                                  <span className="vp-w-name">{sn}</span>
+                                  {st && (
+                                    <span className={`vp-w-type tag-${st}`}>{st}</span>
+                                  )}
+                                </div>
+                                {armed && (
+                                  <AmmoReadout cur={w.magazines!}
+                                    max={w.magazinesMax ?? w.magazines!}
+                                    type={st ?? "mg"} />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {r.isWeaponSeat && !slots.length && r.switchable.length > 1 && (
                         <div className="vp-crew-loadout">
                           {r.switchable.map((w, wi) => (
                             <span key={w.class + wi}

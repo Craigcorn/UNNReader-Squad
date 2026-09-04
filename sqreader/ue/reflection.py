@@ -99,6 +99,15 @@ FBOOLPROPERTY_BYTEOFFSET_OFFSET = 0x71
 FBOOLPROPERTY_BYTEMASK_OFFSET = 0x72
 FBOOLPROPERTY_FIELDMASK_OFFSET = 0x73
 
+# FArrayProperty.Inner (FProperty*) — the element property of a TArray field.
+# Sits one slot past FStructProperty.Struct: +0x70 on an ArrayProperty is a
+# different member entirely, so reading it as a UScriptStruct pointer hands
+# back a plausible-looking address that reflects as nothing. Verified live
+# (2026-09-03) on SQPawnInventoryComponent.Inventory -> StructProperty ->
+# SQWeaponGroupData, and it is the offset the lane-graph and marker-stride
+# doctor checks were already reading by hand.
+FARRAYPROPERTY_INNER_OFFSET = 0x78
+
 # FFieldClass starts with FName Name (its first member is the type name).
 FFIELDCLASS_NAME = 0x00
 
@@ -369,6 +378,46 @@ def read_fstructproperty_struct(pm: ProcessMemory, ffield_addr: int) -> int:
         return 0
 
 
+def read_farrayproperty_inner(pm: ProcessMemory, ffield_addr: int) -> int:
+    """
+    Return the Inner FProperty* of an FArrayProperty field (the TArray's
+    element property). The caller is responsible for knowing the field is
+    ArrayProperty-typed. Returns 0 on any /proc read failure.
+    """
+    if ffield_addr <= 0 or ffield_addr > 0x0000_7fff_ffff_ffff:
+        return 0
+    try:
+        return pm.read_u64(ffield_addr + FARRAYPROPERTY_INNER_OFFSET)
+    except (OSError, OverflowError, ValueError):
+        return 0
+
+
+def read_field_struct(pm: ProcessMemory, ffield_addr: int,
+                      alloc: FNameEntryAllocator) -> int:
+    """
+    The UScriptStruct* a field's VALUES are laid out as: a StructProperty's
+    own Struct, or — for a TArray of structs — the Struct of the
+    ArrayProperty's Inner element property. Anything else (a plain scalar,
+    an array of pointers) is 0.
+
+    This is the hop `check_struct_fields` takes when a watched offset lives
+    inside an array element rather than inside an inline struct — the
+    FSQWeaponGroupData behind SQPawnInventoryComponent.Inventory was the
+    first such table.
+    """
+    prop = read_fproperty(pm, ffield_addr, alloc)
+    if prop is None:
+        return 0
+    if prop.type_name == "StructProperty":
+        return read_fstructproperty_struct(pm, ffield_addr)
+    if prop.type_name == "ArrayProperty":
+        inner_addr = read_farrayproperty_inner(pm, ffield_addr)
+        inner = read_fproperty(pm, inner_addr, alloc) if inner_addr else None
+        if inner is not None and inner.type_name == "StructProperty":
+            return read_fstructproperty_struct(pm, inner_addr)
+    return 0
+
+
 def read_fbool_property_mask(pm: ProcessMemory,
                              ffield_addr: int) -> tuple[int, int]:
     """
@@ -445,6 +494,8 @@ __all__ = [
     "find_field_by_name",
     "find_field_by_name_with_super",
     "read_fstructproperty_struct",
+    "read_farrayproperty_inner",
+    "read_field_struct",
     "read_fbool_property_mask",
     "bool_property_mask",
     "struct_layout_for_field",
@@ -455,4 +506,5 @@ __all__ = [
     "FFIELD_NAME_PRIVATE",
     "FPROPERTY_OFFSET_INTERNAL",
     "FSTRUCTPROPERTY_STRUCT_OFFSET",
+    "FARRAYPROPERTY_INNER_OFFSET",
 ]

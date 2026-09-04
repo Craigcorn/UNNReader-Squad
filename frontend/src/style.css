@@ -784,6 +784,15 @@ html, body, #root {
   color: var(--ink-mute); border: 1px solid var(--border);
 }
 #vehicle-panel .vp-load-cap { font-variant-numeric: tabular-nums; opacity: 0.8; }
+/* whole-inventory rows: one per switchable weapon, the selected one marked */
+#vehicle-panel .vp-crew-slots { display: flex; flex-direction: column; gap: 4px; }
+#vehicle-panel .vp-crew-slot {
+  padding: 3px 6px; border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+}
+#vehicle-panel .vp-crew-slot.active {
+  border-left-color: var(--accent); background: rgba(255,255,255,0.03);
+}
 /* bare tag-* type colors (pips/summary use currentColor; chips tint border) */
 #vehicle-panel .vp-ammo-pips.tag-kinetic, #vehicle-panel .vp-ammo-sum.tag-kinetic { color: #ffd166; }
 #vehicle-panel .vp-ammo-pips.tag-heat,    #vehicle-panel .vp-ammo-sum.tag-heat    { color: #ff8a5b; }

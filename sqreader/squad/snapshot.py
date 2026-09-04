@@ -36,8 +36,8 @@ from .. import profiling
 from ..mem import ProcessMemory
 from ..ue.fname import FNameEntryAllocator
 from ..ue.reflection import (
-    bool_property_mask, get_class_layout, struct_layout_for_field,
-    walk_super_chain,
+    bool_property_mask, get_class_layout, read_field_struct,
+    read_ustruct_header, struct_layout_for_field, walk_super_chain,
 )
 from ..ue.uobject import (
     GUObjectArray,
@@ -337,6 +337,24 @@ SQ_VWEAPON_VEHICLE_TURRET_OFFSET     = 0x0e50  # ObjectProperty
 # then Magazines TArray<FMagData{i32 Max; i32 Cur}> at weapon +0x848.
 SQ_TURRET_INVENTORY_OFFSET           = 0x04b0  # ObjectProperty on the seat pawn
 SQ_INV_CURRENT_WEAPON_OFFSET         = 0x0168  # ObjectProperty on the inventory
+# The seat's WHOLE weapon inventory, not only the selected gun. Reflected
+# live on a Loach CAS Small (Squad v10.5.3, 2026-09-03):
+# SQPawnInventoryComponent.Inventory is a TArray<FSQWeaponGroupData> - one
+# group per weapon-switch slot (AP / HE / coax / smoke / ATGM on a tank
+# turret; minigun / rockets / smoke on the Loach pilot) - and each group's
+# Weapons is a TArray<SQEquipableItem*> whose elements carry the Magazines
+# array above. CurrentWeapon only ever names the selected group, which is
+# why every other weapon's ammo never reached a recording; and the driver /
+# pilot seat IS the vehicle actor (SQVehicle inherits SQVehicleSeat), never
+# listed in VehicleTurrets, so its inventory was never read at all. The
+# group offsets and stride are re-read from the struct at resolve time;
+# these are the fallbacks the doctor watches.
+SQ_INV_INVENTORY_OFFSET              = 0x01b0  # ArrayProperty on SQPawnInventoryComponent
+WEAPON_GROUP_OFFSETS = {                       # FSQWeaponGroupData (Inventory element)
+    "Weapons": 0x10,   # TArray<SQEquipableItem*>
+    "Index":   0x20,   # int32 - the group's weapon-switch slot
+}
+WEAPON_GROUP_SIZE = 40                         # sizeof(FSQWeaponGroupData) - the stride
 
 # Squad v10 map markers — stored as FastArraySerializer Items inside
 # SQMapMarkerManagerComponent.MarkerArray. The manager lives on the
@@ -536,6 +554,13 @@ _REFLECTED_SCALARS: tuple[tuple[str, str, str], ...] = (
      "VehicleComponentState"),
     ("SQ_TURRET_INVENTORY_OFFSET",         "SQVehicleSeat",
      "CachedVehicleInventory"),
+    # Both declared on SQPawnInventoryComponent (the vehicle inventory's
+    # parent); the group struct behind Inventory is reflected separately in
+    # resolve_paths, since a struct-internal offset has no UClass to name.
+    ("SQ_INV_CURRENT_WEAPON_OFFSET",       "SQPawnInventoryComponent",
+     "CurrentWeapon"),
+    ("SQ_INV_INVENTORY_OFFSET",            "SQPawnInventoryComponent",
+     "Inventory"),
 )
 
 #: Offset dicts whose every key is a UPROPERTY name on one UClass.
@@ -1438,6 +1463,13 @@ class SnapshotPaths:
     # keeps them correct across updates; read helpers fall back to the
     # module SQ_VEHICLE_*_OFFSET constants for any field not resolved.
     vehicle_array_offsets: dict[str, int] = field(default_factory=dict)
+    # Reflection-derived SQPawnInventoryComponent offsets (CurrentWeapon /
+    # Inventory) plus the FSQWeaponGroupData element layout and stride, all
+    # read off the live struct so a resized group can never shear the walk.
+    # Fallbacks: SQ_INV_*_OFFSET, WEAPON_GROUP_OFFSETS, WEAPON_GROUP_SIZE.
+    inventory_offsets: dict[str, int] = field(default_factory=dict)
+    weapon_group_offsets: dict[str, int] = field(default_factory=dict)
+    weapon_group_size: int = 0
     # Reflection-derived SQSoldierMovement offsets (Stamina / StaminaMax). The
     # movement component is a two-hop read off the soldier; these offsets live
     # ON that component's class. Reflected by name because the Squad-Replay
@@ -1554,6 +1586,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         "SQVehicleSeat": "Class",
         "SQVehicleComponent": "Class",
         "SQVehicleWeapon": "Class",
+        # SQPawnInventoryComponent - the seat inventory's parent, where
+        # CurrentWeapon and the Inventory group array are declared.
+        "SQPawnInventoryComponent": "Class",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
@@ -1635,6 +1670,22 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     sq_healing_item_class_addr = _addr("SQHealingEquipableItem")
     heal_layout = (get_class_layout(pm, sq_healing_item_class_addr, alloc)
                    if sq_healing_item_class_addr else {})
+    # SQPawnInventoryComponent - CurrentWeapon and the Inventory group array.
+    # The group struct (FSQWeaponGroupData) is reached through the array's
+    # inner property, so its field offsets AND its size come from the live
+    # binary; a Squad update that grows the group cannot shear the walk.
+    sq_pawn_inventory_class_addr = _addr("SQPawnInventoryComponent")
+    inv_layout = (get_class_layout(pm, sq_pawn_inventory_class_addr, alloc)
+                  if sq_pawn_inventory_class_addr else {})
+    wgroup_layout: dict[str, Any] = {}
+    wgroup_size = 0
+    if "Inventory" in inv_layout:
+        wgroup_struct = read_field_struct(pm, inv_layout["Inventory"].addr,
+                                          alloc)
+        if wgroup_struct:
+            wgroup_layout = get_class_layout(pm, wgroup_struct, alloc)
+            wgroup_size = read_ustruct_header(
+                pm, wgroup_struct, alloc).properties_size
 
     def grab(layout, names):
         return {n: layout[n].offset for n in names if n in layout}
@@ -1895,6 +1946,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
             "VehicleSeats", "VehicleTurrets", "VehicleComponents",
             "CachedVehicleEngine",
         ]),
+        inventory_offsets=grab(inv_layout, ["CurrentWeapon", "Inventory"]),
+        weapon_group_offsets=grab(wgroup_layout, ["Weapons", "Index"]),
+        weapon_group_size=wgroup_size,
     )
 
 
@@ -2678,6 +2732,134 @@ def _veh_arr_off(paths: "SnapshotPaths | None", name: str, const: int) -> int:
     return const
 
 
+def _inv_off(paths: "SnapshotPaths | None", name: str, const: int) -> int:
+    """Reflection offset for an SQPawnInventoryComponent field, module-
+    constant fallback - the inventory twin of _veh_arr_off."""
+    if paths is not None:
+        return paths.inventory_offsets.get(name, const)
+    return const
+
+
+def _read_magazines(pm: ProcessMemory, weapon_addr: int
+                    ) -> tuple[list[int], list[int]] | None:
+    """SQWeapon.Magazines as (current, max) round lists, one entry per
+    magazine. The array is TArray<FMagData{i32 Max; i32 Cur}>, bulk-read in
+    one syscall. None when the array does not resolve - never a guess."""
+    mag_hdr = read_tarray_header(pm, weapon_addr + SQ_VWEAPON_MAGAZINES_OFFSET)
+    if mag_hdr is None or not (0 < mag_hdr.count <= 32) or not mag_hdr.data_ptr:
+        return None
+    raw = pm.try_read(mag_hdr.data_ptr, mag_hdr.count * 8)
+    if raw is None or len(raw) != mag_hdr.count * 8:
+        return None
+    pairs = [struct.unpack_from("<ii", raw, k * 8) for k in range(mag_hdr.count)]
+    return [cur for _mx, cur in pairs], [mx for mx, _cur in pairs]
+
+
+def read_inventory_weapons(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                           inv_addr: int, paths: "SnapshotPaths | None",
+                           current_addr: int,
+                           caches: "SnapshotCaches | None" = None,
+                           ) -> list[dict[str, Any]]:
+    """Every weapon a seat inventory holds, group by group.
+
+    SQPawnInventoryComponent.Inventory is a TArray<FSQWeaponGroupData>; each
+    group is one weapon-switch slot and owns a TArray<SQEquipableItem*>. This
+    is what CurrentWeapon alone cannot show: a tank turret's AP / HE / coax /
+    smoke / ATGM all at once, or the three pilot weapons on a Loach. One
+    record per weapon: its class, its group's slot index, the same
+    magazines / magazinesMax shape the turret record carries, and `active`
+    on the one CurrentWeapon points at. Group offsets and the element stride
+    come from the reflected struct (see SQ_INV_INVENTORY_OFFSET).
+    """
+    inv_off = _inv_off(paths, "Inventory", SQ_INV_INVENTORY_OFFSET)
+    go = paths.weapon_group_offsets if paths is not None else {}
+    weapons_off = go.get("Weapons", WEAPON_GROUP_OFFSETS["Weapons"])
+    index_off = go.get("Index", WEAPON_GROUP_OFFSETS["Index"])
+    stride = (paths.weapon_group_size
+              if paths is not None and paths.weapon_group_size > 0
+              else WEAPON_GROUP_SIZE)
+    hdr = read_tarray_header(pm, inv_addr + inv_off)
+    if hdr is None or not (0 < hdr.count <= 16) or not hdr.data_ptr:
+        return []
+    raw = pm.try_read(hdr.data_ptr, hdr.count * stride)
+    if raw is None or len(raw) != hdr.count * stride:
+        return []
+    out: list[dict[str, Any]] = []
+    for k in range(hdr.count):
+        base = k * stride
+        if base + max(weapons_off + 16, index_off + 4) > len(raw):
+            break
+        wptr, wcount, wcap = struct.unpack_from("<Qii", raw, base + weapons_off)
+        gidx = struct.unpack_from("<i", raw, base + index_off)[0]
+        if not wptr or not (0 < wcount <= 8) or wcap < wcount:
+            continue
+        wraw = pm.try_read(wptr, wcount * 8)
+        if wraw is None or len(wraw) != wcount * 8:
+            continue
+        for j in range(wcount):
+            w = struct.unpack_from("<Q", wraw, j * 8)[0]
+            if not w:
+                continue
+            # The class POINTER is read live every tick and only the class
+            # object's name is cached: a weapon freed with its vehicle and
+            # its address reused by a different gun before the rolling
+            # cache reset would otherwise wear the old name against the new
+            # gun's ammo. One 8-byte read per weapon per tick buys that.
+            wcls = _uobject_class_name(
+                pm, w, alloc,
+                cache=caches.class_name if caches is not None else None)
+            if not wcls or wcls == "None":
+                continue
+            rec: dict[str, Any] = {"weaponClass": wcls, "group": gidx}
+            if w == current_addr:
+                rec["active"] = True
+            mags = _read_magazines(pm, w)
+            if mags is not None:
+                rec["magazines"], rec["magazinesMax"] = mags
+            out.append(rec)
+    return out
+
+
+def read_driver_weapons(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                        vh_addr: int, paths: "SnapshotPaths | None",
+                        class_name: str | None,
+                        caches: "SnapshotCaches | None" = None,
+                        ) -> dict[str, Any] | None:
+    """The driver / pilot seat's weapons, in the turret record shape.
+
+    The driver seat is the vehicle actor itself (SQVehicle inherits
+    SQVehicleSeat), so its inventory hangs off the vehicle at
+    CachedVehicleInventory - the same chain the turret pawns use, entered
+    one level up. Tanks carry their driver smoke here; the Loach CAS carries
+    its minigun, rocket pod and smoke pod here and nowhere else. The record
+    is stamped `seat: "driver"` so the viewer routes it to the driver row
+    instead of the turret pool, and carries no yaw (the hull's is the aim).
+    None when the chain does not resolve or holds no weapon - never a guess.
+    """
+    inv_addr = _safe(lambda: pm.read_u64(vh_addr + SQ_TURRET_INVENTORY_OFFSET))
+    if not inv_addr:
+        return None
+    cur_addr = _safe(lambda: pm.read_u64(
+        inv_addr + _inv_off(paths, "CurrentWeapon",
+                            SQ_INV_CURRENT_WEAPON_OFFSET))) or 0
+    weapons = read_inventory_weapons(pm, alloc, inv_addr, paths, cur_addr,
+                                     caches=caches)
+    rec: dict[str, Any] = {"name": "", "className": class_name or "",
+                           "seat": "driver"}
+    if cur_addr:
+        wcls = _uobject_class_name(pm, cur_addr, alloc)
+        if wcls and wcls != "None":
+            rec["weaponClass"] = wcls
+        mags = _read_magazines(pm, cur_addr)
+        if mags is not None:
+            rec["magazines"], rec["magazinesMax"] = mags
+    if weapons:
+        rec["weapons"] = weapons
+    if "weaponClass" not in rec and not weapons:
+        return None
+    return rec
+
+
 def read_vehicle_seats(pm: ProcessMemory, alloc: FNameEntryAllocator,
                        paths: SnapshotPaths, vh_addr: int,
                        caches: SnapshotCaches | None = None,
@@ -3033,7 +3215,9 @@ def read_vehicle_turrets(pm: ProcessMemory, alloc: FNameEntryAllocator,
         inv_addr = _safe(lambda: pm.read_u64(
             wep_addr + SQ_TURRET_INVENTORY_OFFSET))
         weapon_addr = _safe(lambda: pm.read_u64(
-            inv_addr + SQ_INV_CURRENT_WEAPON_OFFSET)) if inv_addr else 0
+            inv_addr + _inv_off(paths, "CurrentWeapon",
+                                SQ_INV_CURRENT_WEAPON_OFFSET))) \
+            if inv_addr else 0
         if weapon_addr:
             # The real weapon's class is more precise than the seat pawn's
             # (e.g. BP_Kord_Tigr_C vs BP_Tigr_Turret_C) — hand it to the
@@ -3041,17 +3225,16 @@ def read_vehicle_turrets(pm: ProcessMemory, alloc: FNameEntryAllocator,
             wcls = _uobject_class_name(pm, weapon_addr, alloc)
             if wcls and wcls != "None":
                 rec["weaponClass"] = wcls
-            # Bulk-read the FMagData array (8 B/elem) in one syscall.
-            mag_hdr = read_tarray_header(
-                pm, weapon_addr + SQ_VWEAPON_MAGAZINES_OFFSET)
-            if mag_hdr is not None and 0 < mag_hdr.count <= 32 \
-                    and mag_hdr.data_ptr:
-                raw = pm.try_read(mag_hdr.data_ptr, mag_hdr.count * 8)
-                if raw is not None and len(raw) == mag_hdr.count * 8:
-                    pairs = [struct.unpack_from("<ii", raw, k * 8)
-                             for k in range(mag_hdr.count)]
-                    rec["magazines"] = [cur for _mx, cur in pairs]
-                    rec["magazinesMax"] = [mx for mx, _cur in pairs]
+            mags = _read_magazines(pm, weapon_addr)
+            if mags is not None:
+                rec["magazines"], rec["magazinesMax"] = mags
+        if inv_addr:
+            # The whole inventory behind the seat — every switchable weapon
+            # with its own ammo, not just the one selected right now.
+            weapons = read_inventory_weapons(
+                pm, alloc, inv_addr, paths, weapon_addr or 0, caches=caches)
+            if weapons:
+                rec["weapons"] = weapons
         # Parent turret base actor — kept only for frontend seat correlation
         # (VEHICLE_LOADOUTS turretClass key). NOTE: this 0x0ec8 ObjectProperty
         # is populated ONLY on mortar / open-turret weapons and is null for the
@@ -3112,7 +3295,8 @@ def read_emplacement_weapon(pm: ProcessMemory, alloc: FNameEntryAllocator,
     inv_addr = _safe(lambda: pm.read_u64(
         vh_addr + SQ_TURRET_INVENTORY_OFFSET))
     weapon_addr = _safe(lambda: pm.read_u64(
-        inv_addr + SQ_INV_CURRENT_WEAPON_OFFSET)) if inv_addr else 0
+        inv_addr + _inv_off(paths, "CurrentWeapon",
+                            SQ_INV_CURRENT_WEAPON_OFFSET))) if inv_addr else 0
     if not weapon_addr:
         return None
     rec: dict[str, Any] = {
@@ -3122,15 +3306,12 @@ def read_emplacement_weapon(pm: ProcessMemory, alloc: FNameEntryAllocator,
     wcls = _uobject_class_name(pm, weapon_addr, alloc)
     if wcls and wcls != "None":
         rec["weaponClass"] = wcls
-    mag_hdr = read_tarray_header(
-        pm, weapon_addr + SQ_VWEAPON_MAGAZINES_OFFSET)
-    if mag_hdr is not None and 0 < mag_hdr.count <= 32 and mag_hdr.data_ptr:
-        raw = pm.try_read(mag_hdr.data_ptr, mag_hdr.count * 8)
-        if raw is not None and len(raw) == mag_hdr.count * 8:
-            pairs = [struct.unpack_from("<ii", raw, k * 8)
-                     for k in range(mag_hdr.count)]
-            rec["magazines"] = [cur for _mx, cur in pairs]
-            rec["magazinesMax"] = [mx for mx, _cur in pairs]
+    mags = _read_magazines(pm, weapon_addr)
+    if mags is not None:
+        rec["magazines"], rec["magazinesMax"] = mags
+    weapons = read_inventory_weapons(pm, alloc, inv_addr, paths, weapon_addr)
+    if weapons:
+        rec["weapons"] = weapons
     swivel = _safe(lambda: pm.read_u64(vh_addr + paths.dv_swivel_off))
     if swivel:
         r = read_frotator(pm, swivel + paths.scene_relative_rotation_off)
@@ -3226,6 +3407,14 @@ def read_vehicle(pm: ProcessMemory, alloc: FNameEntryAllocator,
     if comps:
         out["components"] = comps
     turrets = read_vehicle_turrets(pm, alloc, vh_addr, paths, caches=caches)
+    # The driver / pilot seat's own weapons ride along as the LAST turret
+    # record: VehicleTurrets never lists the vehicle actor itself, so the
+    # Loach's pilot guns and every tank's driver smoke were invisible. Last,
+    # because the viewer's turret icon follows turrets[0]'s yaw.
+    drv = read_driver_weapons(pm, alloc, vh_addr, paths, class_name,
+                              caches=caches)
+    if drv:
+        turrets.append(drv)
     if turrets:
         out["turrets"] = turrets
     return out

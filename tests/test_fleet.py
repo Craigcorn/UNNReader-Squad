@@ -752,3 +752,85 @@ def test_checkin_seals_and_posts(monkeypatch):
     assert captured["url"] == "https://c.test/agent/checkin"
     payload = json.loads(open_envelope(captured["env"], secret=secret))
     assert payload["health"] == "ok" and payload["schema"] == "sqr-checkin-1"
+
+
+# ---- the seat-inventory group struct (first array hop in the struct tier) --
+
+def test_struct_fields_take_the_array_hop_by_reflected_type(monkeypatch):
+    """FSQWeaponGroupData is the element of the Inventory ARRAY, not an inline
+    struct: reading +0x70 off an ArrayProperty is a different member, so the
+    hop must go through Inner. The reflected type of the hop field decides,
+    and the inline-struct rows keep their old path untouched."""
+    import sqreader.ue.reflection as refl
+    from sqreader.squad.snapshot import (
+        SQ_INV_INVENTORY_OFFSET, WEAPON_GROUP_OFFSETS,
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(refl, "find_field_by_name_with_super",
+                        lambda *a: 0x77)
+    monkeypatch.setattr(refl, "read_field_struct",
+                        lambda *a: calls.append("array") or 0x99)
+    monkeypatch.setattr(refl, "read_fstructproperty_struct",
+                        lambda *a: calls.append("struct") or 0x88)
+    monkeypatch.setattr(
+        refl, "get_class_layout",
+        lambda pm, addr, alloc: {
+            "Weapons": _Prop(WEAPON_GROUP_OFFSETS["Weapons"] + 8),
+            "Index": _Prop(WEAPON_GROUP_OFFSETS["Index"])})
+    tg = health.DoctorTargets(None, None, {"SQPawnInventoryComponent": 0x1000},
+                              complete=True)
+    tg._layouts[0x1000] = {
+        "Inventory": _Prop(SQ_INV_INVENTORY_OFFSET, "ArrayProperty")}
+    drift, skipped = health.check_struct_fields(None, _Arr(), None, tg)
+    assert calls == ["array"]
+    mine = [d for d in drift
+            if d["class"] == "SQPawnInventoryComponent.Inventory"]
+    assert [(d["field"], d["problem"]) for d in mine] == [
+        ("Weapons", "offset drift")]
+
+
+def _stride_targets(monkeypatch, *, live_size, struct_name="SQWeaponGroupData",
+                    inner_type="StructProperty"):
+    import sqreader.ue.reflection as refl
+    from sqreader.squad.snapshot import SQ_INV_INVENTORY_OFFSET
+    tg = _targets({"SQPawnInventoryComponent": {
+        "Inventory": _Prop(SQ_INV_INVENTORY_OFFSET, "ArrayProperty")}})
+    monkeypatch.setattr(refl, "find_field_by_name_with_super",
+                        lambda *a: 0x7000)
+    monkeypatch.setattr(refl, "read_farrayproperty_inner", lambda *a: 0x7100)
+    monkeypatch.setattr(refl, "read_fproperty",
+                        lambda *a: _Prop(0, inner_type))
+    monkeypatch.setattr(refl, "read_fstructproperty_struct", lambda *a: 0x8000)
+    monkeypatch.setattr(refl, "read_ustruct_header",
+                        lambda *a: type("I", (), {"properties_size": live_size})())
+    monkeypatch.setattr(health, "_object_name", lambda *a: struct_name)
+    return tg
+
+
+def test_weapon_group_stride_green_when_the_struct_is_its_baked_size(monkeypatch):
+    from sqreader.squad.snapshot import WEAPON_GROUP_SIZE
+    tg = _stride_targets(monkeypatch, live_size=WEAPON_GROUP_SIZE)
+    out = health.check_weapon_group_stride(None, None, tg)
+    assert out.drift == [] and out.skipped == []
+
+
+def test_weapon_group_stride_drift_when_the_struct_grew(monkeypatch):
+    from sqreader.squad.snapshot import WEAPON_GROUP_SIZE
+    tg = _stride_targets(monkeypatch, live_size=WEAPON_GROUP_SIZE + 8)
+    out = health.check_weapon_group_stride(None, None, tg)
+    assert [d["problem"] for d in out.drift] == ["weapon group stride drift"]
+    assert out.drift[0]["live"] == WEAPON_GROUP_SIZE + 8
+
+
+def test_weapon_group_stride_names_a_renamed_struct(monkeypatch):
+    from sqreader.squad.snapshot import WEAPON_GROUP_SIZE
+    tg = _stride_targets(monkeypatch, live_size=WEAPON_GROUP_SIZE,
+                         struct_name="SQWeaponSlotData")
+    out = health.check_weapon_group_stride(None, None, tg)
+    assert [d["problem"] for d in out.drift] == ["weapon group struct renamed"]
+
+
+def test_weapon_group_stride_skips_when_the_class_is_absent():
+    tg = _targets({"SQSoldier": {}})
+    out = health.check_weapon_group_stride(None, None, tg)
+    assert out.drift == [] and len(out.skipped) == 1

@@ -689,3 +689,71 @@ we resolve each unique class's name. Two ways forward, both deferred:
 2. Detect changed objects only — diff InternalIndex set against last tick.
 
 For now 1.6 Hz produces a useful capture.
+
+---
+
+## 2026-09-03 — Vehicle seat inventories: every weapon, not just CurrentWeapon
+
+Prompted by a Loach CAS Small flown on the test box (Squad v10.5.3): the
+pilot fires three weapons and the recording carried ammo for none of them.
+Two gaps, both general:
+
+1. **The driver / pilot seat is the vehicle actor.** `SQVehicle` inherits
+   `SQVehicleSeat`, so the driver's inventory hangs off the vehicle at
+   `CachedVehicleInventory` (+0x4b0) — never listed in `VehicleTurrets`,
+   so never read. Every tank's driver smoke generator lives here too
+   (`SmokeGenerator_Tracked_C`, 30/30), and the Loach's entire armament.
+2. **A seat holds weapon GROUPS; `CurrentWeapon` names one.** Reflected
+   live off `SQPawnInventoryComponent` (the parent of both
+   `SQVehicleInventoryComponent` and the Loach's
+   `SQVehicleResourceWeaponInventoryComponent`):
+
+   ```
+   SQPawnInventoryComponent
+     +0x0168  ObjectProperty  CurrentWeapon          (SQEquipableItem*)
+     +0x01a4  IntProperty     CurrentWeaponSlot
+     +0x01a8  IntProperty     CurrentWeaponOffset
+     +0x01b0  ArrayProperty   Inventory              TArray<FSQWeaponGroupData>
+     +0x01c0  StructProperty  RepInventory           SQWeaponGroupDataArray (FastArray; Items @+0x108, same element)
+   FSQWeaponGroupData  (size 40)
+     +0x0010  ArrayProperty   Weapons                TArray<SQEquipableItem*>
+     +0x0020  IntProperty     Index                  weapon-switch slot
+     +0x0024  IntProperty     SelectedWeaponOffset
+   SQVehicleInventoryComponent
+     +0x02e0  ArrayProperty   Weapons                TArray<FSQVehicleWeaponConfig{ClassProperty WeaponClass}> — the LOADOUT DEFINITION (classes, not instances)
+   ```
+
+   Each `SQEquipableItem*` carries `Magazines` at +0x7e8 as
+   `TArray<FMagData{i32 Max; i32 Cur}>`, exactly as the turret read already
+   decoded it. Live survey across the 30 vehicles on the box:
+
+   | seat | groups seen (class → mags) |
+   |---|---|
+   | Loach CAS Small pilot | M134 200/200 · Hydra HEDP right 0/7 · Hydra smoke left 7/7 |
+   | Warrior CTAS40 turret | AP 81/80 · HE 81/80 · 7.62 coax 52/200 + 9×200 · smoke 2/2 |
+   | T-64BM2 turret | AP 1×20 · HEAT 0/1 + 10 · coax 2000 · smoke 2/2 · Kombat ATGM 0/1 + 2 · Frag 0/1 + 7 |
+   | BTR-4 turret | AP 150 · HE 150 · KT 7.62 6×350 · smoke 2/2 · Stugna-P 2×2 · KBA-117 4×29 |
+   | Kozak driver | driver smoke launcher 2/2 |
+
+   Empty groups occur (BRDM-2 group 1, Challenger group 4: `Weapons`
+   count 0) — skipped, never filled in. A magazine reading Cur > Max
+   (81/80, 51/50) is the chambered round.
+
+**Reflection note.** `FArrayProperty.Inner` is at FField **+0x78**, not the
++0x70 that holds `FStructProperty.Struct` — reading +0x70 off an
+ArrayProperty returns a plausible pointer that reflects as nothing. The
+lane-graph and marker-stride doctor checks were already reading +0x78 by
+hand; it is now `reflection.read_farrayproperty_inner` /
+`read_field_struct`, and the struct-tier doctor walker picks the hop by
+the field's reflected type.
+
+**What the reader does now.** `read_inventory_weapons` walks the groups
+(offsets and stride taken from the reflected struct at resolve time,
+constants as fallback) and emits one record per weapon under a `weapons`
+list on each turret record, `active` on the one `CurrentWeapon` points
+at; `read_driver_weapons` reads the vehicle actor's own inventory and
+appends it as a last turret record stamped `seat: "driver"` (no yaw — the
+hull's is the aim, and it stays last so `turrets[0]` keeps driving the
+turret icon). Watched by the doctor: `SQ_INV_INVENTORY_OFFSET` (class
+tier), `WEAPON_GROUP_OFFSETS` (struct tier, through the array hop),
+`WEAPON_GROUP_SIZE` (`check_weapon_group_stride`).

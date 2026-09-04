@@ -110,6 +110,17 @@ export interface VehicleComponent {
   state: number | null;         // enum: 0=Healthy, 1=Damaged, 2=Destroyed
 }
 
+// One weapon in a seat's inventory — the whole switchable loadout is a list
+// of these, where the turret's own weaponClass/magazines is only the one
+// currently selected.
+export interface VehicleWeaponSlot {
+  weaponClass: string;          // e.g. 'BP_Hydra_Loach_Small_Single_Right_C'
+  group?: number;               // FSQWeaponGroupData.Index — the weapon-switch slot
+  active?: boolean;             // true on the weapon CurrentWeapon points at
+  magazines?: number[];         // current rounds per magazine (idx 0 = loaded)
+  magazinesMax?: number[];      // max rounds per magazine (same length as magazines)
+}
+
 export interface VehicleTurret {
   name: string;                 // e.g. 'BP_T62_Turret_C_2147478966' (UE instance name)
   className: string;            // seat-pawn class, e.g. 'BP_T62_Turret_C'
@@ -118,6 +129,13 @@ export interface VehicleTurret {
   weaponClass?: string | null;
   magazines?: number[];         // current rounds per magazine (idx 0 = loaded)
   magazinesMax?: number[];      // max rounds per magazine (same length as magazines)
+  // Every weapon behind the seat, group by group (AP / HE / coax / smoke /
+  // ATGM on a tank turret; minigun / rockets / smoke on a Loach pilot).
+  weapons?: VehicleWeaponSlot[];
+  // 'driver' marks the vehicle actor's own seat inventory (pilot guns,
+  // driver smoke). Not a turret: it carries no yaw of its own (the hull's
+  // is the aim) and is routed to the driver row, never the turret pool.
+  seat?: "driver" | null;
   turretBaseClass?: string | null;
   // Turret RootComponent.RelativeRotation.Yaw — the turret's facing
   // offset from the hull's attach socket. World yaw = vehicle.yaw + turret.yaw.

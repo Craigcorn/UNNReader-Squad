@@ -110,3 +110,56 @@ none of them:
 - `ts` is epoch seconds, parsed from the log line's own timestamp.
 - The log is the only place a revive is evented at all: memory shows the
   medic's item and target while a channel runs, never the completion.
+
+## Vehicle seat inventory
+
+Two optional additions to the existing `vehicles[].turrets[]` records.
+Both are absent from recordings made before them and from any seat the
+reader could not resolve, so a consumer reads them where they exist and
+shows nothing where they do not. Turret records without them mean
+exactly what they always did.
+
+### `turrets[].weapons`
+
+Present when the seat's inventory resolved: one record per weapon the
+seat can switch to, group by group — a tank gunner's HE, coax, smoke and
+ATGM all at once, or the three pilot weapons on a Loach, not only the
+gun selected this tick:
+
+```json
+"weapons": [
+  { "weaponClass": "BP_M134_Minigun_C", "group": 0, "active": true,
+    "magazines": [3000], "magazinesMax": [3000] },
+  { "weaponClass": "BP_M260_RocketPod_C", "group": 1,
+    "magazines": [7], "magazinesMax": [7] }
+]
+```
+
+- `weaponClass` — the weapon's class name, verbatim, the same rule as
+  `weapon.className` everywhere else in the schema.
+- `group` — the group's weapon-switch slot index, read from the game's
+  own group data; it is the order the switch key walks.
+- `active` — written (as `true`) only on the currently selected weapon.
+  Absence means "not selected", never "unknown": the selected group is
+  identified by pointer equality with the seat's current weapon, and a
+  tick where that comparison cannot be made emits no `active` at all.
+- `magazines` / `magazinesMax` — the same shape the turret record
+  already carries for its current weapon; omitted when the magazine read
+  fails, never zero-filled.
+
+The whole list is absent when the seat inventory pointer or its group
+array cannot be resolved — a Squad rename blanks the feature instead of
+stepping through whatever now sits at a remembered offset.
+
+### the `seat: "driver"` record
+
+The driver / pilot seat is the vehicle actor itself, which
+`VehicleTurrets` never lists — a Loach's minigun, rockets and smoke, or
+a BTR driver's smoke launcher, belonged to no record at all. When that
+seat holds readable weapons, they ride along as the **last** entry in
+`turrets`, stamped `"seat": "driver"`, carrying the vehicle's own
+`className` and the same `weapons` list as any turret. A consumer
+routes it by the stamp — it is a loadout record, not a turret: it has
+no aim, no barrel and no seat pawn, and must never be drawn as one.
+The record is absent entirely when the driver seat has nothing
+readable.

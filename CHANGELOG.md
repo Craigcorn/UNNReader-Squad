@@ -59,6 +59,26 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- Vehicle seats now record their whole weapon inventory, not only the gun
+  currently selected. A Loach CAS flown on the test box showed the gap:
+  the pilot fires a minigun, a rocket pod and a smoke pod, and the
+  recording carried none of them - the pilot seat is the vehicle actor
+  itself, which VehicleTurrets never lists, and even a listed turret was
+  read through CurrentWeapon alone, so a tank's HE, coax, smoke and ATGM
+  vanished the moment the gunner selected AP. The reader now walks the
+  inventory's weapon groups (SQPawnInventoryComponent.Inventory, a
+  TArray of FSQWeaponGroupData, each holding its SQEquipableItem
+  pointers) and emits every weapon with its own magazines, the selected
+  one marked, under a new `weapons` list on each turret record; the
+  driver / pilot seat rides along as a last turret record stamped
+  `seat: "driver"`, which the viewer routes to the driver row instead of
+  the turret pool and never uses for aim. The group struct's offsets and
+  size come from live reflection at resolve time, and the doctor watches
+  the fallbacks: the array offset in the class tier, the group fields in
+  the struct tier (whose hop walker now follows an ArrayProperty's inner
+  struct, the first table to need it), and the element stride by a
+  dedicated check. Old recordings play unchanged; the viewer shows one
+  ammo line per weapon wherever a recording carries the list.
 - The machine doctor now judges the stats collectors too. Their counters
   live in private C++ structures reflection cannot see, so the only
   drift check possible is by value - and the value check needs players,
