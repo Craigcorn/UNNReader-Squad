@@ -688,6 +688,35 @@ placements), all recorded above. All three sessions' raw captures
 (per-tick instance snapshots, class layouts, log slices, the bomb config
 dump, the take-hit struct layout) are archived off-repo.
 
+## Verification session A — run sheet (decision 9, agreed 2026-09-04)
+
+Acceptance test for the implemented capture, run AFTER implementation on
+the test box with the new recorder and the probe both running (the probe's
+independent reads are the oracle the recording is checked against).
+Six players minimum (three squads of two); a layer with an irregular
+faction opposite a conventional one covers mortar + drone as well as
+UAV, strike and artillery. About an hour.
+
+| Step | Action | What the recording must show |
+|---|---|---|
+| A1 | Claim commander on team 1 (vote) | vote block with timer 60 -> 0 and tallies; on resolution the seat fields fill, `actions[]` appears with every entry back-dated by enroute+active, `vote.cooldownTimer` 300 -> 0 |
+| A2 | Attempt a replacement vote inside 5 min | nothing — the cooldown timer explains it |
+| A3 | Call the UAV | category-0 stamp; UAV entry re-stamped; `commandActions` entry for the UAV actor; `CommandRadius` marker with `distance` |
+| A4 | Call a strike after A1's strike entry is ready | category-1 stamp; strike entry re-stamped; aircraft actor with health/shots/spline progress; `CommandLine` marker with `distance` + `yaw`; projectiles with `firer` |
+| A5 | Immediately attempt artillery (optional C1) | blocked with 15:00 -> gate confirmed; allowed -> gate re-derived |
+| A6 | Call artillery when allowed | artillery actor with plan and `currentBarrage` advancing; `CommandPath` marker with `distance` + `addDistance`; shell projectiles impacting |
+| A7 | Enemy commander claims; calls the drone; a player shoots it down (optional A1-attribution) | drone in `drones` and in the 4 Hz frames; `IsDestroyedDuringActive` flips; `LastHitBy` read on the pawn at the kill |
+| A8 | Enemy calls the mortar barrage | mortar actor + `CommandRadius_C` marker with both distances |
+| A9 | Replacement vote the incumbent SURVIVES (optional) | seat unchanged, entries unchanged — the untested branch of the cooldown model |
+| A10 | Replacement vote the challenger WINS | seat changes; every ready entry re-stamped to 300 s; a still-cooling entry shows the unobserved rule |
+| A11 | Step-down | seat null; `CooldownTimeRemaining` written on each entry; no vote cooldown |
+| A12 | Fresh claim after the step-down | which rule the entries follow |
+
+Checks I run afterwards: recorded values vs the probe at the same
+instants; `sqreader doctor` clean with the new required names; the parity
+harness green; the viewer drawing the aim shapes, the actors, the drone,
+and "ready in" matching what the commander's UI showed at A5 and A10.
+
 ## Harness notes (for whoever probes next)
 
 - The probe resolves every `SQCommanderState` offset by reflection at

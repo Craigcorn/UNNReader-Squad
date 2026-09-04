@@ -98,3 +98,24 @@ session. The 10 Hz tracker built for the bombing test (the
 `bomb_track.py` pattern: reflection-resolved fields, change-triggered
 dumps, a 1 Hz roll-call) is the harness — add the `SQFlyingDrone`
 subclasses at dump priority 0 and read the fields above by name.
+
+## Session B — run sheet (one recon-kit player, ~30 min, BEFORE implementation)
+
+Tracker: `drone_track.py` (scratchpad; copy to the box, run as root under
+the fork's venv). It follows every `SQFlyingDrone` pawn, the launcher
+deployable and the commander drone actor at 10 Hz, reflects every field by
+name and dumps the health component's numeric fields, so nothing below
+needs an offset.
+
+| Step | Action | What to say | Decides |
+|---|---|---|---|
+| B1 | Deploy the recon drone; fly it for its whole life until it times out | "deployed", "timed out" | D1 flight-time field (which value counts down, in what units); D7 team while flying |
+| B2 | Re-arm at an ammo source; deploy again; fly 30 s flat out in a straight line | "re-armed", "flat out", "stopping" | D4 top speed; whether re-arm/respawn is a new pawn |
+| B3 | Land it, walk to it, pick it up, redeploy | "picked up", "redeployed" | D3 pick-up/redeploy in memory (same pawn or new), launcher deployable across the cycle |
+| B4 | Hand it to a squad mate and take it back (if a second player is present) | "handing off", "taking back" | D6 possession chain vs `SQ PC` |
+| B5 | Have a second player shoot it down (if present) | "shooting", "dead" | D2 health fields, D5 `LastHitBy` |
+| B6 | Deploy one more and leave it; observe how long the pawn lingers after timeout / death | — | pawn lifetime for the recorder's "gone" semantics |
+
+Check afterwards: the tracker's rows against the recorder's `drones`
+entries once implemented (D8), and the speed profile from B2.
+
