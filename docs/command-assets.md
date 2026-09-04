@@ -236,7 +236,7 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   blanket 15:00; the 300 s new-commander re-stamp), and every finer
   point reproduces captured values. Its display-name table is a handy
   viewer mapping for the `CommandAction_*` classes.
-- **Category gate semantics — REOPENED 2026-09-04.** The claim that a
+- **Category gate semantics — reopened and re-closed 2026-09-04.** The claim that a
   strike puts artillery on the 15-minute category timer rested on one
   contemporaneous UI reading ("the artillery timers had 10 minutes
   added"), which the player has since withdrawn after consulting other
@@ -252,11 +252,24 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   either way** — it records the stamp and the intervals; only the
   viewer's "ready in" arithmetic depends on the answer, and it is
   written as an interpretation to be pinned. Test that settles it in one
-  call (C1 in the open-questions table): with artillery's own cooldown
-  expired (≥ 30 min after the claim, unused), call a strafe and
-  immediately try artillery — blocked with 15:00 = gate real; allowed =
-  no cross-asset gate, and the stamp's meaning is re-derived from
-  whatever the game does next.
+  call: with artillery's own cooldown expired, call a strafe and try
+  artillery at once. **Re-closed the same day**: the players' own rule,
+  relayed verbatim — "air strike cd is 15 min, both arty cd is 30 min,
+  time after any command projectile shot is 15 min; you can airstrike
+  15 min in, creep arty (or airstrike) 30 min in, static arty (or air
+  strike) 45 min in" — IS the category gate: a 15-minute timer after any
+  category-1 call, on top of each asset's own cooldown, with the
+  post-claim delays equal to the own cooldowns. Run through the memory
+  model it reproduces their example to the minute (strike at 15:00 →
+  gate to 30:00; creep at 30:00 → gate to 45:00; static at 45:00), and
+  it reproduces the withdrawn UI reading too: artillery with 298.5 s of
+  its own cooldown left picked up the 900 s gate, i.e. "+10 minutes".
+  Three independent sources now agree — memory arithmetic, SquadCalc's
+  model, the players' rule — and the direct blocked/allowed call remains
+  a cheap optional confirmation. Fine print only memory carries: an
+  asset's own cooldown runs from the end of its active window (strike
+  ready 15:47 after the call, artillery 32:00), which players round to
+  15 and 30.
 
 ## Per-call actors (what an asset use spawns)
 
@@ -458,10 +471,9 @@ the Grach entry above).
 | # | Open item | Needs | What it decides | Blocks |
 |---|---|---|---|---|
 | B2 | The map's bomb-circle radii and the second pair's exact centre are assumed (config 45 m / 100 m, centred on the aim points) | one edge-stand on the second inner circle during any Grach call, read the same way as the 50 m request circle | Whether the viewer's dashed circles match the in-game map exactly | viewer cosmetics only (low importance) |
-| **C1** | Does the category stamp block a *different* category-1 asset (strafe -> artillery)? The only evidence was one UI reading, now withdrawn; SquadCalc says yes, the consulted players say no | one call: artillery ready, call a strafe, try artillery at once | The viewer's "ready in" arithmetic for strikes vs artillery. **Recorder unaffected** (stamps and intervals are recorded regardless) | viewer display only (medium — shown every time a commander uses an asset) |
 | R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
 
-Nothing gates the recorder. C1 gates one line of viewer arithmetic and
+Nothing gates the recorder, and nothing gates the viewer's correctness;
 B2 is cosmetic. The capture proposal can be written now.
 
 Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
