@@ -428,6 +428,35 @@ observed live:
   cooldowns, drone death are all memory-only (proven offset-controlled).
   The single exception is drone possession, which logs `OnPossess`.
 
+## Agreed capture — the commander block (decision 2, 2026-09-04)
+
+The contract for the implementation plan. Every field is a direct read of
+the named memory location, resolved by reflection name (doctor:
+`required_reflection_names`); nothing computed, no events, no rules. All
+game-time stamps are on the same clock as `gameState.worldTimeSec`, which
+the frame already records. Lives on each team's record in every full
+frame.
+
+| Wire field | Memory source | Meaning | Emitted |
+|---|---|---|---|
+| `commanderName`, `commanderEosId` (existing, fixed) | `SQCommanderState.CurrentCommander` -> `SQPlayerState.PlayerNamePrivate` / `.OnlineUserId` | who holds the seat | every frame; explicit `null` when the seat is empty |
+| `commander.enabled` | `SQCommanderState.bCommanderIsActive` | the commander system exists on this layer (NOT "claimed") | every frame |
+| `commander.actionsEnabled` | `SQCommanderState.bActionsEnabled` | the team may issue commands right now (live; consistent with the commander standing in a command zone — interpretation is the viewer's) | every frame |
+| `commander.vote.inProgress` | `bVoteInProgress` | a commander vote is open | while a vote is open, and on the frame it ends (so the final tallies land) |
+| `commander.vote.timer` | `CommanderVoteTimer` (int) | seconds left in the 60 s window | with the vote object |
+| `commander.vote.startedGameTime` | `CommanderVoteTimestamp` (int) | game time the vote opened | with the vote object |
+| `commander.vote.nominees[]` = `{eosId, name, votes}` | `NomineeStatus.Items[].Content`: `NomineeState` -> PlayerState ids, `VoteCount` | each nominee and their live tally (no per-voter ballots exist) | with the vote object |
+| `commander.vote.cooldownActive`, `.cooldownTimer`, `.cooldownStartedGameTime` | `bVoteCooldownActive`, `VoteCooldownTimer` (int), `VoteCooldownTimestamp` (int) | the 300 s block on new votes after a claim, and its countdown | while the cooldown is active |
+| `commander.cooldowns.categories[]` = `{id, name, intervalSec, lastUseGameTime}` | `CommanderCategories[i].Name`, `.CooldownDuration`; `LastCategoryGameTime[i]` | the category gate: any call in the category stamps `lastUseGameTime`; ready = stamp + interval; `lastUseGameTime` `null` until first use | every frame |
+| `commander.cooldowns.actions[]` = `{action, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | `CommandIntervals.Items[].Content` (`SQCommandActionData`): `CommandActionData` (class name), `GameTimeAtCreation`, `CooldownTimeRemaining`, `IsDestroyedDuringActive`; the four config values from the action class's CDO (`CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`) | one entry per action the team can call; ready = `createdGameTime` + enroute + active + cooldown; `remainingAtChange` is written by the game only at a commander change; the config values ride with the entry every frame so a seek into the middle of a replay is self-describing | every frame once entries exist (they appear at the first claim) |
+| `gameState.commanderRules` = `{enabled, votingTimeSec, voteCooldownSec, newCommanderExtensionSec, minSquadSize, minSquads}` | `SQCommanderManager.bCommanderActive`, `VotingTimeSeconds`, `VoteCooldownTimeSeconds`, `ActionCooldownExtensionOnNewCommander`, `MinimumSquadSizeForVoting`, `MinimumSquadsRequiredForVoting` | the server's commander settings, so the viewer can explain a refused vote or a new commander's wait | every frame (six scalars; simpler and seek-safe versus "once") |
+
+Deliberately not recorded: `bDoubleCaptureSpeed` and
+`bCommandActionAttempted` (never left 0), any "ready in" number, any
+event list, any rule. The viewer derives "vote opened / resolved /
+won", "commander changed / stepped down" and every timer from the
+fields above by comparing frames.
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
