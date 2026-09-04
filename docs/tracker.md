@@ -33,20 +33,23 @@ topic docs, the changelog, the session notes and the branch history since
    work lives on the board and is referenced here by issue key (SQH-1148
    to SQH-1153 as of 2026-09-04). Neither restates the other's state. Notes that cannot enter this public repo
    live in the Misc folder on Craig's machine and are listed in W87.
-9. A testing session's checklist is authored FROM this register at prep
-   time (decided 2026-09-04; wording clarified the same day). Three
-   steps, all human-or-agent judgment, none of it a text-match or a
-   tool: whoever preps the session reads the whole register and picks
-   every row whose next step names the session or needs what it offers
-   (live players, a drone, a populated recording); then expands each
-   picked row into concrete steps and the evidence to capture, following
-   the row's "detail lives in" pointers; and Craig reviews the resulting
-   one-session checklist before play. The topic docs' run sheets remain
-   the procedure reference the checklist draws on — how to fly it, which
-   capture script, how to decode — never the register of what rides the
-   session. A row that wants a session says so in its own next column;
-   that is what the sweep finds, and the pre-play review is the backstop
-   for what it misses.
+9. In-game evidence runs through the test register, table T (decided
+   2026-09-04; reshaped the same day after discussion). The moment work
+   needs an in-game test, a T row is created — as a bare `identified`
+   stub when the discussion parks before it can be scoped, so parking
+   stays cheap and nothing is lost to it. A test is `specified` once
+   its row states the question, the evidence that settles it, and what
+   it needs (players, roles, assets, gating work); ONLY specified tests
+   can be selected. A play session has no identity of its own — it is a
+   date, a player count and a focus. When one is scheduled, whoever
+   preps it selects from table T by CAN (the day's players and assets
+   meet the row's needs) and WILL (the session's focus — an eligible
+   test may deliberately wait), Craig reviews the selection, every
+   selected test's harness is confirmed built and staged before play
+   (`harness-ready`), and only then is the concrete in-game step list
+   authored, drawing procedure from the topic docs. Results decode back
+   into the rows each test serves (rule 2). All of it is human-or-agent
+   judgment; none of it is a text-match or a tool.
 10. Ids travel with their meaning (decided 2026-09-04). A row cited in
     chat, a commit message or a doc — W16, D4, C4 — is cited with
     enough of its item and state that the reader never has to open this
@@ -59,6 +62,12 @@ States for work items: `discussed` → `decided` → `specified` →
 `verified` means checked live or against a real recording, not merely
 tests green. Owner is Craig unless a row says otherwise. Commit hashes
 are on `Replay-Improvements`.
+
+States for tests (table T): `identified` (a stub — the question is
+known roughly, nothing else need be) → `specified` (question, settling
+evidence and needs written; selectable from here on) → `harness-ready`
+(capture tooling built and staged) → `run` → `decoded` (results
+recorded in the rows the test serves, which is what closes it).
 
 ## A. Work items
 
@@ -76,20 +85,20 @@ are on `Replay-Improvements`.
 | W8 | Per-player last team-switch time | deployed 2026-08-30 (35bf153) | changelog | none |
 | W9 | Seat names from the game's own seat config | deployed 2026-08-30 (27ffc06) | changelog | none |
 | W10 | Commander identity on the team record | deployed 2026-08-30 (9bc0b22, ac0659e) but **defective**: it reads the CommanderState actor as a PlayerState and emits nothing | `docs/command-assets.md` "Confirmed recorder bug" | fixed inside W18 (one hop through `CurrentCommander`) |
-| W11 | Medical capture: `players[].soldier.medical` while a healing item is held, `reviveEvents` from the log | verified live 2026-08-30 (eea3470, 994e1dc); deployed | `docs/schema.md` "Medical capture"; `docs/medical-stats.md` | one check owed: a real in-game revive seen inside a `.sqrx` (only live output has been checked) |
-| W12 | Vehicle seat inventory: `turrets[].weapons` and a `seat: "driver"` record | verified 2026-09-04: committed and pushed (6546d35), deployed the same day once the bombing test was over, live-verified on the updated build (36 turret records with `weapons`, 11 driver records, at 0 players) | `docs/schema.md` "Vehicle seat inventory"; `docs/findings.md` 2026-09-03 | eyeball a populated-match recording in the viewer when one lands |
+| W11 | Medical capture: `players[].soldier.medical` while a healing item is held, `reviveEvents` from the log | verified live 2026-08-30 (eea3470, 994e1dc); deployed | `docs/schema.md` "Medical capture"; `docs/medical-stats.md` | one check owed: a real in-game revive seen inside a `.sqrx` — test T4 |
+| W12 | Vehicle seat inventory: `turrets[].weapons` and a `seat: "driver"` record | verified 2026-09-04: committed and pushed (6546d35), deployed the same day once the bombing test was over, live-verified on the updated build (36 turret records with `weapons`, 11 driver records, at 0 players) | `docs/schema.md` "Vehicle seat inventory"; `docs/findings.md` 2026-09-03 | eyeball a populated-match recording in the viewer — test T5 |
 | W13 | 4 Hz projectile sampling | shipped and reverted the same day, 2026-08-29 (b25e656, bd79d14); the decoder keeps the optional `projectiles` key in position frames | changelog; session note | re-enabling is undecided: C1 |
 | W14 | Command-asset exploration: request markers, commander state, cooldown model, per-call actors, bombs, drones (three live sessions) | verified 2026-09-03; all nine format decisions closed 2026-09-04 | `docs/command-assets.md`, `docs/drones.md` | W15 |
 | W15 | Commander capture spec: a contract-only `docs/command-assets-spec.md` (wire shapes, viewer rules, doctor names, run sheets, one open table), then a fresh-session comparison against the journal on a written checklist | decided 2026-09-04; not started | this session's review found 8 conflicts and 5 gaps for it to resolve | after W16; order agreed 2026-09-04: tracker → rule commit (done) → session B → spec |
-| W16 | Session B: solo recon-drone capture settling the drones doc's D1 (flight time), D3 (pickup/redeploy identity), D4 (speed), D7 (team) | decided 2026-09-04; tracker script staged on the box; not run | `docs/drones.md` run sheet (procedure) | run whenever Craig has 30 minutes: build the checklist by the rule-9 sweep first, then decode into the drones doc |
+| W16 | Session B: solo recon-drone capture settling the drones doc's D1 (flight time), D3 (pickup/redeploy identity), D4 (speed), D7 (team) | decided 2026-09-04; content grandfathered whole into test T7 | `docs/drones.md` run sheet (procedure) | runs as T7 at the next solo-capable play session; its old run sheet doubles as the comparison case for the rule-9 pipeline |
 | W17 | Implementation plan for the commander, command-asset and drone capture | not started | W15's spec is its input | after W15 |
 | W18 | Implement decisions 1–7: commander block and `gameState.commanderRules` on every full frame, marker `distance`/`addDistance`/`yaw`, `commandActions` list, `drones` list plus the 4 Hz drone key, the identity fix (W10), doctor names, schema entries, viewer rules | specified 2026-09-04 | `docs/command-assets.md` "Agreed capture" sections; `docs/drones.md` | after W17; gates: tests, lint, types, frontend build, parity harness |
-| W19 | Session A: six-player acceptance run with the probe as the oracle | decided 2026-09-04 | `docs/command-assets.md` run sheet | after W18 |
-| W20 | Open commander items that gate nothing: A1 shoot-down attribution (`LastHitBy`), B2 bomb-circle radii (cosmetic), R8 command zones, C1 direct category-gate test (optional), the re-stamp rule for a still-cooling asset at a commander change and the claim rule after a step-down (unobserved branches) | open | `docs/command-assets.md` open table and run sheet | observed during W16 and W19; W15's spec carries them in its one open table |
+| W19 | Session A: six-player acceptance run with the probe as the oracle | decided 2026-09-04; content carried as test T8 | `docs/command-assets.md` run sheet | runs as T8 after W18 lands |
+| W20 | Open commander items that gate nothing: A1 shoot-down attribution (`LastHitBy`), B2 bomb-circle radii (cosmetic), R8 command zones, C1 direct category-gate test (optional), the re-stamp rule for a still-cooling asset at a commander change and the claim rule after a step-down (unobserved branches) | open | `docs/command-assets.md` open table and run sheet | observed via test T9; W15's spec carries them in its one open table |
 | W21 | Killfeed memory enrichment never reaches recordings: the serve loop replaces the memory-derived damage events with the log list every tick (since upstream 1.4.0) | found 2026-09-04; unfixed | plan addendum 2026-09-04; session note | design the merge (memory detail onto the matching log event) and run the parity harness; keep it upstream-offerable |
 | W22 | Blast origin on radial damage events | parked 2026-09-04 (decision 8) | `docs/command-assets.md` capture gap 5 | preconditions: W21 fixed, W23 answered |
 | W23 | Are hand grenades tracked projectiles? | open (none among 664 rounds in one production recording) | `docs/command-assets.md` capture gap 5 | check a production recording that has grenade kills |
-| W24 | Projectile `firer` reads null on lingering corpse records (Instigator chain decay suspected) | open | session note projectile-4hz | probe before relying on corpse-time firer joins |
+| W24 | Projectile `firer` reads null on lingering corpse records (Instigator chain decay suspected) | open | session note projectile-4hz | test T6 before relying on corpse-time firer joins |
 | W25 | Pace the full-frame builder to `--hz` (it free-runs; `--hz` only sizes caches) | deferred, low priority (Craig, 2026-09-03) | plan Phase 4 remedy 1 | none until it matters |
 | W26 | Seek index: per-frame byte offsets (a container-layout change) | not started | plan Phase 1 and Phase 4 | bundle with any other container change; direction is D7 |
 | W27 | Compact packer, built and owned here | not started; after the format additions land | plan Phase 4 remedy 2 | acceptance: pack-and-unpack a real recording of the finished format and require equality with the raw frames; generate the cross-language fixture from a recording that carries every registered key (written into plan Phase 4 remedy 2, 2026-09-04) |
@@ -116,7 +125,7 @@ are on `Replay-Improvements`.
 | W50 | Doctor hardening: machine/human parity, batched resolution, struct-internal tier, collector verdicts on the machine path | verified 2026-08-31 to 09-01 (4903a60, e8777cb, 1ce55da, ce6dc4e); 24 h soak passed | session note doctor-hardening; changelog | none |
 | W51 | 2026-08-31 Squad update: 48 constants refreshed with the doctor dictating | verified (f04399b); recordings 2026-08-31 03:07–03:54Z carry junk positions and are excluded from positional use and parity | changelog | none |
 | W52 | Upstream 1.4.5 merged and hardened (anchor gaps declared, served pack outranks the binary, `stale_source` telemetry) | verified; deployed to the box at b192740 (2026-09-02) | changelog; session note | merge upstream again after its next release |
-| W53 | Placer slots live confirmation on a populated match (the probe saw 0 players) | pending | session note doctor-hardening | first populated match with a fresh recording |
+| W53 | Placer slots live confirmation on a populated match (the probe saw 0 players) | pending | session note doctor-hardening | test T3 |
 | W54 | Upstream-offerable doctor findings (reflected `VehicleComponentState` and `CachedVehicleInventory`, declared gaps plus the gap-consistency test, the relative-move fix, dict-entry anchors) and the W21 fix once made | banked, not sent | session note doctor-hardening | offer as clean commits after the next upstream merge |
 | W55 | Offset central: UNN signs its own packs (platform is the authority, test box the verifier, the existing client the consumer) | decided with Craig ~2026-09-01; design in the Misc folder (W87), destined for the private repo; the prerequisite "intersection verdict" fix is not found in the branch under that name — status unverified | session note doctor-hardening; Misc `squidhub-offset-central-design.md`; board: SQH-1151 | verify whether the prerequisite landed (feded6d is pack precedence, not the same thing); platform side is SquidHub work |
 | W56 | The standing acceptance test: within one check-in of a Squad update the doctor reports everything that moved as `stale_source` | standing; passed twice (2026-08-31, and the update handled by W32) | session note doctor-hardening; changelog | whoever is live on the next update goes and looks |
@@ -192,6 +201,7 @@ are on `Replay-Improvements`.
 - Format rule reworded to name its three surfaces (frames additive; the container version moves with the file layout; the packed stream's version with its index-tracked lists), the frame-key register created, the packer's acceptance test written into the plan — 2026-09-04 (was D8); CLAUDE.md "Recordings are immutable", `docs/schema.md` "Frame-key register", plan Phase 1, Phase 4 remedy 2, Glossary.
 - The medical capture shape (a per-tick `medical` block while an item is held; revive events from the log) — 2026-08-30.
 - Session checklists are built from this register at prep time; topic-doc run sheets carry procedure only — 2026-09-04, rule 9.
+- In-game tests run through the test register (table T) with their own readiness ladder; named sessions dissolve into dated play sessions selecting from it by CAN and WILL; harnesses are confirmed before play — 2026-09-04, rule 9 reshaped after discussion, table T seeded with T1–T9.
 - Ids are cited with their meaning, never bare — 2026-09-04, rule 10.
 
 ## C. Discussions without a decision
@@ -201,4 +211,22 @@ are on `Replay-Improvements`.
 | C1 | Re-enabling 4 Hz projectile sampling, airborne-only | Impacted rounds linger at their rest point (median 54 s), so full frames already capture the explosion point; an airborne-only sampler would cost roughly 0.5–2 % of a production file and ~3 reads per round; smoothness alone does not justify it; the corpse-linger analysis was done 2026-09-02 | Craig's decision on whether smoother flight paths are worth the cost; not part of the commander plan | session note projectile-4hz; changelog (bd79d14) |
 | C2 | 4 Hz ammo sampling (held-weapon magazine sum in the position frame) to shrink the ammo-observation window | Put on the wishlist 2026-08-29 (b02a8d5) as the real fix for the `no_reload` blind spot | a decision, inside D1 | `docs/stats-wishlist.md` Tier 2 |
 | C3 | Mirroring this tracker to the team's issue board at milestone level | Raised 2026-09-04; the board has no project for this repo; item-level mirroring would recreate the two-places problem | Craig's view on whether team visibility is wanted | this file |
-| C4 | Full player inventory capture: a `weapons`-style list per soldier (every carried weapon/item with magazines), the player-side twin of W12's seat walk | Raised 2026-09-04. Feasibility is high: soldiers carry the same `SQPawnInventoryComponent` the seat walk already reads, held-weapon magazines already read through the same offset, and W12's doctor rows/stride check/autoresolve cover the component — the only new derivation is the soldier's inventory-component pointer. Estimated from W12's measured numbers: ~2–5 ms/tick at 50 players (full frames only, never the 4 Hz tier); storage is the real cost, naive upper bound +25–30 % per full-frame line (~15–30 MB per match), likely +10–20 % after compression. Would close the `no_reload`/`fire_no_ammo` one-slot blind spot and make suppression rounds (Tier 2) and most of C2 derivable. Cheaper variants: guns-only (~half the payload), or C2 as written | The inventory-pointer probe and a walk timing (piggyback on W16, one live soldier suffices); a real storage measurement (piggyback on W19, six players); then Craig's keep/cut decision inside D1, with the storage number feeding D4 | this session; session note seat-inventory-capture |
+| C4 | Full player inventory capture: a `weapons`-style list per soldier (every carried weapon/item with magazines), the player-side twin of W12's seat walk | Raised 2026-09-04. Feasibility is high: soldiers carry the same `SQPawnInventoryComponent` the seat walk already reads, held-weapon magazines already read through the same offset, and W12's doctor rows/stride check/autoresolve cover the component — the only new derivation is the soldier's inventory-component pointer. Estimated from W12's measured numbers: ~2–5 ms/tick at 50 players (full frames only, never the 4 Hz tier); storage is the real cost, naive upper bound +25–30 % per full-frame line (~15–30 MB per match), likely +10–20 % after compression. Would close the `no_reload`/`fire_no_ammo` one-slot blind spot and make suppression rounds (Tier 2) and most of C2 derivable. Cheaper variants: guns-only (~half the payload), or C2 as written | Tests T1 (pointer probe + walk timing) then T2 (storage measurement); then Craig's keep/cut decision inside D1, with the storage number feeding D4 | this session; session note seat-inventory-capture |
+
+## T. In-game test register
+
+What each play session draws from, per rule 9. A session selects only
+`specified`-or-better rows whose needs the day can meet; results decode
+into the rows the test serves.
+
+| id | test: question → settling evidence | serves | needs | harness | state |
+|---|---|---|---|---|---|
+| T1 | Does `SQSoldier` expose its inventory component by a reflectable name, and what does the full-kit walk cost? → the pointer resolved live on one soldier, plus a timed walk | C4, the player-inventory capture discussion | 1 live player | a read-only probe adapting the seat-walk pattern; to write | specified |
+| T2 | What does full player-inventory emission really cost on the wire? → per-line size delta of a populated recording from a throwaway build emitting the fields | C4; the number feeds D4 (retention) | T1 decoded; 4+ players; a throwaway prototype build | prototype patch; not built | specified |
+| T3 | Do the deployable placer slots (0x518/0x510 since the 2026-09-04 refresh) resolve to the placing player live? → a placed rally/FOB whose recording carries correct placer attribution, or a live pointer probe | W53, the placer confirmation waiting since the upstream-1.4.5 work | 1 player placing a deployable while online | read attribution off the fresh recording; optional 20-line probe from the doctor session note | specified |
+| T4 | Does a real revive appear correctly inside a `.sqrx`? → one in-game revive found in the recording's `reviveEvents` with both ids | W11, the medical capture's one owed check | 2 players (a down and a reviver) | none — record and decode | harness-ready |
+| T5 | Do the seat-inventory weapons rows read correctly on a real match? → viewer eyeball of `turrets[].weapons` and the driver row on a populated recording | W12, the vehicle seat inventory | 2+ players crewing vehicles | the shipped viewer | harness-ready |
+| T6 | Does a corpse-time projectile record lose its `firer` (Instigator chain decay)? → firer presence sampled across a round's linger window | W24, the corpse-firer question from the 4 Hz analysis | players producing tracked-projectile kills | a read-only probe; to write | specified |
+| T7 | The drone bundle: flight time (drones doc D1), pickup/redeploy identity (D3), speed (D4), team (D7) → tracker log decoded into the drones doc | W16, the former session B content, grandfathered whole | 1 player as commander with a recon drone | `drone_track.py`, staged on the box | harness-ready — also the pipeline's own acceptance case: the first rule-9 checklist is diffed against the drones-doc run sheet, and a gap either way is a process finding |
+| T8 | Does the commander implementation match the probe on a real match? → six-player acceptance run with the probe as oracle | W19, the former session A content | 6 players; W18 (the commander implementation) landed | the command-assets probe and run sheet | specified — blocked on W18 |
+| T9 | The unobserved commander branches: shoot-down attribution, re-stamp at a commander change, claim after a step-down, command zones → journal entries when the branches occur | W20, the open commander items that gate nothing | any session with an active commander; opportunistic | observation and the journal; no tooling | harness-ready |
