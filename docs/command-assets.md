@@ -569,6 +569,19 @@ Family-specific fields, emitted where the class has them:
 Deliberately not yet recorded: who damaged or destroyed the actor (A1 —
 added to the same record once observed working).
 
+## Agreed capture — drones (decision 7, 2026-09-04)
+
+A generic `drones` list in the full frame for every `SQFlyingDrone` pawn
+(commander drone and recon drone alike), plus drone position and yaw in
+the 4 Hz position frames as a third sampled set. Cost measured against
+existing frames: ~115 B per drone per sample, ~28 KB on disk per
+10-minute flight, 3-4 small reads per drone per sample — under half a
+percent of a production match even with many recon flights. Fields,
+verification status and the outstanding tests live in **`docs/drones.md`**,
+which owns the drone pawn from here on; this document keeps only the
+commander-side link (`Command Action` -> the call actor, and the
+cooldown-restart-on-destruction rule).
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
