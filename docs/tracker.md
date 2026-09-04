@@ -202,6 +202,7 @@ recorded in the rows the test serves, which is what closes it).
 - The medical capture shape (a per-tick `medical` block while an item is held; revive events from the log) — 2026-08-30.
 - Session checklists are built from this register at prep time; topic-doc run sheets carry procedure only — 2026-09-04, rule 9.
 - In-game tests run through the test register (table T) with their own readiness ladder; named sessions dissolve into dated play sessions selecting from it by CAN and WILL; harnesses are confirmed before play — 2026-09-04, rule 9 reshaped after discussion, table T seeded with T1–T9.
+- Harnesses are per-test, composed never merged, canonical in `scripts/probes/` once ready — 2026-09-04, table T preamble; `probe_common.py` + README carry the conventions.
 - Ids are cited with their meaning, never bare — 2026-09-04, rule 10.
 
 ## C. Discussions without a decision
@@ -219,6 +220,15 @@ What each play session draws from, per rule 9. A session selects only
 `specified`-or-better rows whose needs the day can meet; results decode
 into the rows the test serves.
 
+Harness design (decided 2026-09-04): one probe per test, one question
+per probe; a session composes probes — at most a thin launcher generated
+at prep — and never gets a merged harness. `scripts/probes/` is the
+durable home (`probe_common.py` carries the shared attach plumbing;
+its README carries the conventions): a probe graduates there, committed
+and reviewed, when its test reaches `harness-ready`, so staging means
+`git pull` and a box cleanup cannot silently invalidate the state.
+`/tmp` on the box holds probe output and development scratch only.
+
 | id | test: question → settling evidence | serves | needs | harness | state |
 |---|---|---|---|---|---|
 | T1 | Does `SQSoldier` expose its inventory component by a reflectable name, and what does the full-kit walk cost? → the pointer resolved live on one soldier, plus a timed walk | C4, the player-inventory capture discussion | 1 live player | a read-only probe adapting the seat-walk pattern; to write | specified |
@@ -227,6 +237,6 @@ into the rows the test serves.
 | T4 | Does a real revive appear correctly inside a `.sqrx`? → one in-game revive found in the recording's `reviveEvents` with both ids | W11, the medical capture's one owed check | 2 players (a down and a reviver) | none — record and decode | harness-ready |
 | T5 | Do the seat-inventory weapons rows read correctly on a real match? → viewer eyeball of `turrets[].weapons` and the driver row on a populated recording | W12, the vehicle seat inventory | 2+ players crewing vehicles | the shipped viewer | harness-ready |
 | T6 | Does a corpse-time projectile record lose its `firer` (Instigator chain decay)? → firer presence sampled across a round's linger window | W24, the corpse-firer question from the 4 Hz analysis | players producing tracked-projectile kills | a read-only probe; to write | specified |
-| T7 | The drone bundle: flight time (drones doc D1), pickup/redeploy identity (D3), speed (D4), team (D7) → tracker log decoded into the drones doc | W16, the former session B content, grandfathered whole | 1 player as commander with a recon drone | `drone_track.py`, staged on the box — presence confirmed by ls 2026-09-04, a prior run's output beside it | harness-ready — also the pipeline's own acceptance case: the first rule-9 checklist is diffed against the drones-doc run sheet, and a gap either way is a process finding |
+| T7 | The drone bundle: flight time (drones doc D1), pickup/redeploy identity (D3), speed (D4), team (D7) → tracker log decoded into the drones doc | W16, the former session B content, grandfathered whole | 1 player as commander with a recon drone | `scripts/probes/drone_track.py` — canonical since 2026-09-04 (relocated from box `/tmp` under the harness convention; attach via probe_common, the stale 0x200 transform fallback dropped for the health constant); the `/tmp` copy is retired once `docs/drones.md`'s run sheet points at the repo path | harness-ready — also the pipeline's own acceptance case: the first rule-9 checklist is diffed against the drones-doc run sheet, and a gap either way is a process finding |
 | T8 | Does the commander implementation match the probe on a real match? → six-player acceptance run with the probe as oracle | W19, the former session A content | 6 players; W18 (the commander implementation) landed | the command-assets probe and run sheet | specified — blocked on W18 |
 | T9 | The unobserved commander branches: shoot-down attribution, re-stamp at a commander change, claim after a step-down, command zones → journal entries when the branches occur | W20, the open commander items that gate nothing | any session with an active commander; opportunistic | observation and the journal; no tooling | harness-ready |
