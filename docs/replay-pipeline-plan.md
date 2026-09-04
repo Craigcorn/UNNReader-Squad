@@ -167,23 +167,29 @@ that exist. Phase 4 is the designated parallel track.
   sprint stamina, `bFiring`/`bReloading`, `ShovelAction`, mine
   `OwnerPlayerState` — plus whatever the stats wishlist decides. Recording
   gains are forever; gaps are forever too. Enrichment is **additive**: a
-  new field on an existing record needs no version change, because the
-  file stores raw frames and every reader ignores keys it does not know
-  (earlier drafts called this "v3"; it is not a version number — see the
-  Glossary). What IS a versioned change: a new top-level tracked list, a
-  change to the file's layout, or a change to what an existing field
-  means (the last is never allowed).
+  new field, a new top-level list or a new position-line key needs no
+  version change, because the file stores raw frames and every reader
+  ignores keys it does not know (earlier drafts called this "v3"; it is
+  not a version number — see the Glossary); each addition is entered in
+  the schema doc's frame-key register. What IS versioned, and by which
+  number: a change to the file's byte layout moves the container
+  version; a change to which lists the packed stream tracks by index
+  moves the replay format; a change to what an existing field means is
+  never allowed (CLAUDE.md, "Recordings are immutable").
 - **Seek index** in the format (or sidecar): per-frame byte offsets so the
   viewer can later fetch ranges instead of whole files. This is a
   container-layout change — bundle it with any other container change so
   old files are handled once (see Phase 4, viewer scalability).
 - **Seeding-layer exclusion**: config pattern list (default `*Seed*`); the
   recorder skips those matches entirely.
-- **Bi-versioned consumers** — when a versioned change happens: the
-  browser decoder and `crosslang.test.mts` are extended (the fixture is
-  hand-extended; its generator and the compact packer it mirrors are
-  upstream's private platform code, which the agent does not use), and
-  every recording made before the change keeps playing everywhere.
+- **Bi-versioned consumers** — when a versioned change happens, the
+  consumer that owns the number is extended and keeps reading the old
+  form: the reader opens both container layouts; the browser decoder
+  reads both replay formats and `crosslang.test.mts` is regenerated from
+  a recording that carries every registered key (its generator and the
+  compact packer it mirrors are upstream's private code today, and ours
+  once Phase 4 builds a packer). Every recording made before the change
+  keeps playing everywhere.
 - Tooling: `stats-backfill` reads `serverId` per recording from its meta
   instead of one `--server-id` flag per run.
 
@@ -243,8 +249,15 @@ none started:
    unchanged sub-objects (players, vehicles) are sent once and reused in
    the browser; the viewer already carries the decoder (`replayUnpack.ts`,
    replay format 2) and a fixture to validate a re-implementation
-   against. Generic — it diffs objects and knows no field names, so
-   format additions cannot break it. Helps memory more than bandwidth
+   against. Generic for every key it does not track by index — those it
+   sends whole, so format additions cannot break it; the two
+   index-tracked lists are the part the format version names.
+   **Acceptance when we build ours (agreed 2026-09-04):** pack and unpack
+   a real recording of the finished format and require equality with the
+   raw frames, key for key; generate the fixture from a recording that
+   carries every key in the schema doc's frame-key register; choose any
+   further index-tracked list on measurement, and each one moves the
+   replay format version. Helps memory more than bandwidth
    (zstd already removes ~10x on the wire).
 3. *Chunked loading* (above): bounds memory regardless of length, needs
    the seek index — a container change.
@@ -336,10 +349,15 @@ Status is tracked in `docs/tracker.md` — D1 (wishlist), D4 (retention), D3
   stats computed live during play and recomputed afterward from its recording
   alone: two databases, diffed row by row. The proof that a replay file is a
   complete record.
-- **Format versions** — the recording file's container is version 1
-  (`sqrx.py`); the compact replay stream the viewer can also decode is
-  replay format 2 (upstream's packer, which the agent does not use — it
-  serves raw frames). "v3" in earlier drafts meant "enriched recordings"
-  and is not a version number: additive fields change no version. The
+- **Format versions** — three surfaces. The frames (raw JSON, full and
+  4 Hz position lines) carry no version a reader checks; the
+  `schemaVersion` string on each frame is a constant label from
+  upstream. The recording file's container is version 1 (`sqrx.py`) and
+  moves only with the file's byte layout. The compact replay stream the
+  viewer can also decode is replay format 2 (upstream's packer, which
+  the agent does not use — it serves raw frames) and moves only with
+  the set of index-tracked lists. "v3" in earlier drafts meant "enriched
+  recordings" and is not a version number: additive keys change no
+  version and are listed in the schema doc's frame-key register. The
   platform ingests post-upgrade recordings (decision 4); old files keep
   playing forever.

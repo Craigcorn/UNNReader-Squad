@@ -39,15 +39,28 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   it — see CONTRIBUTING.md "Reverse-engineered offsets"; `tests/test_fleet.py`
   enforces it.
 - **Recordings are immutable; consumers are bi-versioned.** Old `.sqrx` files
-  must keep playing forever. Adding a field to an existing record is not a
-  wire-format change (frames are raw JSON, unknown keys are ignored) — it
-  is documented in `docs/schema.md`, emitted only when present, and never
-  changes what an existing field means. A new top-level tracked list, a
-  container-layout change, or a change of meaning IS one: it bumps the
-  format version and extends the Python↔TypeScript cross-language fixture
-  (`frontend/src/state/crosslang.test.mts`; hand-extended — its generator
-  is upstream's). The two decoders drifted silently once (the 4 Hz bug);
-  the fixture is why it can't happen again.
+  must keep playing forever. Three surfaces have a format, and the one
+  that owns a change is the one that versions it:
+  - *Frames* — the raw JSON the recorder writes, full snapshots and 4 Hz
+    position lines — are additive. A new field on an existing record, a
+    new top-level list, or a new position-line key is documented in
+    `docs/schema.md` and entered in its frame-key register, emitted only
+    when present, and never changes what an existing field means. No
+    version moves: every reader ignores keys it does not know.
+  - *The `.sqrx` container* (`sqrx.py`, version 1) moves only when the
+    file's byte layout changes — a seek index, for instance. The reader
+    then opens both old and new files; bundle every such change so old
+    files are handled once.
+  - *The packed replay stream* (`frontend/src/state/replayUnpack.ts`,
+    format 2) moves only when the set of index-tracked entity lists
+    (players and vehicles today) or their encoding changes, and that
+    change regenerates the Python↔TypeScript fixture
+    (`frontend/src/state/crosslang.test.mts`) from a recording that
+    carries every registered key. The two decoders drifted silently
+    once (the 4 Hz bug); the fixture is why it can't happen again.
+
+  A change of meaning of an existing field is never allowed — add a new
+  field instead.
 - **One register.** `docs/tracker.md` is the single record of work items,
   open decisions and discussions that ended without a decision. A commit
   that changes an item's state updates its row in the same commit; a

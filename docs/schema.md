@@ -1,48 +1,62 @@
 # sqreader snapshot schema
 
-The contract for what the reader emits per tick. We're building up to
-this incrementally — each phase adds more fields. The full target is
-documented in the kickoff doc; this file tracks **what we actually
-produce today**.
+The contract for what the reader emits. Two parts: the **frame-key
+register** below — every top-level key of the full frame and of the
+4 Hz position line, when it arrived, and how the packed replay stream
+carries it — and one section per capture added in this fork, describing
+the shape of the addition. The pre-fork keys are described field by
+field by upstream's `docs/findings.md` and by the viewer's
+`frontend/src/state/types.ts`; this file grows one section per addition.
 
----
+Rules (CLAUDE.md, "Recordings are immutable"): frames are additive and
+unversioned — a new key is documented here, entered in the register in
+the same commit that adds it, emitted only when present, and never
+changes what an existing key means. The `.sqrx` container version moves
+only with the file's byte layout; the packed replay stream's version
+moves only with the set of index-tracked lists.
 
-## Phase 0 — no snapshot yet
+## Frame-key register
 
-The reader can attach to the process and read raw memory at known
-addresses. No structured output.
+### Full frame (one JSON object per tick)
 
----
+| Key | What it holds | Since | In the packed stream |
+|---|---|---|---|
+| `timestamp` | wall-clock time of the tick | upstream | sent whole |
+| `server` | server label | upstream | sent whole |
+| `schemaVersion` | constant label `phase3-draft` from upstream; descriptive, no reader checks it | upstream | sent whole |
+| `tick` | the reader's tick counter | upstream | sent whole |
+| `perf` | reader diagnostics (build time, cache counters) | upstream | sent whole |
+| `counts` | entity counts | upstream | sent whole |
+| `gameState` | match and layer state, incl. `worldTimeSec`; the commander rules block joins it (planned, `docs/command-assets.md` decision 2) | upstream; rules block planned 2026-09-04 | sent whole |
+| `teams` | per-team record; the commander block joins it (planned, decision 2) | upstream; commander block planned 2026-09-04 | sent whole |
+| `squads` | per-squad record | upstream | sent whole |
+| `players` | per-player record with `soldier` (`soldier.medical` since 2026-08-30) | upstream | **index-tracked** |
+| `vehicles` | per-vehicle record with `turrets` (`turrets[].weapons` and the driver record since 2026-09-04) | upstream | **index-tracked** |
+| `captureZones` | capture-zone state | upstream | sent whole |
+| `markers` | map markers (`distance`, `addDistance`, `yaw` planned, decision 5) | upstream | sent whole |
+| `deployables` | deployables with placer | upstream | sent whole |
+| `vehicleSpawners` | spawner state | upstream | sent whole |
+| `rallyPoints` | rally points | upstream | sent whole |
+| `projectiles` | tracked projectiles with `firer` and `team` (since 2026-08-28) | upstream | sent whole |
+| `damageEvents` | damage and kill events; log-derived in serve mode today (the memory detail is lost — tracker W21) | upstream | sent whole |
+| `reviveEvents` | revives from the server log; present only on ticks with revives | 2026-08-30 | sent whole |
+| `commandActions` | one entry per live command actor | planned, decision 6 (2026-09-04) | sent whole |
+| `drones` | one entry per live drone pawn | planned, decision 7 (2026-09-04) | sent whole |
 
-## Phase 1 — reflection anchors (planned)
+### Position line (`{"t": "pos", ...}`, 4 Hz, between full frames)
 
-A diagnostic dump only:
+The packed stream wraps the whole line as `{"p": line}` and passes it
+through untouched, so every key here rides the packed stream by
+construction.
 
-```json
-{
-  "binary_build_id": "96be21a...",
-  "squad_version": "v10.4.1",
-  "ue_version": "5.7.4-604352",
-  "module_base": 2097152,
-  "globals": {
-    "g_world_string": 20682414,
-    "g_world_pointer": null,
-    "g_uobject_array": null,
-    "f_name_pool": null
-  },
-  "first_uobjects": []
-}
-```
-
----
-
-## Phase 3 target
-
-See `squad-memory-reader-kickoff.md` § "Reference: Snapshot Schema
-Contract (Truncated)" for the full target, and `kickoff-changes.md`
-§ "Phase 4+" for the 11 additional reader paths (capture zones, FOBs,
-damage events, vehicle pool, projectiles, markers, RAAS lane,
-per-player extras, vehicle IDs, continuous mode, offset auto-verify).
+| Key | What it holds | Since |
+|---|---|---|
+| `t` | the literal `"pos"` | 2026-08-28 (two-tier recording) |
+| `tick`, `timestamp`, `fullTick` | the sample's tick and time, and the full frame it follows | 2026-08-28 |
+| `players[]` | `{id, x, y, z, h, yaw}`; `id` is the player's eosId, else name | 2026-08-28 |
+| `vehicles[]` | `{id, x, y, h, yaw, team}`; `id` is the vehicle id | 2026-08-28 |
+| `projectiles[]` | `{id, x, y, z}`; optional — the sampler does not emit it today (shipped and reverted 2026-08-29); the viewer reads it when present | 2026-08-29 |
+| `drones[]` | `{id, x, y, z, yaw}`; `id` is the pawn address, the same id as the full-frame entry | planned, decision 7 (2026-09-04) |
 
 ---
 

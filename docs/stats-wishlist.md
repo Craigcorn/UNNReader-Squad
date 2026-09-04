@@ -17,9 +17,7 @@ live-server session before its cost is known.
 2. **Enrichment is cheaper than the plan assumed.** `.sqrx` stores raw
    snapshot NDJSON verbatim (`sqrx.py:79-81`), so a new snapshot key needs no
    container change, and the browser's key-diff decoder passes unknown scalar
-   fields through untouched (`replayUnpack.ts`). The strict v2→v3 boundary
-   really applies to the **seek index** and to any new top-level arrays — not
-   to added fields.
+   fields through untouched (`replayUnpack.ts`). What is versioned (rule settled 2026-09-04, CLAUDE.md "Recordings are immutable"): the container version moves with the file's byte layout (the **seek index**); the packed stream's version moves with its index-tracked lists; new fields and new top-level lists are additive.
 3. **The compact wire encoder is not in this repo.** The viewer's decoder
    mirrors `central/replaypack.py` (upstream's central platform, private);
    the agent itself serves raw NDJSON with zstd passthrough. Phase 2 choice

@@ -543,9 +543,7 @@ actor exists (a handful per match, 30 s to 10 min each). One entry per
 actor, every full frame. Every field resolves by reflection name on the
 actor's own class (Blueprint variable names contain spaces and are used
 verbatim); a field the class lacks is omitted, never defaulted. Nothing
-computed, no events. This is the one new top-level list in the plan: raw
-frames carry it as another key; a compact packer, if SquidHub ever
-adopts one, must be taught it.
+computed, no events. It is one of the two new top-level lists in the plan (the other is `drones`): additive under the format rule, entered in the schema doc's frame-key register; a packer built to the current replay format carries it whole, and the packer's round-trip test covers it.
 
 | Wire field | Memory source (all `BP_CommandActor_*`) | Meaning |
 |---|---|---|

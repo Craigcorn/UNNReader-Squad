@@ -74,8 +74,7 @@ be confirmed in implementation.
    ~28 KB on disk per 10-minute flight, 3–4 small reads per drone per
    sample. Touch points: `possample.SampledEntities` / `sample_positions`,
    the position-frame `drones` key, the viewer reconstructor,
-   `docs/schema.md`. Additive under the format rule; the compact packer,
-   if ever adopted, must be taught the key.
+   `docs/schema.md`. Additive under the format rule, entered in the schema doc's frame-key register; the packed stream passes position lines through untouched, and the packer's round-trip test covers the key.
 3. Attribution of a shoot-down (`LastHitBy`) is added when observed
    working (A1 in the commander doc).
 
