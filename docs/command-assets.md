@@ -631,8 +631,31 @@ cooldown-restart-on-destruction rule).
    generic) saying which event block is live. The killfeed read stops at
    the point-damage block today. Emitting `origin` on radial damage
    events would give every grenade, mortar, IED and bomb hit its blast
-   location as memory truth — a candidate at ~24 bytes per radial event,
-   not proposed yet.
+   location as memory truth. **Closed out 2026-09-04 as PARKED (decision
+   8)**, with the claims audited: verified — the struct layout, the two
+   bomb origins within 1 m of the rest points, the poll-and-overwrite miss
+   profile shared with `hitDistance`/`bone`, log-merged kills never lost,
+   the doctor's struct tier already covering the struct, additive with no
+   version change; refuted — "rockets, HE and grenades rarely leave rest
+   points" (production recordings capture 92-100 % of impacts per class;
+   impacted rounds linger a median 54 s) and "artillery shells are not
+   tracked" (they are); corrected — JSON cost is ~70 B per explosion hit
+   (~14 % of damage events, roughly 5-10 KB per match), not 24 B; open —
+   whether hand grenades are tracked projectiles (none appeared among 664
+   rounds in one production recording), and whether radial class ids
+   other than the observed 1000 exist. Remaining value: the per-victim
+   blast distance without guessing which round of a salvo, barrage
+   footprints by casualty, and a cross-check on rest points. Semantic
+   caution for any future schema entry: the origin sits ABOVE the impact
+   by the ordnance's configured distance (1 m secondary, 10 m primary on
+   the bomb) and depends on which blast hit the victim — it is the damage
+   origin, not a ground point. Preconditions before promoting it: (a)
+   show this fork's memory-derived damage fields populate on a
+   production-size match — the five managed-instance recordings carry
+   `damageType`/`causerClass`/`hitDistance` as null on 3,739 of 3,744
+   events, a finding that matters for the killfeed regardless of origin;
+   (b) settle the hand-grenade question. Not part of the commander
+   plan.
 
 ## Open questions — status after the 09-03 session
 
