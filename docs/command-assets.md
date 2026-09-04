@@ -516,6 +516,39 @@ frame carries a squad-data marker and an actor marker of the same
 family, owner and position, it renders one shape. That de-duplication is
 a viewer rule, owned by the viewer work; the recorder never merges.
 
+## Agreed capture — per-call command actors (decision 6, 2026-09-04)
+
+A new frame list, `commandActions`, present only while a `BP_CommandActor_*`
+actor exists (a handful per match, 30 s to 10 min each). One entry per
+actor, every full frame. Every field resolves by reflection name on the
+actor's own class (Blueprint variable names contain spaces and are used
+verbatim); a field the class lacks is omitted, never defaulted. Nothing
+computed, no events. This is the one new top-level list in the plan: raw
+frames carry it as another key; a compact packer, if SquidHub ever
+adopts one, must be taught it.
+
+| Wire field | Memory source (all `BP_CommandActor_*`) | Meaning |
+|---|---|---|
+| `id`, `class` | actor address; class name | identity of this call's actor, e.g. `BP_CommandActor_SU25_Bomb_Strafe_C` |
+| `team` | `Team` | owning team |
+| `action` | `Action` (class) | the `CommandAction_*` config class — joins the commander block's `cooldowns.actions[]` entry |
+| `callerEosId` | `DamageInstigatorController` -> controller -> PlayerState | the commander who called it (the attribution pointer the game itself uses for the asset's kills) |
+| `position`, `yaw` | root transform | where the actor is this frame (aircraft move; artillery sits at its origin) |
+| `actionDestroyed` | `Action Destroyed` | the call has ended (actor lingers for `Destroy Delay after Action Destroyed`) |
+| `distance` | `Distance` | the actor's own length figure (the creep's path length = the marker's) |
+
+Family-specific fields, emitted where the class has them:
+
+| Family | Fields | Memory source |
+|---|---|---|
+| Strike aircraft (`*_Strafe_*`, gun and bomb) | `health`, `dead`, `shotsMade`, `maxShots`, `splineDistance`, `originLocation` | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` — a shootable aircraft: progress along its run, whether it fired, whether it died |
+| Artillery creep / barrage and mortar barrage | `originLocation`, `targetLocation`, `maxDropRadius`, `preWarningShells`, `shellsPerBarrage`, `barrageCount`, `currentBarrage`, `projectile` | `OriginLocation`, `target location`, `MaxDropRadius`, `PreWarningShells`, `ShellsPerBarrage`, `BarrageCount`, `CurrentBarrage`, `Projectile` (class) — the fire plan and its progress; shells are not tracked projectiles, so this is the only record of a barrage |
+| UAV | `health` if present | position is the point; layout to be reflected on first sight |
+| Drone spawner (`BP_CommandActor_Drone_C`) | `health`, `pilotEosId` | `Health`, `SQ PC` -> PlayerState |
+
+Deliberately not yet recorded: who damaged or destroyed the actor (A1 —
+added to the same record once observed working).
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
