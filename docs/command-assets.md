@@ -439,7 +439,17 @@ observed live:
    and vote/asset events - storage measured ahead of design at
    **+0.25 %/match, ~0.009 ms/tick** (house canonicalized-zstd method,
    ceiling-flavored model), so the cost gate is pre-cleared for whatever
-   shape is agreed.
+   shape is agreed. **Agreed 2026-09-04**: the cooldown state is recorded
+   as the game holds it — the category stamps with their intervals, and
+   per action entry the action class, `GameTimeAtCreation`,
+   `CooldownTimeRemaining` and `IsDestroyedDuringActive` — plus, once per
+   entry when it first appears, the action's `CategoryId`,
+   `EnrouteDuration`, `ActiveDuration` and `CooldownDuration` read from
+   its config class. Every timer rule (effective duration, later of the
+   two gates, the new-commander re-stamp) stays viewer arithmetic, so a
+   corrected rule or a patched duration never touches recordings, and
+   the replay is self-describing for factions never seen on the test
+   box.
 4. The commander-identity **bugfix** (one hop via `CurrentCommander`)
    stands apart from the debate - it repairs an already-shipped field.
 5. **Radial-damage origins are readable and unrecorded (09-03).**
@@ -494,6 +504,13 @@ dump, the take-hit struct layout) are archived off-repo.
   On a layer dense with command zones and commander-variant vehicles the
   mortar actor's per-tick raws were crowded out of the dump cap, costing
   the direct fire-plan read (recovered from the CDO instead).
+- Never guess a FastArray stride. The 09-02 probe sliced `CommandIntervals`
+  items at 32 bytes; the real `SQCommandActionDataFASItem` is 40, so the
+  second entry's stamp fell 24 bytes past the slice and the one
+  mid-cooldown commander-swap sample memory offered was lost. Element
+  sizes come from reflection (the `Items` ArrayProperty's inner struct,
+  `properties_size`); the probe now resolves them at startup and logs
+  them (`aux-size` events).
 - Short-lived blueprint classes (the bomb projectile lives only in flight)
   need a trigger watcher: poll for the class, dump its CDO the instant it
   exists. The bomb config was captured that way mid-flight.
