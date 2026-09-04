@@ -33,14 +33,20 @@ topic docs, the changelog, the session notes and the branch history since
    work lives on the board and is referenced here by issue key (SQH-1148
    to SQH-1153 as of 2026-09-04). Neither restates the other's state. Notes that cannot enter this public repo
    live in the Misc folder on Craig's machine and are listed in W87.
-9. A testing session's checklist is built FROM this register at prep
-   time (decided 2026-09-04): sweep the tables for every row whose next
-   step names the session or needs what it offers (live players, a
-   drone, a populated recording), and the sweep is the list of what to
-   collect. The topic docs' run sheets remain the procedure reference —
-   how to fly it, which script, how to decode — never the register of
-   what rides the session; a rider references the session from its own
-   row and the sweep is what finds it there.
+9. A testing session's checklist is authored FROM this register at prep
+   time (decided 2026-09-04; wording clarified the same day). Three
+   steps, all human-or-agent judgment, none of it a text-match or a
+   tool: whoever preps the session reads the whole register and picks
+   every row whose next step names the session or needs what it offers
+   (live players, a drone, a populated recording); then expands each
+   picked row into concrete steps and the evidence to capture, following
+   the row's "detail lives in" pointers; and Craig reviews the resulting
+   one-session checklist before play. The topic docs' run sheets remain
+   the procedure reference the checklist draws on — how to fly it, which
+   capture script, how to decode — never the register of what rides the
+   session. A row that wants a session says so in its own next column;
+   that is what the sweep finds, and the pre-play review is the backstop
+   for what it misses.
 10. Ids travel with their meaning (decided 2026-09-04). A row cited in
     chat, a commit message or a doc — W16, D4, C4 — is cited with
     enough of its item and state that the reader never has to open this
