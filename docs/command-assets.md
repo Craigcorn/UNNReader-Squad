@@ -497,6 +497,14 @@ recordings only through the squad-data marker path (`arrowLength` /
 actor copy is a second, independent source and the only one for a
 Director actor that has no squad-data twin in a frame.
 
+The two copies are two markers from the game's own point of view — the
+squad-data entry is what the placing squad sees, the team actor is what
+other squad leaders see (player-confirmed 2026-09-04) — so the recorder
+records both, truthfully, and **the viewer must not draw both**: when a
+frame carries a squad-data marker and an actor marker of the same
+family, owner and position, it renders one shape. That de-duplication is
+a viewer rule, owned by the viewer work; the recorder never merges.
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
