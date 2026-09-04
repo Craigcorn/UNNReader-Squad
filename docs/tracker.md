@@ -41,6 +41,11 @@ topic docs, the changelog, the session notes and the branch history since
    how to fly it, which script, how to decode — never the register of
    what rides the session; a rider references the session from its own
    row and the sweep is what finds it there.
+10. Ids travel with their meaning (decided 2026-09-04). A row cited in
+    chat, a commit message or a doc — W16, D4, C4 — is cited with
+    enough of its item and state that the reader never has to open this
+    file mid-sentence to learn what they are being told. The id is for
+    finding the row afterwards, not a substitute for saying what it is.
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,
@@ -181,6 +186,7 @@ are on `Replay-Improvements`.
 - Offset central: UNN signs its own packs — ~2026-09-01 (W55).
 - The medical capture shape (a per-tick `medical` block while an item is held; revive events from the log) — 2026-08-30.
 - Session checklists are built from this register at prep time; topic-doc run sheets carry procedure only — 2026-09-04, rule 9.
+- Ids are cited with their meaning, never bare — 2026-09-04, rule 10.
 
 ## C. Discussions without a decision
 
