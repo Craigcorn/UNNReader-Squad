@@ -33,6 +33,14 @@ topic docs, the changelog, the session notes and the branch history since
    work lives on the board and is referenced here by issue key. Neither
    restates the other's state. Notes that cannot enter this public repo
    live in the Misc folder on Craig's machine and are listed in W87.
+9. A testing session's checklist is built FROM this register at prep
+   time (decided 2026-09-04): sweep the tables for every row whose next
+   step names the session or needs what it offers (live players, a
+   drone, a populated recording), and the sweep is the list of what to
+   collect. The topic docs' run sheets remain the procedure reference —
+   how to fly it, which script, how to decode — never the register of
+   what rides the session; a rider references the session from its own
+   row and the sweep is what finds it there.
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,
@@ -62,7 +70,7 @@ are on `Replay-Improvements`.
 | W13 | 4 Hz projectile sampling | shipped and reverted the same day, 2026-08-29 (b25e656, bd79d14); the decoder keeps the optional `projectiles` key in position frames | changelog; session note | re-enabling is undecided: C1 |
 | W14 | Command-asset exploration: request markers, commander state, cooldown model, per-call actors, bombs, drones (three live sessions) | verified 2026-09-03; all nine format decisions closed 2026-09-04 | `docs/command-assets.md`, `docs/drones.md` | W15 |
 | W15 | Commander capture spec: a contract-only `docs/command-assets-spec.md` (wire shapes, viewer rules, doctor names, run sheets, one open table), then a fresh-session comparison against the journal on a written checklist | decided 2026-09-04; not started | this session's review found 8 conflicts and 5 gaps for it to resolve | after W16 and D8; proposed order tracker → rule commit → session B → spec, not yet confirmed by Craig |
-| W16 | Session B: solo recon-drone capture settling the drones doc's D1 (flight time), D3 (pickup/redeploy identity), D4 (speed), D7 (team) | decided 2026-09-04; tracker script staged on the box; not run | `docs/drones.md` run sheet | run whenever Craig has 30 minutes; decode into the drones doc |
+| W16 | Session B: solo recon-drone capture settling the drones doc's D1 (flight time), D3 (pickup/redeploy identity), D4 (speed), D7 (team) | decided 2026-09-04; tracker script staged on the box; not run | `docs/drones.md` run sheet (procedure) | run whenever Craig has 30 minutes: build the checklist by the rule-9 sweep first, then decode into the drones doc |
 | W17 | Implementation plan for the commander, command-asset and drone capture | not started | W15's spec is its input | after W15 |
 | W18 | Implement decisions 1–7: commander block and `gameState.commanderRules` on every full frame, marker `distance`/`addDistance`/`yaw`, `commandActions` list, `drones` list plus the 4 Hz drone key, the identity fix (W10), doctor names, schema entries, viewer rules | specified 2026-09-04 | `docs/command-assets.md` "Agreed capture" sections; `docs/drones.md` | after W17; gates: tests, lint, types, frontend build, parity harness |
 | W19 | Session A: six-player acceptance run with the probe as the oracle | decided 2026-09-04 | `docs/command-assets.md` run sheet | after W18 |
@@ -172,6 +180,7 @@ are on `Replay-Improvements`.
 - Commander decisions 1–9 (additive fields; the commander block contract; votes derived, not evented; stamps only; marker geometry fields; the `commandActions` list; the `drones` list in the fast tier; blast origin parked; two verification sessions) — 2026-09-04, `docs/command-assets.md` "Agreed capture" sections and `docs/drones.md`.
 - Offset central: UNN signs its own packs — ~2026-09-01 (W55).
 - The medical capture shape (a per-tick `medical` block while an item is held; revive events from the log) — 2026-08-30.
+- Session checklists are built from this register at prep time; topic-doc run sheets carry procedure only — 2026-09-04, rule 9.
 
 ## C. Discussions without a decision
 
