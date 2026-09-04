@@ -68,6 +68,11 @@ changelog's `[Unreleased]`; reports naming players live in
   are landing from a parallel session.
 - Viewer scalability measured against production-sized recordings — see
   Phase 4; it changes the retention estimate in open question 2.
+- **Found 2026-09-04, unfixed**: the recorder discards its memory-derived
+  damage events in favour of the log-derived list every tick (see the
+  open-decisions table), so no recording carries hit distance, headshot,
+  bone or victim position for any hit. Must be explored before any new
+  memory-derived damage field is proposed.
 
 **Open decisions (owner: Craig unless noted):**
 
@@ -81,6 +86,7 @@ changelog's `[Unreleased]`; reports naming players live in
 | speedhack 18.0 borderline | **resolved 2026-08-29: a hull-rider, correctly flagged** — the player stood on a moving BMP-1's roof (dz +2.4 m, unseated, at the vehicle's exact road speed), a rules violation the alert usefully surfaced. Seat tracking is fine (the same blueprint resolves passengers in the Fallujah recording); an initial seat-gap theory was disproven by Craig's challenge. Threshold stays 18.0, no suppression wanted. Evidence: Misc/speedhack-borderline-verdict.md |
 | Production rollout path for the fork | Phase 2/3 decision (see open question 4) |
 | HEAD-request support | task chip pending |
+| **Killfeed memory enrichment never reaches recordings (found 2026-09-04)** | **must be explored — bug, not a decision.** The snapshot builds memory-derived damage events (`damage`, `damageType`, `causerClass`, `hitDistance`, `headshot`, `bone`, `victimPos`, `victimSoldier`, attacker controller) from `LastTakeHitInfo`, but `_consume_full` then ASSIGNS the log tailer's event list over `damageEvents` whenever a log tailer is active — i.e. always in `serve` — so the memory list is discarded every tick. Present since upstream 1.4.0 (`0167579`), not a fork regression. Measured: 0 of 85 damage events in the fork's two newest test-box recordings and 5 of 3,744 in five managed-instance production recordings carry any memory-derived field; kill weapons come from the log's "caused by" text. Parity is unaffected (live and replay see the same log-derived list) but the killfeed's distance/headshot/bone detail, the victim position at the hit, and any future memory-derived damage field (e.g. the parked blast origin) are silently null. Fix shape to evaluate: merge the memory detail onto the matching log event (same victim, timestamps within a window) or emit both with a `source` tag — a change on the parity-critical path, so `scripts/stats_parity.py` gates it; upstream-offerable. Owner: Craig to schedule |
 
 **Efficacy caveat that must survive every summary:** detector validation
 proves no false accusations; it proves nothing about catching cheaters until
