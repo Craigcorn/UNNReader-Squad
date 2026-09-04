@@ -562,7 +562,7 @@ Family-specific fields, emitted where the class has them:
 | Family | Fields | Memory source |
 |---|---|---|
 | Strike aircraft (`*_Strafe_*`, gun and bomb) | `health`, `dead`, `shotsMade`, `maxShots`, `splineDistance`, `originLocation` | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` — a shootable aircraft: progress along its run, whether it fired, whether it died |
-| Artillery creep / barrage and mortar barrage | `originLocation`, `targetLocation`, `maxDropRadius`, `preWarningShells`, `shellsPerBarrage`, `barrageCount`, `currentBarrage`, `projectile` | `OriginLocation`, `target location`, `MaxDropRadius`, `PreWarningShells`, `ShellsPerBarrage`, `BarrageCount`, `CurrentBarrage`, `Projectile` (class) — the fire plan and its progress; shells are not tracked projectiles, so this is the only record of a barrage |
+| Artillery creep / barrage and mortar barrage | `originLocation`, `targetLocation`, `maxDropRadius`, `preWarningShells`, `shellsPerBarrage`, `barrageCount`, `currentBarrage`, `projectile` | `OriginLocation`, `target location`, `MaxDropRadius`, `PreWarningShells`, `ShellsPerBarrage`, `BarrageCount`, `CurrentBarrage`, `Projectile` (class) — the fire plan and its progress. Correction 2026-09-04: the shells ARE tracked projectiles (`BP_Projectile_155mm_Artillery_C`, 29 rounds in one production recording, 97 % with their impact point captured), so the actor adds the plan and progress, not the impacts |
 | UAV | `health` if present | position is the point; layout to be reflected on first sight |
 | Drone spawner (`BP_CommandActor_Drone_C`) | `health`, `pilotEosId` | `Health`, `SQ PC` -> PlayerState |
 
