@@ -164,10 +164,21 @@ swept across three factions so far (USMC, INS/IMF, AFU + generic bases):
   tick the strike marker spawned) and the player observed every other
   cat-1 asset's timer jump at once. `CommanderCategories` carries the
   intervals (600 s cat 0, 900 s cat 1).
-- **Cooldowns anchor to the call, not the asset's fate**: the drone was
-  shot down a minute after its call and the UI showed ~9 minutes
-  remaining — 600 s from the call, unchanged by the death; no redeploy
-  within the window.
+- **An asset destroyed during its active window restarts its cooldown
+  from the destruction** (player-confirmed 2026-09-04; UAVs and drones
+  can both be shot down). This CORRECTS the 09-02 reading "cooldowns
+  anchor to the call": the capture shows the enemy drone called at
+  wall 1788317639, its entry's `IsDestroyedDuringActive` flipping to 1
+  at 1788318082 — 7.4 minutes into a 10-minute active window, not one
+  minute as first noted — and the pawn despawning 74 s later. The
+  player read "~9 minutes" shortly after the kill: 600 s from the
+  destruction fits; 1210 s from the call (12.8 min left) and 600 s from
+  the call (2.6 min left) do not. Memory encodes the event as the flag
+  alone — `GameTimeAtCreation` stayed 107568.9 — so the destruction
+  time is the frame in which the flag flips (1 s granularity), or the
+  command actor's own destroyed/health state if that actor is recorded
+  (decision 6). Viewer rule: destroyed -> ready = flip frame's
+  `worldTimeSec` + `cooldownSec`; otherwise the effective-duration rule.
 - **Per-asset state — decoded 2026-09-04 from the 09-02 captures, item
   struct reflected live.** `CommandIntervals` is a FastArray
   (`SQCommanderActionDataArray`) of 40-byte `SQCommandActionDataFASItem`
@@ -448,7 +459,7 @@ frame.
 | `commander.vote.nominees[]` = `{eosId, name, votes}` | `NomineeStatus.Items[].Content`: `NomineeState` -> PlayerState ids, `VoteCount` | each nominee and their live tally (no per-voter ballots exist) | with the vote object |
 | `commander.vote.cooldownActive`, `.cooldownTimer`, `.cooldownStartedGameTime` | `bVoteCooldownActive`, `VoteCooldownTimer` (int), `VoteCooldownTimestamp` (int) | the 300 s block on new votes after a claim, and its countdown | while the cooldown is active |
 | `commander.cooldowns.categories[]` = `{id, name, intervalSec, lastUseGameTime}` | `CommanderCategories[i].Name`, `.CooldownDuration`; `LastCategoryGameTime[i]` | the category gate: any call in the category stamps `lastUseGameTime`; ready = stamp + interval; `lastUseGameTime` `null` until first use | every frame |
-| `commander.cooldowns.actions[]` = `{action, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | `CommandIntervals.Items[].Content` (`SQCommandActionData`): `CommandActionData` (class name), `GameTimeAtCreation`, `CooldownTimeRemaining`, `IsDestroyedDuringActive`; the four config values from the action class's CDO (`CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`) | one entry per action the team can call; ready = `createdGameTime` + enroute + active + cooldown; `remainingAtChange` is written by the game only at a commander change; the config values ride with the entry every frame so a seek into the middle of a replay is self-describing | every frame once entries exist (they appear at the first claim) |
+| `commander.cooldowns.actions[]` = `{action, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | `CommandIntervals.Items[].Content` (`SQCommandActionData`): `CommandActionData` (class name), `GameTimeAtCreation`, `CooldownTimeRemaining`, `IsDestroyedDuringActive`; the four config values from the action class's CDO (`CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`) | one entry per action the team can call; ready = `createdGameTime` + enroute + active + cooldown; `remainingAtChange` is written by the game only at a commander change; when `destroyedDuringActive` flips true the asset's cooldown restarts from that frame (ready = the flip frame's `worldTimeSec` + `cooldownSec`; player-confirmed, matches the 09-02 drone); the config values ride with the entry every frame so a seek into the middle of a replay is self-describing | every frame once entries exist (they appear at the first claim) |
 | `gameState.commanderRules` = `{enabled, votingTimeSec, voteCooldownSec, newCommanderExtensionSec, minSquadSize, minSquads}` | `SQCommanderManager.bCommanderActive`, `VotingTimeSeconds`, `VoteCooldownTimeSeconds`, `ActionCooldownExtensionOnNewCommander`, `MinimumSquadSizeForVoting`, `MinimumSquadsRequiredForVoting` | the server's commander settings, so the viewer can explain a refused vote or a new commander's wait | every frame (six scalars; simpler and seek-safe versus "once") |
 
 Deliberately not recorded: `bDoubleCaptureSpeed` and
