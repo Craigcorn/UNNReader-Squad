@@ -585,10 +585,11 @@ the Grach entry above).
 | # | Open item | Needs | What it decides | Blocks |
 |---|---|---|---|---|
 | B2 | The map's bomb-circle radii and the second pair's exact centre are assumed (config 45 m / 100 m, centred on the aim points) | one edge-stand on the second inner circle during any Grach call, read the same way as the 50 m request circle | Whether the viewer's dashed circles match the in-game map exactly | viewer cosmetics only (low importance) |
+| **A1** | Who shot down a drone, UAV or strike aircraft. The fact and time of destruction are captured (`IsDestroyedDuringActive`, the pawn despawn); the killer is not. The drone pawn carries `LastHitBy`, the field the killfeed already uses for soldiers, but the 09-02 probe never captured a drone-pawn raw (dump cap), so its behaviour is unobserved; the command actors expose `Health`, `Dead_0` and a `HealthComponent` with no last-damager field in their reflected list, and no aircraft was ever hit in a session. The 09-02 log wrote no damage or kill line for the drone at all — only `OnPossess` for the pilot and `Invalid MyDrone` errors after the death | one drone shoot-down with the pawn tracked (`LastHitBy`, health), and one aircraft hit with its command actor tracked (`Health`, `Dead_0`, the health component's fields) | Whether "shot down by" can be attributed and recorded; a candidate stat. Recorder emits the attribution field only once it is seen working | attribution feature only (medium) |
 | R8 | Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) | exploration only | Whether they gate anything display-worthy; parked as a decision, not a blind spot | nothing |
 
 Nothing gates the recorder, and nothing gates the viewer's correctness;
-B2 is cosmetic. The capture proposal can be written now.
+B2 is cosmetic and A1 is a feature waiting on one observation. The capture proposal can be written now.
 
 Offline analysis: **done** — 08-31 decoded the nominee entry, the vote
 lifecycle and the marker geometry; 09-02 decoded the cooldown stamps, the
