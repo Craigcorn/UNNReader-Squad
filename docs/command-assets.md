@@ -413,6 +413,26 @@ observed live:
   there is no drone-kill attribution question; a drone being shot down is
   the attributable event (its `LastHitBy` rides the capture to the last
   tick).
+  **Two drones, one class (2026-09-04).** The commander's drone is
+  `BP_FlyingDrone_C`; some factions' recon kit carries a deployable drone,
+  `BP_FlyingDrone_Recoverable_C` (seen on 09-03), that flies for less
+  time, can be picked up and redeployed, and re-arms and respawns after
+  destruction or timeout — not a commander asset at all
+  (player-confirmed). Both derive from `SQFlyingDrone` (a `Character`),
+  so one capture path covers both and any future drone. The pawn's own
+  fields past the Character boilerplate: `HealthComponent`, `SQ PC` (the
+  possessing controller), `Dead`, `Can Possess`, `Command Action` (the
+  calling action's class — the join to the call actor for a commander
+  drone; expected null on a recon drone), `Max Fly Height`,
+  `BleedOutTime`, `EndFlightTimer`, `CrashVelocity`, the FPV item, zoom
+  state; plus the standard `PlayerState`, `Controller`, `LastHitBy`,
+  `PreviousController`. The recon drone's launcher,
+  `BP_Deployable_DroneSpawner_C`, is an `SQDeployable` (Health, Team,
+  `InstigatingPlayerState`, `Drone Class`, `Action`), so it should already
+  reach the deployables stream — to be confirmed in implementation. Drone
+  speed: one flight was tracked at ~10 m/s while cruising; the player
+  reports drones fly faster than that, and no top speed has been
+  measured.
 - **Commander kill attribution flows through the existing causer chain
   (R6, 09-02)**: a strafe wound event recorded `attacker` = the calling
   commander with `causerWeapon` = the rocket class, and bombs carry the
