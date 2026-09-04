@@ -48,6 +48,13 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   (`frontend/src/state/crosslang.test.mts`; hand-extended — its generator
   is upstream's). The two decoders drifted silently once (the 4 Hz bug);
   the fixture is why it can't happen again.
+- **One register.** `docs/tracker.md` is the single record of work items,
+  open decisions and discussions that ended without a decision. A commit
+  that changes an item's state updates its row in the same commit; a
+  discussion that ends undecided gets a row; before calling anything
+  pending or done, read the tracker and `git log`. Status lives there
+  only — the plan's narrative is dated history, a doc's status line
+  describes that doc, session memory points at tracker ids.
 - **Frozen surfaces.** The built-in stats dashboard and the SQLite read API
   receive fixes only — no new features. New stats/product work happens on the
   SquidHub side.
@@ -87,6 +94,8 @@ on failure).
 
 ## Key docs
 
+- `docs/tracker.md` — the register: work items, open decisions, undecided
+  discussions. Read first on resume.
 - `docs/replay-pipeline-plan.md` — goals, decisions, build-out phases (this
   repo's side in detail)
 - `docs/architecture-notes.md` — module map of the backend and viewer, with

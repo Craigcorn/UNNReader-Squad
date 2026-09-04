@@ -1,7 +1,7 @@
 # Implementation plan: three detectors + seeding exclusion + two-tier enable
 
-Status: **implemented 2026-08-28** — all workstreams complete; detector
-enablement and the speedhack borderline await Craig's decision · branch: `Replay-Improvements`
+Status: **implemented 2026-08-28** — all workstreams complete; detectors
+enabled on the test box and the speedhack borderline resolved 2026-08-29 (tracker W40, W42) · branch: `Replay-Improvements`
 
 This is a self-contained handoff spec. Before starting, read `CLAUDE.md`
 (hard rules — they all apply here), `docs/stats-wishlist.md` (where these

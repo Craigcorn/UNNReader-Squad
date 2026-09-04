@@ -2,8 +2,7 @@
 
 Status: **catalog for review** · drafted 2026-08-30 from a live two-player
 probe session on the test server. The recording additions that feed groups
-2-4 (`reviveEvents` + per-player `medical` dict) are approved and pending
-implementation; the stats themselves are later-phase work (`stats.py` /
+2-4 (`reviveEvents` + per-player `medical` dict) shipped 2026-08-30 (tracker W11); the stats themselves are later-phase work (`stats.py` /
 SquidHub) and nothing here changes what the recorder writes. Details and
 supersedes the two medical rows in `stats-wishlist.md` Tier 1.
 
