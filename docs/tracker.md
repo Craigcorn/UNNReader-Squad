@@ -25,6 +25,10 @@ topic docs, the changelog, the session notes and the branch history since
 7. Rows are never deleted. A finished item keeps its final state; a
    decision, once made, moves to the "made" list at the end of table B
    with its date and where it is recorded.
+8. Two registers, one home per fact. The platform side keeps its own
+   register (W86). Program-wide decisions (table B) live here and are
+   referenced by id from the platform side; platform-only work lives there
+   and is referenced by id here. Neither restates the other's state.
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,
@@ -115,16 +119,17 @@ are on `Replay-Improvements`.
 | W75 | Chunked seek-on-demand loading | not started; needs W26 | plan Phase 4 remedy 3 | after D7 |
 | W76 | Viewer cheap wins: cache numeric timestamps once, decode and kill-feed precompute in a worker | not started | plan Phase 4 | any time |
 
-### Platform and rollout (this repo's side; platform internals stay in the private repo)
+### Platform and rollout (this repo's obligations; platform work is registered on the platform side, W86)
 
 | id | item | state | detail lives in | next |
 |---|---|---|---|---|
-| W80 | Phase 2, this repo's side: authenticated upload of finished recordings, the engine invocable per file, alerts relayed with their match id | not started | plan Phase 2 | after the format additions |
+| W80 | Phase 2, this repo's side: authenticated upload of finished recordings, the engine invocable per file, alerts relayed with their match id | not started | plan Phase 2; platform side: `docs/features/squad-replay-pipeline.md` in the private repo (see W86 for its state); platform ids: none yet | after the format additions |
 | W81 | Phase 3: record-only agent mode | not started; gated on Phase 2 dual-run parity | plan Phase 3 | after W80 |
-| W82 | Phase 5: stats redesign | not started (platform repo) | plan Phase 5 | after W80 |
-| W83 | Phase 6: admin-only live view | not started | plan Phase 6 | last |
+| W82 | Phase 5: stats redesign | not started (platform work) | plan Phase 5; platform doc as W80 | after W80 |
+| W83 | Phase 6: admin-only live view | not started | plan Phase 6; platform doc as W80 | last |
 | W84 | Early rollout of Phase 1 agents, which sets the history freeze line | blocked on D5 | plan "Agent-side infrastructure" | after D5 |
 | W85 | Platform retention job | blocked on D4 | plan open question 2 | after D4 |
+| W86 | Platform-side register and design-doc sync. Found 2026-09-04: the platform design doc (`docs/features/squad-replay-pipeline.md`, private repo) exists only on the unmerged branch `docs/squad-replay-pipeline` (one commit, 2026-08-28); it restates open decisions D1–D4 as its own open-items list, and carries two facts corrected here since (the retired "v3" label; storage math of 15 MB per match, since measured at 60–100 MB); the team board has no milestone or issue for the pipeline | found 2026-09-04; not started | this file; the platform doc | owner Craig with the platform team: merge the doc; replace its open-items list with pointers to D1–D4 and its stale facts with pointers to the plan; when Phase 2 starts, open a "Squad replay pipeline" milestone on the board with one issue per platform work item; then W80–W85 cite those ids |
 
 ### Program hygiene
 
