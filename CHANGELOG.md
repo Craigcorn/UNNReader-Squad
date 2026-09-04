@@ -6,6 +6,24 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The second Squad update since the reader learned to heal itself, and
+  the first it healed itself through: the 2026-09-04 build moved the
+  struct layout back toward its pre-v10.5.3 shape, and the boot log
+  simply listed 33 constants re-derived from the binary - both anchor
+  tiers moving their unreflected passengers (the placer slots riding
+  Health by their declared +0xD4/+0xCC, the seat-component pair riding
+  theirs) - while the first snapshot's transform verify caught
+  ComponentToWorld moving 0x200 -> 0x210 on a unanimous 24-component
+  vote before anything read a position. No junk window this time; the
+  recordings were right from the restart. The source table is refreshed
+  to the values the resolver measured, and the one tier the doctor
+  still had to FAIL on - fallbacks that were reflection-first at read
+  time but absent from the self-correction tables (VehicleSeats, the
+  deployable-vehicle aim trio, the FOB pool, the controller fields, the
+  ammo pools) - is now in those tables too, so the next update corrects
+  them instead of reporting them.
+
 ### Changed
 - Merged upstream 1.4.5, which makes the reader re-derive every
   reflectable offset from the running binary at startup and recognise

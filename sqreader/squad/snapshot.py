@@ -250,7 +250,7 @@ PROJECTILE_BASE_NAMES = (
 # (NOT pawns — corrected after diagnosis: the array element class is
 # SQVehicleSeatComponent). Verified via dump_struct_layout on Squad
 # v10.4.1 (SQVehicle.VehicleSeats @+0x8c8, inner ObjectProperty).
-SQ_VEHICLE_SEATS_OFFSET = 0x8a8
+SQ_VEHICLE_SEATS_OFFSET = 0x8c8
 
 # SQDeployableVehicle.OwningDeployable — the gun actor a fully built
 # emplacement spawns (mortar tube, TOW tripod, HMG bunker gun, …) is a
@@ -258,7 +258,7 @@ SQ_VEHICLE_SEATS_OFFSET = 0x8a8
 # pointer joins it back to the baseplate SQDeployable it belongs to.
 # Fallback for reflection; verified via dump_struct_layout + a live
 # manned TOW on Squad v10.5.3 (2026-08-29).
-SQ_DEPLOYABLE_VEHICLE_OWNING_OFF = 0x0ac0
+SQ_DEPLOYABLE_VEHICLE_OWNING_OFF = 0x0b18
 
 # SQDeployableVehicle aim components. The gun's ROOT never rotates (its
 # recorded yaw sat frozen through a whole manned session) — the aim
@@ -269,28 +269,28 @@ SQ_DEPLOYABLE_VEHICLE_OWNING_OFF = 0x0ac0
 # mirror it into CachedTubePitch — same number, one read path for every
 # emplacement type). Verified live by aim-diffing a manned TOW and L16
 # mortar on Squad v10.5.3 (2026-08-29); reflection fallbacks.
-SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF    = 0x0ab0
-SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF = 0x0ab8
+SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF    = 0x0b08
+SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF = 0x0b10
 
 # SQVehicleSeatComponent layout (4-level chain: SQVehicleSeatComponent
 # → USceneComponent → UActorComponent → UObject, size=800). Six own
 # props identify the seat's role + occupant:
-SQ_SEATCOMP_SEAT_CONFIG_OFFSET    = 0x240  # FStructProperty (seat name etc.)
+SQ_SEATCOMP_SEAT_CONFIG_OFFSET    = 0x250  # FStructProperty (seat name etc.)
 # ANIM_STATE and FORCE_OCCUPIED are declared-but-never-read raw members.
 # They are still kept generation-consistent with their reflected anchors
 # (SeatPawn -0x8 / SeatedSoldier +0x8 — the gaps in _ANCHORED_SCALARS),
 # because a value from a previous build sitting in this table is how the
 # 2026-08-31 refresh briefly left ANIM_STATE equal to the NEW SeatedPlayer
 # offset — a collision waiting to mislead the next derivation.
-SQ_SEATCOMP_ANIM_STATE_OFFSET     = 0x2c0  # int32
-SQ_SEATCOMP_SEAT_PAWN_OFFSET      = 0x2c8  # SQVehicleSeat* — the seat pawn
-SQ_SEATCOMP_SEATED_PLAYER_OFFSET  = 0x2d0  # APlayerState* of occupant
-SQ_SEATCOMP_SEATED_SOLDIER_OFFSET = 0x2d8  # SQSoldier* of occupant
-SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET = 0x2e0  # bool
+SQ_SEATCOMP_ANIM_STATE_OFFSET     = 0x2d0  # int32
+SQ_SEATCOMP_SEAT_PAWN_OFFSET      = 0x2d8  # SQVehicleSeat* — the seat pawn
+SQ_SEATCOMP_SEATED_PLAYER_OFFSET  = 0x2e0  # APlayerState* of occupant
+SQ_SEATCOMP_SEATED_SOLDIER_OFFSET = 0x2e8  # SQSoldier* of occupant
+SQ_SEATCOMP_FORCE_OCCUPIED_OFFSET = 0x2f0  # bool
 
 # SQVehicleSeat.SeatHealth — read off the SeatPawn (one indirection
 # from the seat component). +0x4d0 on the SQVehicleSeat pawn.
-SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET = 0x4c0
+SQ_VEHICLESEAT_SEAT_HEALTH_OFFSET = 0x4d0
 
 # SQVehicleSeatConfig.SeatAttachSocket — the game's own role label for a
 # seat (socket_seat_driver / _gunner / _passengerN), an FName inside the
@@ -306,37 +306,37 @@ SQ_SEATCFG_ATTACH_SOCKET_OFF = 0x30
 # - VehicleTurrets:    TArray<SQVehicleWeapon*>           @+0x0a90 on SQVehicle
 # - VehicleComponents: TArray<SQVehicleComponent*>        @+0x04a0 on parent SQVehicleSeat
 # - CachedVehicleEngine: SQVehicleEngine*                 @+0x04b0 on parent SQVehicleSeat
-SQ_VEHICLE_TURRETS_OFFSET            = 0x0a40  # +0x8 vs v10.4.1 (drifted)
-SQ_VEHICLE_COMPONENTS_OFFSET         = 0x0490
-SQ_VEHICLE_CACHED_ENGINE_OFFSET      = 0x04a0
+SQ_VEHICLE_TURRETS_OFFSET            = 0x0a98
+SQ_VEHICLE_COMPONENTS_OFFSET         = 0x04a0
+SQ_VEHICLE_CACHED_ENGINE_OFFSET      = 0x04b0
 
 # SQVehicleComponent (base class of SQVehicleEngine + every wheel/track/
 # turret-base/ammo-rack actor that ships health). 36 own props; the two
 # we need are at:
-SQ_VEHCOMP_HEALTH_OFFSET             = 0x0728  # FloatProperty
-SQ_VEHCOMP_MAX_HEALTH_OFFSET         = 0x0618  # FloatProperty
+SQ_VEHCOMP_HEALTH_OFFSET             = 0x0758  # FloatProperty
+SQ_VEHCOMP_MAX_HEALTH_OFFSET         = 0x0630  # FloatProperty
 # VehicleComponentState is a NAMED EnumProperty (Healthy/Damaged/Destroyed)
 # packed right after Health — reflection resolves it by name (verified live
-# 2026-09-01), so it is watched like any named field. Was 0x075c until the
-# 2026-08-31 Squad update; the stale offset read a neighbouring byte (176)
-# as a component state.
-SQ_VEHCOMP_STATE_OFFSET              = 0x072c
-SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET  = 0x06f4  # FloatProperty (0..1)
+# 2026-09-01), so it is watched like any named field. It has now moved
+# twice with the block (0x75c -> 0x72c -> 0x75c across the 2026-08-31 and
+# 2026-09-04 Squad updates); autoresolve carries it between refreshes.
+SQ_VEHCOMP_STATE_OFFSET              = 0x075c
+SQ_VEHCOMP_NORMALIZED_HEALTH_OFFSET  = 0x070c  # FloatProperty (0..1)
 
 # SQVehicleWeapon inherits SQWeapon_Effects → SQWeapon → SQEquipableItem.
 # Magazines TArray<int32> lives on SQWeapon @+0x848 (round counts; idx 0
 # is the chambered/loaded magazine, rest are spares — verified via the
 # pattern read off live BMP-2 / M1A2 turrets, matches the legacy vanilla
 # viewer's mag rendering shape).
-SQ_VWEAPON_MAGAZINES_OFFSET          = 0x07e8
-SQ_VWEAPON_VEHICLE_TURRET_OFFSET     = 0x0e50  # ObjectProperty
+SQ_VWEAPON_MAGAZINES_OFFSET          = 0x0848
+SQ_VWEAPON_VEHICLE_TURRET_OFFSET     = 0x0ec8  # ObjectProperty
 # Turret ammo chain (RE'd live 2026-07-22 vs the real values: Kornet ATGM
 # [(1,1)x6], Kord HMG [(100,100)x10]). The object in VehicleTurrets is the
 # turret PAWN (SQVehicleSeat), NOT the weapon — 0x848 read on the pawn is junk.
 # Follow: pawn +0x4C0 → SQVehicleInventoryComponent +0x1B8 → CurrentWeapon,
 # then Magazines TArray<FMagData{i32 Max; i32 Cur}> at weapon +0x848.
-SQ_TURRET_INVENTORY_OFFSET           = 0x04b0  # ObjectProperty on the seat pawn
-SQ_INV_CURRENT_WEAPON_OFFSET         = 0x0168  # ObjectProperty on the inventory
+SQ_TURRET_INVENTORY_OFFSET           = 0x04c0  # ObjectProperty on the seat pawn
+SQ_INV_CURRENT_WEAPON_OFFSET         = 0x01b8  # ObjectProperty on the inventory
 # The seat's WHOLE weapon inventory, not only the selected gun. Reflected
 # live on a Loach CAS Small (Squad v10.5.3, 2026-09-03):
 # SQPawnInventoryComponent.Inventory is a TArray<FSQWeaponGroupData> - one
@@ -349,7 +349,7 @@ SQ_INV_CURRENT_WEAPON_OFFSET         = 0x0168  # ObjectProperty on the inventory
 # listed in VehicleTurrets, so its inventory was never read at all. The
 # group offsets and stride are re-read from the struct at resolve time;
 # these are the fallbacks the doctor watches.
-SQ_INV_INVENTORY_OFFSET              = 0x01b0  # ArrayProperty on SQPawnInventoryComponent
+SQ_INV_INVENTORY_OFFSET              = 0x0208  # ArrayProperty on SQPawnInventoryComponent
 WEAPON_GROUP_OFFSETS = {                       # FSQWeaponGroupData (Inventory element)
     "Weapons": 0x10,   # TArray<SQEquipableItem*>
     "Index":   0x20,   # int32 - the group's weapon-switch slot
@@ -561,6 +561,32 @@ _REFLECTED_SCALARS: tuple[tuple[str, str, str], ...] = (
      "CurrentWeapon"),
     ("SQ_INV_INVENTORY_OFFSET",            "SQPawnInventoryComponent",
      "Inventory"),
+    # The tier the 2026-09-04 Squad update exposed: these reads were already
+    # reflection-first at resolve time, so the reader stayed correct — but
+    # the constants sat outside this table and the doctor spent a day
+    # FAILing on fallbacks nothing actually read through. Every fallback a
+    # named property can carry belongs here.
+    ("SQ_VEHICLE_SEATS_OFFSET",            "SQVehicle", "VehicleSeats"),
+    ("SQ_DEPLOYABLE_VEHICLE_OWNING_OFF",   "SQDeployableVehicle",
+     "OwningDeployable"),
+    ("SQ_DEPLOYABLE_VEHICLE_SWIVEL_OFF",   "SQDeployableVehicle",
+     "SwivelMeshComponent"),
+    ("SQ_DEPLOYABLE_VEHICLE_GUN_MOUNT_OFF", "SQDeployableVehicle",
+     "GunMountComponent"),
+    ("PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET", "SQProjectile",
+     "DamageInstigatorController"),
+    # The controller resolves as SQPlayerController or (on a dedicated
+    # server) as its blueprint subclass — two rows per field; whichever
+    # class the walk found answers, the other is skipped as absent.
+    ("PC_PLAYER_STATS_INDEX_OFFSET",   "SQPlayerController", "PlayerStatsIndex"),
+    ("PC_PLAYER_STATS_INDEX_OFFSET",   "BP_PlayerController_C",
+     "PlayerStatsIndex"),
+    ("PC_PLAYER_STATE_OFFSET",         "SQPlayerController", "PlayerState"),
+    ("PC_PLAYER_STATE_OFFSET",         "BP_PlayerController_C", "PlayerState"),
+    ("PC_RECENT_VOICE_CHANNEL_OFFSET", "SQPlayerController",
+     "RecentVoiceChannel"),
+    ("PC_RECENT_VOICE_CHANNEL_OFFSET", "BP_PlayerController_C",
+     "RecentVoiceChannel"),
 )
 
 #: Offset dicts whose every key is a UPROPERTY name on one UClass.
@@ -570,6 +596,12 @@ _REFLECTED_DICTS: tuple[tuple[str, str], ...] = (
     ("MARKER_OFFSETS", "SQMapMarker"),
     ("VEHICLE_SPAWNER_OFFSETS", "SQVehicleSpawner"),
     ("PROJECTILE_OFFSETS", "SQProjectile"),
+    # Same 2026-09-04 lesson as the scalars above: the FOB pool is
+    # reflection-first off the blueprint base and the ammo pools are
+    # declared on SQVehicleResource — both tables were doctor-watched but
+    # not self-correcting.
+    ("FOB_RESOURCE_OFFSETS", "BP_BaseFobCreator_C"),
+    ("AMMO_WEP_OFFSETS", "SQVehicleResource"),
 )
 
 #: Constants reflection cannot see, each sitting a fixed distance from one
@@ -866,7 +898,7 @@ COLLECTOR_OFFSETS = {
 }
 # PlayerStatsIndex on SQPlayerController — reflection-derived at runtime
 # (SQPlayerController.PlayerStatsIndex), with this as the fallback offset.
-PC_PLAYER_STATS_INDEX_OFFSET = 0x0848
+PC_PLAYER_STATS_INDEX_OFFSET = 0x08a0
 # AController.PlayerState — reflection-derived (AController.PlayerState), with
 # this fallback. Used to resolve a controller pointer to a player name.
 PC_PLAYER_STATE_OFFSET = 0x02C0
@@ -885,7 +917,7 @@ PROJECTILE_INSTIGATOR_CONTROLLER_OFFSET = 0x0588
 # with this as the fallback offset. uint8 ESQVoiceChannel; a wrong/torn read is
 # rejected by the 0..13 sanity gate in read_player, which blanks the field
 # (no-guess) rather than showing a wrong channel.
-PC_RECENT_VOICE_CHANNEL_OFFSET = 0x08b4
+PC_RECENT_VOICE_CHANNEL_OFFSET = 0x092c
 # ESQVoiceChannel enum -> channel name. 0/'none' = the player is not keying
 # voice this tick; 5..13 = commander broadcasting to a specific squad.
 VOICE_CHANNEL_NAMES = {
@@ -909,12 +941,12 @@ VOICE_CHANNEL_NAMES = {
 # Inherits SQGameRallyPoint → SQGameSpawn → PlayerStart → NavigationObjectBase → Actor.
 # Verified via dump_struct_layout on Squad v10.4.1.
 RALLY_OFFSETS = {
-    "Team":              0x0468,  # uint8 enum on SQGameSpawn
-    "bSpawningEnabled":  0x035c,  # bool on SQGameSpawn
-    "bSieged":           0x035d,  # bool on SQGameSpawn
-    "NumberOfSpawns":    0x04c0,  # int32 on SQGameRallyPoint
-    "AuthoritySquad":    0x04c8,  # SQSquadState* on SQSquadRallyPoint
-    "SquadState":        0x04d0,  # SQSquadState* (often == AuthoritySquad)
+    "Team":              0x0490,  # uint8 enum on SQGameSpawn
+    "bSpawningEnabled":  0x0384,  # bool on SQGameSpawn
+    "bSieged":           0x0385,  # bool on SQGameSpawn
+    "NumberOfSpawns":    0x04f0,  # int32 on SQGameRallyPoint
+    "AuthoritySquad":    0x04f8,  # SQSquadState* on SQSquadRallyPoint
+    "SquadState":        0x0500,  # SQSquadState* (often == AuthoritySquad)
 }
 
 
@@ -928,7 +960,7 @@ RALLY_OFFSETS = {
 # doctor's FIRST run after the struct went on its watch list — the read had
 # been silently degraded until then. Reflected at resolve time now; this is
 # the fallback.
-SQ_SOLDIER_TAKE_HIT_INFO_OFFSET      = 0x24b8
+SQ_SOLDIER_TAKE_HIT_INFO_OFFSET      = 0x24e8
 
 # Within SQTakeHitInfo (own props from reflection dump):
 THI_ACTUAL_DAMAGE_OFFSET             = 0x0000  # float
@@ -960,11 +992,11 @@ DEPLOYABLE_OFFSETS = {
     "Team":          0x2e0,    # int32 (current team owner)
     "bIsFob":        0x2e4,    # bool — own byte, no bitmask
     "bPlaced":       0x2e5,    # bool
-    "BuildState":    0x03f0,    # uint8 enum (Unbuilt/HalfBuilt/Completed)
-    "Cost":          0x0420,    # int32
-    "MaxHealth":     0x0424,    # float
-    "InitialHealth": 0x0428,    # float
-    "Health":        0x042c,    # float
+    "BuildState":    0x0408,    # uint8 enum (Unbuilt/HalfBuilt/Completed)
+    "Cost":          0x0438,    # int32
+    "MaxHealth":     0x043c,    # float
+    "InitialHealth": 0x0440,    # float
+    "Health":        0x0444,    # float
 }
 
 # The direct placer slots on SQDeployable are UNNAMED private fields, so no
@@ -980,8 +1012,8 @@ DEPLOYABLE_OFFSETS = {
 # that resolves through the controller chain CAN fabricate a short "name",
 # which is why these live here under the fleet test rather than as dataclass
 # defaults.
-SQ_DEPLOYABLE_PLACER_PS_OFFSET   = 0x0500  # SQPlayerState* (durable)
-SQ_DEPLOYABLE_PLACER_CTRL_OFFSET = 0x04f8  # its APlayerController*
+SQ_DEPLOYABLE_PLACER_PS_OFFSET   = 0x0518  # SQPlayerState* (durable)
+SQ_DEPLOYABLE_PLACER_CTRL_OFFSET = 0x0510  # its APlayerController*
 
 # FOB radio resource pool. These offsets are on BP_BaseFobCreator_C —
 # the base for every FOB radio variant (BP_FOBRadio_AFU_C, _TLF_C, …).
@@ -992,20 +1024,20 @@ SQ_DEPLOYABLE_PLACER_CTRL_OFFSET = 0x04f8  # its APlayerController*
 # Squad update shifted most of these +0x38 (but bIsSpawningEnabled only
 # +0x18 — the non-uniform drift is exactly why reflection is primary).
 FOB_RESOURCE_OFFSETS = {
-    "InitialConstructionPoints": 0x05dc,  # float
-    "MaxConstructionPoints":     0x05e0,  # float
-    "InitialAmmo":               0x05e4,  # float
-    "MaxAmmo":                   0x05e8,  # float
-    "CPPerSecond":               0x05ec,  # float (regen rate)
-    "AmmoPerSecond":             0x05f0,  # float
-    "Ammo":                      0x05fc,  # float — current ammo
-    "ConstructionPoints":        0x0600,  # float — current construction material
-    "NearbyEnemies":             0x0604,  # int32
-    "bSieged":                   0x0598,  # bool
-    "bIsSpawningEnabled":        0x0500,  # bool
-    "bIsBleeding":               0x0650,  # bool
-    "bHasBeenOverrun":           0x0740,  # bool
-    "EstimatedWorldTimeOfDeath": 0x0660,  # float
+    "InitialConstructionPoints": 0x0604,  # float
+    "MaxConstructionPoints":     0x0608,  # float
+    "InitialAmmo":               0x060c,  # float
+    "MaxAmmo":                   0x0610,  # float
+    "CPPerSecond":               0x0614,  # float (regen rate)
+    "AmmoPerSecond":             0x0618,  # float
+    "Ammo":                      0x0624,  # float — current ammo
+    "ConstructionPoints":        0x0628,  # float — current construction material
+    "NearbyEnemies":             0x062c,  # int32
+    "bSieged":                   0x05c0,  # bool
+    "bIsSpawningEnabled":        0x0518,  # bool
+    "bIsBleeding":               0x0680,  # bool
+    "bHasBeenOverrun":           0x0770,  # bool
+    "EstimatedWorldTimeOfDeath": 0x0690,  # float
 }
 
 
@@ -1405,14 +1437,13 @@ class SnapshotPaths:
     scene_relative_location_off: int    # USceneComponent.RelativeLocation
     scene_relative_rotation_off: int    # USceneComponent.RelativeRotation
     scene_attach_parent_off: int        # USceneComponent.AttachParent
-    # ComponentToWorld.Translation (cached world FVector). Empirically
-    # at SceneComponent + 0x200 on the current build (FTransform starts
-    # at +0x1e0 with the FQuat Rotation; Translation is +0x20 into
-    # FTransform). Was +0x210 before the 2026-08-31 Squad update — the
-    # doctor's value check caught the move within one cycle, hexdump
-    # confirmed the new layout. ComponentToWorld is not reflected so we
-    # hardcode the offset; it is the one constant only the value check
-    # can watch.
+    # ComponentToWorld.Translation (cached world FVector), +0x20 into the
+    # FTransform whose FQuat Rotation leads it. It has moved twice now —
+    # 0x210 -> 0x200 at the 2026-08-31 Squad update (doctor value check,
+    # hexdump-confirmed) and back 0x200 -> 0x210 at the 2026-09-04 one
+    # (verify_component_to_world corrected it on the first snapshot, 24/24
+    # unattached components agreeing). ComponentToWorld is not reflected,
+    # so the baked value is only the first guess the verify checks.
     scene_component_to_world_translation_off: int
     # ComponentToWorld.Rotation (world FQuat), 0x20 before Translation.
     # World yaw — correct even for actors attached to a parent, whose
@@ -1589,6 +1620,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # SQPawnInventoryComponent - the seat inventory's parent, where
         # CurrentWeapon and the Inventory group array are declared.
         "SQPawnInventoryComponent": "Class",
+        # The native base every AmmoWep_*_C resource pool inherits — walked
+        # for AMMO_WEP_OFFSETS in the reflected-dict tier.
+        "SQVehicleResource": "Class",
     }
     found = arr.find_all_by_names({**required, **optional}, alloc=alloc)
     missing = [n for n in required if n not in found]
@@ -1917,11 +1951,12 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         scene_attach_parent_off=scene_layout["AttachParent"].offset,
         # Last known good; corrected against the live process on the first
         # snapshot (see verify_component_to_world). Squad v10.5.3 moved this
-        # from 0x210 to 0x200, and because nothing checked, every position in
-        # every recording became `{x: junk, y: 0, z: 1}` while the agent
-        # reported itself healthy.
-        scene_component_to_world_translation_off=0x200,
-        scene_component_to_world_rotation_off=0x200 - 0x20,
+        # from 0x210 to 0x200 with nothing checking — every recorded position
+        # became `{x: junk, y: 0, z: 1}` while the agent reported itself
+        # healthy — and the 2026-09-04 update moved it straight back, this
+        # time caught by the verify before anything read a position.
+        scene_component_to_world_translation_off=0x210,
+        scene_component_to_world_rotation_off=0x210 - 0x20,
         # Reflection-derived deployable + FOB offsets (see dataclass docs).
         deployable_offsets=grab(dep_layout, [
             "InitialTeam", "OwningFob", "Team", "bIsFob", "bPlaced",

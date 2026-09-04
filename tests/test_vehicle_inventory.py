@@ -4,7 +4,8 @@ one CurrentWeapon names.
 Laid out from the live Loach CAS Small (Squad v10.5.3, 2026-09-03):
 SQPawnInventoryComponent.Inventory is a TArray<FSQWeaponGroupData> (40-byte
 elements: Weapons TArray<SQEquipableItem*> @+0x10, Index @+0x20), and each
-weapon carries Magazines as TArray<FMagData{Max, Cur}> @+0x7e8. The fake
+weapon carries Magazines as TArray<FMagData{Max, Cur}> at
+SQ_VWEAPON_MAGAZINES_OFFSET. The fake
 memory below is that shape byte for byte; the reads go through the same
 FakeProcessMemory the rest of the reader tests use."""
 from __future__ import annotations
@@ -73,17 +74,24 @@ def _group(weapons_ptr: int, count: int, index: int, stride: int = 40,
 
 
 def _memory(stride: int = 40, weapons_off: int = 0x10,
-            index_off: int = 0x20, inventory_off: int = 0x1b0) -> _Pm:
-    inv = bytearray(0x400)
+            index_off: int = 0x20, inventory_off: int | None = None) -> _Pm:
+    # Buffer sizes and write positions derive from the live constants, so a
+    # doctor-dictated refresh never silently writes the fake structures past
+    # a fixed-size buffer's end (slice assignment clamps, and every read
+    # comes back None) — the 2026-09-04 refresh did exactly that to the
+    # original literals.
+    if inventory_off is None:
+        inventory_off = sn.SQ_INV_INVENTORY_OFFSET
+    inv = bytearray(max(inventory_off, sn.SQ_INV_CURRENT_WEAPON_OFFSET) + 0x20)
     inv[inventory_off:inventory_off + 16] = _tarray(GROUPS, 2, 4)
     struct.pack_into("<Q", inv, sn.SQ_INV_CURRENT_WEAPON_OFFSET, GUN_A)
     groups = (_group(WPTR_A, 1, 0, stride, weapons_off, index_off)
               + _group(WPTR_B, 2, 3, stride, weapons_off, index_off))
-    gun_a = bytearray(0x800)
+    gun_a = bytearray(sn.SQ_VWEAPON_MAGAZINES_OFFSET + 0x20)
     gun_a[:0x20] = _uobject(CLS_A)
     gun_a[sn.SQ_VWEAPON_MAGAZINES_OFFSET:sn.SQ_VWEAPON_MAGAZINES_OFFSET + 16] = \
         _tarray(MAGS_A, 2)
-    vehicle = bytearray(0x500)
+    vehicle = bytearray(sn.SQ_TURRET_INVENTORY_OFFSET + 0x10)
     struct.pack_into("<Q", vehicle, sn.SQ_TURRET_INVENTORY_OFFSET, INV)
     return _Pm({
         INV: bytes(inv),
