@@ -466,6 +466,37 @@ be corrected later for every recording at once. Damage and revive
 events stay events because their signals are events in memory and in
 the log.
 
+## Agreed capture — marker geometry (decision 5, 2026-09-04)
+
+Three new fields on any actor marker whose class carries them, resolved
+by reflection name, never by class-name matching: `distance`
+(`Distance`, f64, raw game units), `addDistance` (`AddDistance`, f64,
+raw), `yaw` (the root transform's world yaw, as vehicles record it).
+Emitted whenever the class has the field, so a request marker carries a
+truthful 0. The viewer decides the shape from the marker `type`: circle
+(`CommandRadius`: radius = distance), line (`CommandLine`: run along yaw
+for distance), path with scatter (`CommandPath`: distance + addDistance),
+aim pair (`CommandLineRadius`: two points, 0 and distance along yaw),
+request (50 m documented constant). The existing `arrowLength` /
+`arrowHeading` fields are NOT reused: they describe a dragged arrow on
+the squad-data markers and would make a UAV radius render as a line.
+
+Which loaded marker classes carry the fields (live enumeration of all
+163 marker-related classes on the idle server, 2026-09-04):
+
+| Family | Classes | Fields |
+|---|---|---|
+| Command (`BP_MapMarker_CommandMaster_C` and subclasses: `Command_Request`, `Command_SLRequest`; `CommandRadius`/`CommandLine`/`CommandPath`/`CommandLineRadius` load with a claim or call) | 3 loaded idle, 7 known | `Distance`, `AddDistance`, `Request` |
+| Director (`BP_MapMarker_DirectorMaster_C` and subclasses: `DirectorPathEnemy`, `DirectorPathFriendly`, `Director_CO_OrderLine`, `Director_EnemyCircle`, `Director_FrontlineGold`, `Director_Frontline`) | 7 | `Distance` only |
+| Every other actor marker (AAS attack/defend, spotted ×24, waypoint ×11, request-resupply/pickup/reinforcement/fire-mission, ping, generic) | ~45 | neither |
+
+So the "any class with the fields" rule also fills the Director
+family's geometry from the actor copy. Today those shapes reach
+recordings only through the squad-data marker path (`arrowLength` /
+`arrowHeading` on `BP_SquadStateDataMapMarker_DirectorMarker_*`); the
+actor copy is a second, independent source and the only one for a
+Director actor that has no squad-data twin in a frame.
+
 ## Capture gaps found (candidate wire additions - NOT yet proposed/agreed)
 
 1. **Asset uses are only partly visible in recordings today.** Present:
