@@ -159,6 +159,7 @@ are on `Replay-Improvements`.
 | D9 | The seven doctor improvements proposed in the 2026-08-31 incident write-up (severity classes the top pick) | Craig | none forced; before the next Squad update ideally | the write-up (private notes) | session note doctor-hardening |
 | D10 | Where the drone wire shape lives: the spec (recommended, so every wire shape has one home) with the drones doc keeping findings and tests, or the drones doc | Craig | W15 | none | this session |
 | D11 | Medical stats catalog: which stats to build, later-phase | the team | Phase 5 | `docs/medical-stats.md` | `docs/medical-stats.md` |
+| D12 | Offset-central design review (W55): where the signing key lives in the platform deployment; the channel strategy if a second server runs a different fork release; whether a pack's application is reported back in the next check-in; when to offer the doctor hardening upstream | Craig | before the central is built (a "Squad Reader" issue on the board once the design moves to the private repo) | the design doc in the Misc folder (W87) | Misc `squidhub-offset-central-design.md`, "Open questions for review" |
 
 **Made** (for the record; the text lives where cited):
 
