@@ -407,7 +407,23 @@ observed live:
   commander with `causerWeapon` = the rocket class, and bombs carry the
   commander as `firer`. The wire needs nothing new for commander kills.
 - Command zones (`BP_CommandZone_HAB_C` / `_Vehicle_C`) exist around HABs
-  and command vehicles - noted, not explored (parked, R8).
+  and command vehicles - noted, not explored (parked, R8). **Related,
+  found 2026-09-04 in the 09-02 raws: `SQCommanderState.bActionsEnabled`
+  (+0x5a0) is live per-tick state**, not a setting — it read 1 only in
+  windows around the moments assets were actually called (on the AFU
+  team, 218 s of 1 across a 90-minute layer, each window opening
+  seconds before a bomb run; on the enemy team it toggled repeatedly
+  while their commander moved; on the first team it held 1 from 10 s
+  after the claim until the step-down). Consistent with "the commander
+  is inside a command zone", which is the mechanic R8 asks about, but
+  that reading is an inference: record the flag, interpret in the
+  viewer, and close R8 by correlating the commander's recorded position
+  with the zone actors when convenient. Two other booleans on the same
+  actor are dead weight and are NOT captured: `bDoubleCaptureSpeed` read
+  0 in every row of every instance on both the state and the manager
+  (21,000 rows, two layers), and `bCommandActionAttempted` read 0
+  throughout even while actions were used, so it does not mean what its
+  name suggests.
 - **Commander actions write no server-log lines** — assets, votes,
   cooldowns, drone death are all memory-only (proven offset-controlled).
   The single exception is drone possession, which logs `OnPossess`.
