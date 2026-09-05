@@ -60,6 +60,16 @@ topic docs, the changelog, the session notes and the branch history since
     enough of its item and state that the reader never has to open this
     file mid-sentence to learn what they are being told. The id is for
     finding the row afterwards, not a substitute for saying what it is.
+11. A cell says one thing (decided 2026-09-05). State is state; a
+    result is a dated fact; a lesson goes to the rule it taught, in the
+    rule's text or its entry in the made list; a chore is done at once,
+    or gets its own row naming the work that actually needs it, or is
+    dropped — it never rides on another row as a note. A finished row
+    is a record, not a to-do list. Before describing a row, read it;
+    never describe it from recollection. (Learned when T7, a decoded
+    test, accreted a probe chore, a prep lesson and the pipeline's
+    first-run history, and the chore was then copied onto two tests
+    that did not need it.)
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,

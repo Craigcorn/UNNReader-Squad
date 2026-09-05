@@ -67,7 +67,10 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   discussion that ends undecided gets a row; before calling anything
   pending or done, read the tracker and `git log`. Status lives there
   only — the plan's narrative is dated history, a doc's status line
-  describes that doc, session memory points at tracker ids.
+  describes that doc, session memory points at tracker ids. A row
+  carries state and dated facts only: a chore is done, or gets its own
+  row with the work that needs it, or is dropped — never a note on
+  another row (tracker rule 11).
 - **Frozen surfaces.** The built-in stats dashboard and the SQLite read API
   receive fixes only — no new features. New stats/product work happens on the
   SquidHub side.
