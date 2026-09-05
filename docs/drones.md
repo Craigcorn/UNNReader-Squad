@@ -5,7 +5,7 @@ plan); test T7 run and decoded 2026-09-05** — five recon-drone flights on
 the test box, one player, the probe at 10 Hz — settling flight time,
 health, damage attribution, identity across pickup, speed, team and the
 after-death behaviour. What remains to observe is tracked, not listed
-here: test T7 carries the hand-off remainder, test T8 the commander-drone
+here: test T10 is the hand-off, test T8 carries the commander-drone
 confirmations, and the 4 Hz check follows the implementation (W18).
 Earlier findings: the 2026-09-02
 commander session (one commander drone flight, shot down) and the
@@ -166,7 +166,7 @@ keyed on `SQFlyingDrone` covers both and any future variant. On
 | D3 | Recon lifecycle: deploy, fly, pick up, redeploy; time out; re-arm; respawn | a recon-kit player and an ammo source | identity in memory across the cycle | 2026-09-05: pickup destroys the pawn; every redeploy and every re-arm is a new pawn; no launcher deployable exists for the recon drone |
 | D4 | Speed: flat out, straight, 30 s at 10 Hz | a pilot | top speed for the 4 Hz argument and interpolation | 2026-09-05: 9–10.6 m/s sustained, best 10 s mean 11.4 m/s; spikes are replication steps |
 | D5 | Shoot-down attribution: `LastHitBy` at the kill | a drone and a shooter — the pilot can be the shooter on a landed drone; a second player only for an in-flight shoot-down | whether "shot down by" is recordable | 2026-09-05: `LastHitBy` → the shooter's controller at the kill (self-inflicted case); in-flight by another player optional |
-| D6 | Possession hand-off: give the drone to a squad mate and take it back; watch `PlayerState`, `Controller`, `SQ PC` | two players | that `pilotEosId` follows the game and what `SQ PC` does on a hand-off | tracker T7 (the hand-off remainder; a second player) |
+| D6 | Possession hand-off: give the drone to a squad mate and take it back; watch `PlayerState`, `Controller`, `SQ PC` | two players | that `pilotEosId` follows the game and what `SQ PC` does on a hand-off | tracker T10 (two players) |
 | D7 | Team and owner of a pilotless drone | a pilot who lands and exits | whether `team` can be emitted | 2026-09-05: `SQ PC` holds the deployer/last pilot through de-possession and death → `ownerEosId`, team derived |
 | D8 | The 4 Hz sample on a live drone: gates admit it, omit it cleanly at death and at the zeroed position | any drone flight with the two-tier recorder running the new code | that the fast tier behaves | tracker W18 then T8 (acceptance of the implementation) |
 | D9 | Commander drone confirmations: `SQ PC` persistence, health value, linger, `Command Action` set | a commander calling the drone (rides test T8) | that the commander drone matches the recon findings where the class is shared | tracker T8 (rides the six-player run) |
@@ -177,7 +177,7 @@ dumps, a 1 Hz soldier roll-call — following every `SQFlyingDrone`
 subclass, the launcher deployable and the commander drone actor by name,
 with the health component's numeric fields dumped on change.
 `BatteryLifetimeMax` is not in its field list (read on 2026-09-05 by a
-one-off layout read); add it before the next run. Session outputs are
+one-off layout read); tests T8 and T10 need it added first. Session outputs are
 archived in the Misc folder under `command-probe-2026-09-05/` (probe
 rows, both class layouts, the inventory probe's output).
 
