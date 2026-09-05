@@ -187,9 +187,11 @@ contain spaces and are used verbatim.
 Not recorded: who damaged or destroyed an actor. No last-damager field
 exists in the reflected lists of the six command actors archived (creep,
 UAV and F/A-18 on 08-30; drone, F/A-18, SU-25 bomb and mortar on
-09-02). The drone pawn's `LastHitBy` is recorded in §7.
-Tracker T9 is the observation that would add an aircraft attribution
-read, if one exists.
+09-02), so the actor itself cannot supply it. Whether another source
+can — a server-log line at the actor's death, or an object the actor
+points at — has never been tested; that is tracker T9's item (a), and a
+read joins this record only if it finds one. The drone pawn's
+`LastHitBy` is recorded in §7.
 
 The shells, rockets and bombs an asset fires are already tracked
 projectiles with `firer` = the commander (bombs 09-02/03; 155 mm shells
