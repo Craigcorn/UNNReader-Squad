@@ -28,3 +28,11 @@ in `docs/tracker.md`). The design, decided 2026-09-04:
   lives in `probe_common.py`. Output is JSONL to `/tmp/<probe>.jsonl`
   unless the test says otherwise; the session's decode step files the
   evidence into the rows the test serves.
+
+- **Dump whole layouts, never ask for names.** When a probe first meets a
+  class it records the class's complete reflected layout, not the handful
+  of properties the day's question needs. The 09-04 marker enumeration
+  asked 163 classes for three names and missed the `Action` class pointer
+  sitting between them; the 08-30 archive had held every command marker's
+  full layout all along. A full dump costs nothing and is what the next
+  question is answered from.
