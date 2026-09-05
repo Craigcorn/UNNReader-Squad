@@ -43,7 +43,8 @@ EXTRA_CLASSES = ("BP_Deployable_DroneSpawner_C", "BP_CommandActor_Drone_C")
 FIELDS = {
     "drone": ["PlayerState", "Controller", "PreviousController", "LastHitBy",
               "SQ PC", "HealthComponent", "Command Action", "BleedOutTime",
-              "EndFlightTimer", "Max Fly Height", "CrashVelocity",
+              "EndFlightTimer", "BatteryLifetimeMax", "Max Fly Height",
+              "CrashVelocity",
               "Zoom Level", "Desired Zoom", "FPV Item", "Dead", "Can Possess",
               "Can Increase Altitude"],
     "BP_Deployable_DroneSpawner_C": ["Health", "MaxHealth", "Team", "BuildState",

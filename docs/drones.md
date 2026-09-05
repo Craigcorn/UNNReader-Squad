@@ -176,8 +176,8 @@ The harness is `scripts/probes/drone_track.py` (tracker test T7): the
 dumps, a 1 Hz soldier roll-call — following every `SQFlyingDrone`
 subclass, the launcher deployable and the commander drone actor by name,
 with the health component's numeric fields dumped on change.
-`BatteryLifetimeMax` is not in its field list (read on 2026-09-05 by a
-one-off layout read); tests T8 and T10 need it added first. Session outputs are
+`BatteryLifetimeMax` joined its field list on 2026-09-05, after the
+session read it by a one-off layout read. Session outputs are
 archived in the Misc folder under `command-probe-2026-09-05/` (probe
 rows, both class layouts, the inventory probe's output).
 
