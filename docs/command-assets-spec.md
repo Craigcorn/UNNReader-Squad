@@ -180,7 +180,7 @@ contain spaces and are used verbatim.
 | Family | Wire fields (type) | Memory source |
 |---|---|---|
 | Strike aircraft (`*_Strafe_*`, gun and bomb): a shootable pawn flying its run | `health` (number), `dead` (bool), `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts) |
-| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `shellsPerBarrage` (int), `barrageCount` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Shells Per Barrage`, `Barrage Count`, `Current Barrage`, `Projectile` — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
+| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values decoded 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
 | UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, kept by decision D17). No UAV or aircraft has been shot down in a session, so `Dead_0` flipping is unobserved — tracker T9. The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
 | Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is confirmed under tracker T8 |
 
@@ -312,6 +312,15 @@ test is cited by tracker id; the fields do not change when it runs.
   sources agree on the category gate — memory arithmetic, the players'
   rule, SquadCalc's model — and the direct call test is tracker T9's
   optional confirmation.
+- **Artillery timeline.** From the call: the guns open at
+  `createdGameTime` + `enrouteSec` (the first warning shell landed at
+  +59.7 s on a 60 s enroute, 08-30 creep); the main barrage opens when
+  `currentPrewarningShells` reaches `preWarningShells`, plus
+  `preWarningDelaySec` (observed 12.1 s after the second warning shell);
+  barrages then advance `currentBarrage` at the game's own interval, which
+  is not recorded, roughly every six to seven seconds on the 08-30 creep.
+  Whether the mortar follows the same shape is unobserved — it rides the
+  acceptance run's mortar call (T8).
 - **Actions enabled.** `commander.actionsEnabled` is displayed as read;
   its reading as "the commander stands in a command zone" is an
   inference the viewer may label as such (tracker W20's item R8).
@@ -418,11 +427,9 @@ named.
 | both artillery actors (creep 08-30, mortar 09-02: identical) | `Arrow` (Object) | engine or visual component |
 | ″ | `DefaultSceneRoot` (Object) | engine or visual component |
 | ″ | `Edge Only` (Bool) | placement config |
-| ″ | `Pre Warning Delay` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
-| ″ | `Barrage Interval` (Struct) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
-| ″ | `First Barrage Height Variance` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
-| ″ | `Main Barrage Height Variance` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
-| ″ | `Current Prewarning Shells` (Int) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| ″ | `Barrage Interval` (Struct) | a timer handle, not a time — decision D14 (2026-09-05) took the delay and the pre-warning counter and left this |
+| ″ | `First Barrage Height Variance` (Double) | spawn-height scatter with no display use — decision D14 (2026-09-05) took the delay and the pre-warning counter and left this |
+| ″ | `Main Barrage Height Variance` (Double) | spawn-height scatter with no display use — decision D14 (2026-09-05) took the delay and the pre-warning counter and left this |
 | both strike actors (F/A-18 08-30/09-02, SU-25 bomb 09-02) | `Arrow` (Object) | engine or visual component |
 | ″ | `DefaultSceneRoot` (Object) | engine or visual component |
 | ″ | `Cam` (Object) | engine or visual component |
@@ -565,7 +572,11 @@ the archived probe output (Misc `command-probe-2026-09-05/`,
 `spec_names_check.live.jsonl` and `.archive.jsonl`) and are values of
 their day, never read by the implementation. All 157 names resolved —
 57 on the box for 18 classes, 131 from the archives for 19, eight classes
-checked both ways, and one class (`SQTeamState`) live only.
+checked both ways, and one class (`SQTeamState`) live only. The two
+artillery fields decision D14 added afterwards, `Pre Warning Delay` and
+`Current Prewarning Shells`, resolved in the same run as part of the
+artillery actors' full layouts (they appeared in §10's enumeration before
+they were promoted).
 
 | Class | Source | Names → reflected type |
 |---|---|---|

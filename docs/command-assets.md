@@ -524,6 +524,21 @@ four per 4 Hz sample — under a millisecond per frame at any observed
 count, against a full-frame build of ~130 ms on the test box and 1–2 s at
 110 players.
 
+**Artillery phases decoded 2026-09-05 from the 08-30 creep call** (the
+probe's per-tick raw dumps of `BP_CommandActor_Artillery_Creep_C`, 106
+rows over 128 s, archived beside the 09-05 outputs as
+`creep_raw_0830.jsonl`; the 09-02 mortar left no raws, crowded out by the
+dump cap). Offsets from the 08-30 layout; the known values decode exactly
+(2 warning shells, 12 per barrage, 7 barrages, 7500 scatter, 45000 path),
+so the two new ones are trusted: `Pre Warning Delay` = 12.0 s constant,
+and `Current Prewarning Shells` 0 at appearance, 1 at +59.7 s, 2 at
++67.1 s; `Current Barrage` 1 at +79.2 s (12.1 s after the second warning
+shell), then 2–7 at +85.3, +92.7, +96.3, +103.6, +111.0, +115.9 s. So the
+guns open at the end of the 60 s enroute window, the main barrage opens
+`Pre Warning Delay` after the last warning shell, and barrages follow at
+roughly six to seven second intervals (the interval field is a timer
+handle). Decision D14 records the delay and the counter.
+
 ## Agreed capture — the commander block (decision 2, 2026-09-04)
 
 The contract for the implementation plan. Every field is a direct read of
