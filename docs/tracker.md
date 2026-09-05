@@ -55,7 +55,12 @@ topic docs, the changelog, the session notes and the branch history since
    holds still, a claimable commander — never as a player count: the
    count is what a solo day cannot change, the capability often is
    (learned 2026-09-05, when the damage tests waited for a second player
-   although the pilot could land the drone and shoot it).
+   although the pilot could land the drone and shoot it). A test row that
+   bundles several questions states, for each one, the evidence that
+   settles it — or it is not a test row, and a decision cannot rest on
+   it (learned 2026-09-05, when T9 said "shoot-down attribution" as if
+   one observation covered drones and aircraft, and two items said they
+   were "observed via T9" while T9 never named them).
 10. Ids travel with their meaning (decided 2026-09-04). A row cited in
     chat, a commit message or a doc — W16, D4, C4 — is cited with
     enough of its item and state that the reader never has to open this
