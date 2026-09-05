@@ -1,5 +1,9 @@
 # Command assets — exploration findings
 
+The contract drawn from these findings is `docs/command-assets-spec.md`
+(2026-09-05). This document is the journal: dated findings in the order
+they were made, including statements later superseded.
+
 Status: **exploration COMPLETE — every item that gates the recorder or
 the viewer's correctness is closed (one cosmetic measurement, B2,
 remains); implementation planning can begin** · live sessions on the

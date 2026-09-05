@@ -114,6 +114,9 @@ on failure).
   discussions. Read first on resume.
 - `docs/replay-pipeline-plan.md` — goals, decisions, build-out phases (this
   repo's side in detail)
+- `docs/command-assets-spec.md` — the capture contract for the commander,
+  tactical requests, command assets and drones (journal:
+  `docs/command-assets.md`; drone findings: `docs/drones.md`)
 - `docs/architecture-notes.md` — module map of the backend and viewer, with
   file pointers and the replay-playback pipeline explained
 - `docs/offsets.md`, `docs/findings.md` — upstream's reverse-engineering

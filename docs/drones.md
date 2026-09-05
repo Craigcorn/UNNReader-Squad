@@ -123,39 +123,16 @@ keyed on `SQFlyingDrone` covers both and any future variant. On
   measured on the recon drone; the commander's cooldown restarts from the
   destruction (see the commander doc).
 
-## Proposed capture (decision 7, agreed in principle 2026-09-04; fields pinned 2026-09-05)
+## Wire shape
 
-1. **Full frame**: a `drones` list, one entry per live `SQFlyingDrone`
-   pawn of any class, emitted only while a pawn exists and omitted when
-   its position is zeroed or the pawn is gone. Fields, all direct reads
-   resolved by reflection name: `id` (the pawn address, as vehicles use;
-   new on every deploy), `class`, `position`, `yaw`, `dead` (`Dead`),
-   `health` and `maxHealth` (the health component's `Health` and
-   `Max Health`), `pilotEosId` (`PlayerState` → id; null while nobody
-   flies it), `ownerEosId` (`SQ PC` → its player state → id; the deployer
-   or last pilot, persists through de-possession and death; team derives
-   from it), `commandAction` (`Command Action` class name; null on a recon
-   drone), `batteryLifetimeMax` (`BatteryLifetimeMax`, seconds; emitted
-   when the class has it), `lastHitByEosId` (`LastHitBy` → its player
-   state → id; emitted when set). No remaining-time field: the viewer
-   derives it from the first frame the id appears plus the budget — the
-   pawn's battery for a recon drone, the action's active window for a
-   commander drone.
-2. **4 Hz position frames**: drones join players and vehicles as a third
-   sampled set, `{id, x, y, z, yaw}` with the same `id` as the full-frame
-   entry and the same freshness gates (class pointer, sane coordinates; a
-   zeroed position or a freed pawn is omitted, never guessed). Measured
-   cost: ~115 B of raw JSON per drone per sample, ~28 KB on disk per
-   10-minute flight, 3–4 small reads per drone per sample. Touch points:
-   `possample.SampledEntities` / `sample_positions`, the position-frame
-   `drones` key, the viewer reconstructor, `docs/schema.md`. Additive
-   under the format rule, entered in the schema doc's frame-key register;
-   the packed stream passes position lines through untouched, and the
-   packer's round-trip test covers the key.
-3. Viewer rules (interpretation, never recorded): stop drawing at `dead`;
-   remaining time as above; a drone whose `ownerEosId` and team match a
-   just-vanished one is the same kit redeployed, if the viewer wants
-   continuity.
+The `drones` list and the position-line `drones` key are specified in
+`docs/command-assets-spec.md` §7 — the one home of every wire shape in
+the commander workstream — with the viewer's drone rules in its §9.
+This document keeps the evidence the spec rests on (above) and the
+tests (below). Measured cost of the position-line key, for the record:
+~115 B of raw JSON per drone per sample, ~28 KB on disk per ten-minute
+flight, three to four small reads per drone per sample; additive under
+the format rule and entered in the schema doc's frame-key register.
 
 ## Tests (needs are capabilities, not head-counts; state lives in the tracker)
 
