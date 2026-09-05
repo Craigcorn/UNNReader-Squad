@@ -92,16 +92,23 @@ be confirmed in implementation.
 | D8 | The 4 Hz sample on a live drone: confirm the position gates admit it and omit it cleanly at death | any drone flight with the two-tier recorder running | that the fast tier behaves | high (implementation acceptance) |
 
 Most of these need one recon-kit player on the test box and no
-commander; D1's commander half and D6 ride along with the next commander
-session. The 10 Hz tracker built for the bombing test (the
-`bomb_track.py` pattern: reflection-resolved fields, change-triggered
-dumps, a 1 Hz roll-call) is the harness — add the `SQFlyingDrone`
-subclasses at dump priority 0 and read the fields above by name.
+commander; D1's commander half and D6 ride along with a later play
+session that has a commander (tracker tests T8, T9). The harness is
+`scripts/probes/drone_track.py` (tracker test T7): the `bomb_track.py`
+pattern — reflection-resolved fields, change-triggered dumps, a 1 Hz
+roll-call — with the `SQFlyingDrone` subclasses, the launcher deployable
+and the commander drone actor followed by name.
 
-## Session B — run sheet (one recon-kit player, ~30 min, BEFORE implementation)
+## T7 run sheet — the drone bundle (one recon-kit player, ~30 min, before implementation)
 
-Tracker: `drone_track.py` (scratchpad; copy to the box, run as root under
-the fork's venv). It follows every `SQFlyingDrone` pawn, the launcher
+Harness: `scripts/probes/drone_track.py`, canonical in the repo since
+2026-09-04 (test T7 in `docs/tracker.md`; conventions in
+`scripts/probes/README.md`). On the box it arrives with `git pull` and
+runs from the fork checkout as `sudo .venv/bin/python
+scripts/probes/drone_track.py` (reading the server's memory needs root);
+it appends to `/tmp/drone_track.jsonl`. Steps B4 and B5 need a second
+player — with one player they wait, and D2, D5 and D6 stay outstanding.
+The probe follows every `SQFlyingDrone` pawn, the launcher
 deployable and the commander drone actor at 10 Hz, reflects every field by
 name and dumps the health component's numeric fields, so nothing below
 needs an offset.
@@ -115,6 +122,8 @@ needs an offset.
 | B5 | Have a second player shoot it down (if present) | "shooting", "dead" | D2 health fields, D5 `LastHitBy` |
 | B6 | Deploy one more and leave it; observe how long the pawn lingers after timeout / death | — | pawn lifetime for the recorder's "gone" semantics |
 
-Check afterwards: the tracker's rows against the recorder's `drones`
-entries once implemented (D8), and the speed profile from B2.
+Check afterwards: the probe's rows against the recorder's `drones`
+entries once implemented (D8), and the speed profile from B2. The decode
+files each answer into the test table above and into the tracker's T7
+row.
 
