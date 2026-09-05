@@ -463,6 +463,33 @@ observed live:
   cooldowns, drone death are all memory-only (proven offset-controlled).
   The single exception is drone possession, which logs `OnPossess`.
 
+## Reflected live 2026-09-05 (spec review)
+
+While the capture spec was checked against this journal, the inner
+structs the agreed contract names — never archived before — were
+reflected live on the idle box and archived (Misc
+`command-probe-2026-09-05/struct_layouts_0905.txt`):
+`SQCommandActionData` (24 bytes: `CommandActionData` class +0,
+`GameTimeAtCreation` f32 +8, `CooldownTimeRemaining` f32 +0xc,
+`IsDestroyedDuringActive` bool +0x10); `SQCommandActionDataFASItem`
+(40 bytes, `Content` +0x10 over `FastArraySerializerItem`);
+`CommanderVoteNominee` (32 bytes, `NomineeState` object +0x10,
+`VoteCount` i32 +0x18); `CommanderCategory` (24 bytes, `Name` FText +0,
+`CooldownDuration` f32 +0x10). The two marker masters as well:
+`BP_MapMarker_CommandMaster_C` carries `Distance` f64 +0x320, **`Action`
+class +0x328**, `Request` bool +0x330, `AddDistance` f64 +0x338;
+`BP_MapMarker_DirectorMaster_C` carries `Distance` f64 +0x320 only. The
+`Action` pointer is new to this journal: a command marker names the
+action it belongs to directly, a join no agreed field carries (tracker
+D13). One correction to the creep entry above (2026-08-30, offline
+transcription): the mortar actor's 09-02 layout spells the fire-plan
+fields with spaces — `Max Drop Radius`, `Pre Warning Shells`, `Shells Per
+Barrage`, `Barrage Count`, `Current Barrage`, `Origin Location` — at the
+offsets quoted; the creep's spelling is taken from reflection at
+implementation. The `CommandAction_*` configs were not loaded on the
+09-05 layer (they load when a claim resolves), so their common base
+class remains to be named by reflection.
+
 ## Agreed capture — the commander block (decision 2, 2026-09-04)
 
 The contract for the implementation plan. Every field is a direct read of

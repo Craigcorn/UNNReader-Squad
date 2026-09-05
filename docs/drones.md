@@ -86,7 +86,8 @@ keyed on `SQFlyingDrone` covers both and any future variant. On
   On landing and exiting, all three null; `SQ PC` keeps naming the last
   pilot through the de-possession, through death and until the pawn is
   gone. A freshly deployed drone reads `SQ PC` = the deployer before
-  anyone flies it. So `SQ PC` is the owner and the source of team for a
+  anyone flies it, while `PlayerState` and `Controller` read null until
+  the first possession (48 s on flight 4). So `SQ PC` is the owner and the source of team for a
   pilotless drone; `PlayerState` is the live pilot. What a hand-off does
   to `SQ PC` is still unobserved (D6).
 - **Speed (D4).** Flat out and level for 40 s: 9–10.6 m/s in every
