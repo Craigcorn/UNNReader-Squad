@@ -20,8 +20,9 @@ topic docs, the changelog, the session notes and the branch history since
 5. Status lives here and nowhere else. The plan's narrative sections are
    dated history, a doc's own status line describes that doc, and session
    memory holds pointers to ids, never states.
-6. Before stating that an item is pending, done, decided or undecided —
-   human or agent — read this file and `git log`.
+6. Before stating that an item is pending, done, decided or undecided,
+   or describing any row — human or agent — read this file and
+   `git log`. Never from recollection.
 7. Rows are never deleted. A finished item keeps its final state; a
    decision, once made, moves to the "made" list at the end of table B
    with its date and where it is recorded.
@@ -60,16 +61,12 @@ topic docs, the changelog, the session notes and the branch history since
     enough of its item and state that the reader never has to open this
     file mid-sentence to learn what they are being told. The id is for
     finding the row afterwards, not a substitute for saying what it is.
-11. A cell says one thing (decided 2026-09-05). State is state; a
-    result is a dated fact; a lesson goes to the rule it taught, in the
-    rule's text or its entry in the made list; a chore is done at once,
-    or gets its own row naming the work that actually needs it, or is
-    dropped — it never rides on another row as a note. A finished row
-    is a record, not a to-do list. Before describing a row, read it;
-    never describe it from recollection. (Learned when T7, a decoded
-    test, accreted a probe chore, a prep lesson and the pipeline's
-    first-run history, and the chore was then copied onto two tests
-    that did not need it.)
+11. A cell says one thing: state is state, a result is a dated fact.
+12. A chore is done at once, or gets its own row naming the work that
+    needs it, or is dropped. It never rides on another row as a note.
+13. A lesson lives with the rule it taught — in the rule's text or the
+    rule's entry in the made list — not on the row where it was
+    learned.
 
 States for work items: `discussed` → `decided` → `specified` →
 `implemented` → `committed` → `deployed` → `verified`; also `parked`,
@@ -213,6 +210,7 @@ recorded in the rows the test serves, which is what closes it).
 - "v3" is not a version number; additive fields change no version — 2026-09-03 (565dcb2).
 - Commander decisions 1–9 (additive fields; the commander block contract; votes derived, not evented; stamps only; marker geometry fields; the `commandActions` list; the `drones` list in the fast tier; blast origin parked; two verification sessions) — 2026-09-04, `docs/command-assets.md` "Agreed capture" sections and `docs/drones.md`.
 - Offset central: UNN signs its own packs — ~2026-09-01 (W55).
+- Rules 11–13 (one thing per cell; chores never ride on rows; lessons live with their rule) and the read-before-describing clause of rule 6 — 2026-09-05, after T7, a decoded test, accreted a probe chore, a prep lesson and the pipeline's first-run history, the chore was copied onto two tests that did not need it, and rows were described from recollection.
 - Format rule reworded to name its three surfaces (frames additive; the container version moves with the file layout; the packed stream's version with its index-tracked lists), the frame-key register created, the packer's acceptance test written into the plan — 2026-09-04 (was D8); CLAUDE.md "Recordings are immutable", `docs/schema.md` "Frame-key register", plan Phase 1, Phase 4 remedy 2, Glossary.
 - The medical capture shape (a per-tick `medical` block while an item is held; revive events from the log) — 2026-08-30.
 - Session checklists are built from this register at prep time; topic-doc run sheets carry procedure only — 2026-09-04, rule 9.

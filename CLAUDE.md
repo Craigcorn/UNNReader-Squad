@@ -70,7 +70,7 @@ trends toward record-and-upload. Full plan: `docs/replay-pipeline-plan.md`.
   describes that doc, session memory points at tracker ids. A row
   carries state and dated facts only: a chore is done, or gets its own
   row with the work that needs it, or is dropped — never a note on
-  another row (tracker rule 11).
+  another row (tracker rules 11–13).
 - **Frozen surfaces.** The built-in stats dashboard and the SQLite read API
   receive fixes only — no new features. New stats/product work happens on the
   SquidHub side.
