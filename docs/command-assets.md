@@ -504,6 +504,26 @@ does not read are listed with reasons in the spec's §10, and three of
 them became decisions (D14 artillery fire-plan extras, D15 the action
 configs' `DisplayName`/`Description`, D16 their placement bounds).
 
+**Storage cost measured 2026-09-05 (house method: two production
+recordings re-encoded line by line, canonical JSON, zstd level 10, one
+frame per line, with the spec's additions inserted at realistic rates —
+the full commander block for both teams every frame with eleven action
+entries each, the rules block, geometry fields on every command and
+director marker present (6–9 per frame in these matches), a command actor
+in a quarter of frames, one or two drones in 40 %).** Fallujah TC
+(974 full frames): +5.9 MB raw, +0.40 MB compressed, +1.4 %. Mutaha RAAS
+(1,254 full frames): +7.6 MB raw, +0.74 MB compressed, +1.7 %. About
++6 KB of raw JSON and +0.4–0.6 KB on disk per full frame, four fifths of
+it the per-team action list. The 4 Hz drone entry was measured earlier at
+~115 B raw per drone per sample. Read cost is analytical for now: the
+commander state is one block read per team plus one for the items buffer
+(class names and config values cached per class), the manager one read,
+each geometry marker one or two more, a command actor about twenty reads
+while it exists, a drone fifteen to twenty per full frame and three to
+four per 4 Hz sample — under a millisecond per frame at any observed
+count, against a full-frame build of ~130 ms on the test box and 1–2 s at
+110 players.
+
 ## Agreed capture — the commander block (decision 2, 2026-09-04)
 
 The contract for the implementation plan. Every field is a direct read of
