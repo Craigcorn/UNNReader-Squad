@@ -147,8 +147,9 @@ Nothing new is recorded about request markers themselves: `type`
 classes have byte-identical layouts and the `Request` bool reads 1 on
 both), position, `team`, `squad` and `ownerPlayerStateAddr` already
 reach the file. The Command master's `Action` class pointer, a direct
-join from a marker to the action it belongs to, is not recorded; it is
-tracker D13.
+join from a marker to the action it belongs to, is recorded only after
+test T12 has observed what it holds on a request before and after
+approval and on a footprint during a call (decision D13).
 
 ## 6. Surface D — the `commandActions` list
 
@@ -180,7 +181,7 @@ contain spaces and are used verbatim.
 |---|---|---|
 | Strike aircraft (`*_Strafe_*`, gun and bomb): a shootable pawn flying its run | `health` (number), `dead` (bool), `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts) |
 | Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `shellsPerBarrage` (int), `barrageCount` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Shells Per Barrage`, `Barrage Count`, `Current Barrage`, `Projectile` — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
-| UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, the layout also carrying `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded) |
+| UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, kept by decision D17). No UAV or aircraft has been shot down in a session, so `Dead_0` flipping is unobserved — tracker T9. The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
 | Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is confirmed under tracker T8 |
 
 Not recorded: who damaged or destroyed an actor. No last-damager field
@@ -321,7 +322,9 @@ test is cited by tracker id; the fields do not change when it runs.
   Interpolate at 4 Hz knowing cruise is ~10 m/s (2.5 m per sample).
 - **Asset display names.** SquadCalc's per-asset table maps the
   `CommandAction_*` class names to display names and agrees with the
-  config values (cross-checked 2026-09-04).
+  config values (cross-checked 2026-09-04). Decision D15 replaces the
+  mapping with the configs' own `DisplayName`, recorded on each action
+  entry once test T13 has read the strings.
 
 ## 10. Deliberately not recorded
 
@@ -331,8 +334,9 @@ across 21,000 rows); any "ready in" or remaining-time number; any
 event line; any rule; the request circle radius; the bomb map circles;
 any last-damager for a command actor (none exists in memory); the recon
 launcher (no deployable exists — the launcher is the kit item in the
-soldier's inventory); the command marker's `Action` pointer (tracker
-D13).
+soldier's inventory); the command marker's `Action` pointer until
+test T12 has observed it (D13); the action configs' `Description` (D15)
+and placement bounds (D16).
 
 Second, exhaustively, every other game-level property the classes of
 §3–§7 carry, from test T11's full layouts (2026-09-05), each with the
@@ -474,21 +478,21 @@ named.
 | ″ | `DefaultSceneRoot` (Object) | engine or visual component |
 | ″ | `Equippable Drone Item Class` (Class) | spawn plumbing |
 | ″ | `TargetInventorySlot` (Int) | spawn plumbing |
-| the action configs (three CDOs archived 09-02) | `DisplayName` (Str) | the game's own display text — tracker D15 |
+| the action configs (three CDOs archived 09-02) | `DisplayName` (Str) | the game's own display text — `DisplayName` is recorded once test T13 has read it (D15); `Description` is not |
 | ″ | `Description` (Str) | the game's own display text — tracker D15 |
 | ″ | `Texture` (Object) | UI: icon, tint, widget, sounds |
 | ″ | `Tint` (Struct) | UI: icon, tint, widget, sounds |
 | ″ | `CommandActor` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
 | ″ | `ControlWidget` (Class) | UI: icon, tint, widget, sounds |
 | ″ | `IconAngleOffset` (Float) | UI: icon, tint, widget, sounds |
-| ″ | `MaxAngleFromBase` (Float) | placement bounds — tracker D16 |
+| ″ | `MaxAngleFromBase` (Float) | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
 | ″ | `CreateMapMarker` (Bool) | config flag with no agreed use |
 | ″ | `bAllowedInVehicle` (Bool) | config flag with no agreed use |
 | ″ | `bIgnoreActionEnabled` (Bool) | config flag with no agreed use |
 | ″ | `MapMarkerClass` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
 | ″ | `CommanderActionSoundsList` (Struct) | UI: icon, tint, widget, sounds |
-| ″ | `MinimumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — tracker D16 |
-| ″ | `MaximumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — tracker D16 |
+| ″ | `MinimumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
+| ″ | `MaximumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
 
 ## 11. Acceptance
 
