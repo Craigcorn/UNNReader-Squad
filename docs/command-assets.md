@@ -481,12 +481,19 @@ class +0x328**, `Request` bool +0x330, `AddDistance` f64 +0x338;
 `BP_MapMarker_DirectorMaster_C` carries `Distance` f64 +0x320 only. The
 `Action` pointer is new to this journal: a command marker names the
 action it belongs to directly, a join no agreed field carries (tracker
-D13). One correction to the creep entry above (2026-08-30, offline
-transcription): the mortar actor's 09-02 layout spells the fire-plan
-fields with spaces — `Max Drop Radius`, `Pre Warning Shells`, `Shells Per
-Barrage`, `Barrage Count`, `Current Barrage`, `Origin Location` — at the
-offsets quoted; the creep's spelling is taken from reflection at
-implementation. The `CommandAction_*` configs were not loaded on the
+D13). One correction to the creep entry above (2026-08-30): the creep actor's
+own reflected layout, archived that day (`cmd_session.tgz`,
+`cmd_layouts/BP_CommandActor_Artillery_Creep_C.json`, extracted to plain
+files 09-05), spells the fire-plan fields with spaces — `Max Drop
+Radius`, `Pre Warning Shells`, `Shells Per Barrage`, `Barrage Count`,
+`Current Barrage`, `Origin Location`, `target location` — at the offsets
+quoted, as does the mortar's 09-02 layout; the entry above dropped the
+spaces in transcription. The same archive holds the UAV actor's layout
+(`BP_CommandActor_UAV_MQ9_C`: `Health` f64 +0x330, `Dead_0` +0x338,
+`HealthComponent` +0x300, `Min`/`Max`/`Actual Flight Speed`, `Height`
++0x398), which the 09-04 contract described as unread, and the three
+geometry marker subclasses, each carrying the master's `Distance`,
+`Action`, `Request`, `AddDistance` at the master's offsets. The `CommandAction_*` configs were not loaded on the
 09-05 layer (they load when a claim resolves), so their common base
 class remains to be named by reflection.
 

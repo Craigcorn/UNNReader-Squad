@@ -58,9 +58,9 @@ W15; the implementation plan is W17, the implementation W18).
 | Convention | Rule |
 |---|---|
 | Ids | An actor's or pawn's address as a lowercase hex string (`"0x707db0c584a0"`), the same form vehicles use. New on every spawn; never reused within a recording's life except by the game itself. |
-| Player identity | `eosId`: the `OnlineUserId` string of the player state reached from the pointer named; `name`: its `PlayerNamePrivate` — the reader's existing identity read. |
-| Absent reads | A field whose read fails, whose pointer is null or does not reach the object named, or whose array has no element at the index, is **omitted**. No field is `null`-filled. This also holds for the two existing identity fields, which are omitted when the seat is empty, as the shipped code already does; the journal's contract wording ("explicit `null`") is not adopted, and §12 records the deviation. |
-| Class names | The object's class name verbatim, e.g. `BP_CommandActor_SU25_Bomb_Strafe_C`, `CommandAction_Drone_C`. A class pointer that reads null is an absent read. |
+| Player identity | `eosId`: the `OnlineUserId` string of the player state reached from the pointer named; `name`: its `PlayerNamePrivate` — the reader's existing identity read. A pointer that reads null gives `null` for both; one that does not reach a player state gives an omitted field. |
+| Absent reads | Two cases, kept distinct because they mean different things to a viewer. **`null`** = the game's own value is empty and was read successfully: a pointer that reads null (no commander in the seat, no pilot in the drone, no calling action on a recon drone), an array with no element at the index (a category never called). **Omitted** = the recorder could not read: the class lacks the field, the pointer reaches an object that is not what the field names, or the read fails. So a viewer that sees `null` knows "none", and a viewer that sees nothing knows "unknown". This is the journal's contract for the identity fields ("explicit `null` when the seat is empty") applied to every field. |
+| Class names | The object's class name verbatim, e.g. `BP_CommandActor_SU25_Bomb_Strafe_C`, `CommandAction_Drone_C`. A class pointer that reads null gives `null`. |
 | Positions | `{x, y, z}` in world centimetres from the root transform, as vehicles record them. The existing sanity exclusion applies unchanged: a `commandActions` or `drones` entry whose root position reads exactly (0, 0, 0) is dropped from the list (the junk-vehicle test; a dead drone's final tick reads (0, 0, 0) before the pawn is freed, 09-05), and the position line applies the sampler's existing finite-and-in-bounds gate. |
 | `yaw` | Degrees, world, from the root transform, as vehicles record it. |
 | Game time | Seconds on the server's game clock — the same clock as the existing `gameState.worldTimeSec`. Stamps are read raw; nothing is subtracted. |
@@ -79,7 +79,7 @@ live in the 08-30/31 sessions).
 
 | Wire field | Memory source | Type | Meaning | Emitted |
 |---|---|---|---|---|
-| `commanderName`, `commanderEosId` (existing fields) | `SQTeamState.CommanderState` → `SQCommanderState.CurrentCommander` → player state | string | who holds the seat | every frame the seat is held; omitted when empty |
+| `commanderName`, `commanderEosId` (existing fields) | `SQTeamState.CommanderState` → `SQCommanderState.CurrentCommander` → player state | string | who holds the seat; explicit `null` when `CurrentCommander` reads null — the seat is empty | every frame |
 | `commander.enabled` | `SQCommanderState.bCommanderIsActive` | bool | the commander system exists on this layer — not "claimed" (read 1 on both teams while one had no commander, 08-30/31) | every frame |
 | `commander.actionsEnabled` | `SQCommanderState.bActionsEnabled` | bool | the team may issue commands this frame (live state; it opened around the moments assets were called and toggled as a commander moved, 09-02 raws) | every frame |
 | `commander.vote.inProgress` | `bVoteInProgress` | bool | a commander vote is open | every frame |
@@ -89,7 +89,7 @@ live in the 08-30/31 sessions).
 | `commander.vote.cooldownActive` | `bVoteCooldownActive` | bool | the block on new votes after a claim | every frame |
 | `commander.vote.cooldownTimer` | `VoteCooldownTimer` | int, s | its countdown (counts down after every claim, 09-02; the manager's `VoteCooldownTimeSeconds` read 300, 09-04) | every frame |
 | `commander.vote.cooldownStartedGameTime` | `VoteCooldownTimestamp` | int, game s | when it started | every frame |
-| `commander.cooldowns.categories[]` | `CommanderCategories[i]` (`CommanderCategory`, 24-byte items): `Name` (FText), `CooldownDuration` (float); `LastCategoryGameTime[i]` (float) | `{id, name, intervalSec, lastUseGameTime}` | the per-category gate: any call in the category writes the stamp (strafe, mortar and three bomb calls all wrote index 1, 09-02). `id` is the array index `i` — the index `LastCategoryGameTime` uses and the value the actions' `categoryId` carries — the one key the recorder produces. `lastUseGameTime` is omitted while `LastCategoryGameTime` has no element at `i` (the array is empty until the first call) | every frame |
+| `commander.cooldowns.categories[]` | `CommanderCategories[i]` (`CommanderCategory`, 24-byte items): `Name` (FText), `CooldownDuration` (float); `LastCategoryGameTime[i]` (float) | `{id, name, intervalSec, lastUseGameTime}` | the per-category gate: any call in the category writes the stamp (strafe, mortar and three bomb calls all wrote index 1, 09-02). `id` is the array index `i` — the index `LastCategoryGameTime` uses and the value the actions' `categoryId` carries — the one key the recorder produces. `lastUseGameTime` is `null` while `LastCategoryGameTime` has no element at `i` (the array is empty until the first call) | every frame |
 | `commander.cooldowns.actions[]` | `CommandIntervals.Items[]` (`SQCommandActionDataFASItem`, 40-byte items) `.Content` (`SQCommandActionData`): `CommandActionData` (class), `GameTimeAtCreation` (float), `CooldownTimeRemaining` (float), `IsDestroyedDuringActive` (bool); plus, from that class's defaults, `CategoryId` (byte), `EnrouteDuration`, `ActiveDuration`, `CooldownDuration` (floats) | `{action, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | one entry per action the team can call; entries appear at the first claim, back-dated by enroute plus active so each asset starts with its own cooldown to run (both claims, 09-02); a call rewrites `createdGameTime`; `remainingAtChange` is the raw read — the game writes it only at a commander change and it reads 0 otherwise; `destroyedDuringActive` read 1 on the drone that was shot down. The four config values ride every frame so a seek into a replay is self-describing | every frame once entries exist |
 
 ## 4. Surface B — `gameState.commanderRules`
@@ -120,7 +120,9 @@ Evidence: offline decode 2026-08-31, live enumeration of 163 marker
 classes 2026-09-04, the agreed contract of 2026-09-04, the two master
 classes reflected live 2026-09-05 (`BP_MapMarker_CommandMaster_C`:
 `Distance` double, `Action` class, `Request` bool, `AddDistance` double;
-`BP_MapMarker_DirectorMaster_C`: `Distance` double).
+`BP_MapMarker_DirectorMaster_C`: `Distance` double); the geometry
+subclasses `CommandPath`, `CommandLine` and `CommandRadius_Friendly`
+carry the master's same four fields at the same offsets (08-30 layouts).
 
 | Wire field | Memory source | Type | Meaning | Emitted |
 |---|---|---|---|---|
@@ -153,8 +155,8 @@ tracker D13.
 One entry per live `BP_CommandActor_*` actor, every full frame, present
 only while such an actor exists (a handful per match, 30 s to 10 min
 each). Evidence: journal §"Per-call actors" (2026-08-30 to 09-03), the
-agreed contract of 2026-09-04, the four actor layouts archived 09-02
-(drone, F/A-18, SU-25 bomb, mortar).
+agreed contract of 2026-09-04, six actor layouts archived (creep, UAV,
+F/A-18 on 08-30; drone, F/A-18, SU-25 bomb, mortar on 09-02).
 
 Common fields, every actor:
 
@@ -177,14 +179,14 @@ contain spaces and are used verbatim.
 | Family | Wire fields (type) | Memory source |
 |---|---|---|
 | Strike aircraft (`*_Strafe_*`, gun and bomb): a shootable pawn flying its run | `health` (number), `dead` (bool), `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts) |
-| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `shellsPerBarrage` (int), `barrageCount` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Shells Per Barrage`, `Barrage Count`, `Current Barrage`, `Projectile` — the spellings reflected on `BP_CommandActor_Mortar_Radius_C` (09-02). The journal's creep transcription (08-30) drops the spaces at the same offsets; the creep's names are taken from reflection at implementation, and the mortar's spellings are the expected values |
-| UAV: position is the point | `health` (number) where present | `Health`; the UAV actor is read at implementation — the common fields apply, family fields join when its class is reflected |
+| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `shellsPerBarrage` (int), `barrageCount` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Shells Per Barrage`, `Barrage Count`, `Current Barrage`, `Projectile` — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
+| UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, the layout also carrying `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded) |
 | Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is confirmed under tracker T8 |
 
 Not recorded: who damaged or destroyed an actor. No last-damager field
-exists in the reflected lists of the four command actors read on 09-02
-(drone, F/A-18, SU-25 bomb, mortar); the creep and UAV actors are read
-at implementation. The drone pawn's `LastHitBy` is recorded in §7.
+exists in the reflected lists of the six command actors archived (creep,
+UAV and F/A-18 on 08-30; drone, F/A-18, SU-25 bomb and mortar on
+09-02). The drone pawn's `LastHitBy` is recorded in §7.
 Tracker T9 is the observation that would add an aircraft attribution
 read, if one exists.
 
@@ -210,11 +212,11 @@ archived in Misc `command-probe-2026-09-05/`).
 | `position`, `yaw` | root transform | position, degrees | where it is |
 | `dead` | `Dead` | bool | true from the moment the battery expires or it is destroyed |
 | `health`, `maxHealth` | `HealthComponent` → `Health` (float), `Max Health` (double) | number | 15 / 15 on the recon drone; one rifle burst takes it to 0 (09-05) |
-| `pilotEosId` | `PlayerState` → player state | string | who is flying it this frame; omitted while nobody is — landed and exited, or deployed and not yet possessed (48 s of a fresh deploy read no pilot, flight 4, 09-05) |
+| `pilotEosId` | `PlayerState` → player state | string | who is flying it this frame; `null` while nobody is — landed and exited, or deployed and not yet possessed (48 s of a fresh deploy read no pilot, flight 4, 09-05) |
 | `ownerEosId` | `SQ PC` → its player state | string | the deployer or last pilot; observed to persist through de-possession and death (09-05). What a hand-off does to it is tracker T10 |
-| `commandAction` | `Command Action` (class) | string | the calling action on a commander drone; omitted on a recon drone, where the pointer reads null (every recon row, 09-05) |
+| `commandAction` | `Command Action` (class) | string | the calling action on a commander drone; `null` on a recon drone, where the pointer reads null (every recon row, 09-05) |
 | `batteryLifetimeMax` | `BatteryLifetimeMax` | number, s | the flight budget from spawn (100 on the recon class; the field does not exist on the commander drone's class, whose budget is its action's `activeSec` in §3) |
-| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; resolved to the shooter at the kill (09-05) |
+| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; `null` until something has (every live row, 09-05); resolved to the shooter at the kill |
 
 The pawn's `PlayerState`, `Controller` and `LastHitBy` are `Pawn`'s own
 properties (`SQFlyingDrone` adds none); the reader's layout read merges
@@ -261,7 +263,7 @@ and their absence on an idle server is not drift.
 | `HealthComponent_C` | Class | yes — content | `Health`, `Max Health` |
 | `BP_MapMarker_CommandMaster_C` | Class | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance` |
 | `BP_MapMarker_DirectorMaster_C` | Class | yes — content | `Distance` |
-| `BP_CommandActor_Drone_C`, `BP_CommandActor_FA18_Rockets_Strafe_USMC_C`, `BP_CommandActor_SU25_Bomb_Strafe_C`, `BP_CommandActor_Mortar_Radius_C` (archived 09-02), `BP_CommandActor_Artillery_Creep_C`, `BP_CommandActor_UAV_MQ9_C` (read live 08-30, not archived) | Class | yes — content, exist only during a call | the common and family properties of §6 each class carries; a Blueprint parent common to the family, if reflection shows one at implementation, replaces the per-class rows |
+| `BP_CommandActor_Artillery_Creep_C`, `BP_CommandActor_UAV_MQ9_C`, `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_Drone_C`, `BP_CommandActor_SU25_Bomb_Strafe_C`, `BP_CommandActor_Mortar_Radius_C` (archived 09-02) | Class | yes — content, exist only during a call | the common and family properties of §6 each class carries; a Blueprint parent common to the family, if reflection shows one at implementation, replaces the per-class rows |
 
 ## 9. Viewer rules (interpretation; nothing here is recorded)
 
@@ -343,9 +345,10 @@ also carries the commander-drone confirmations of the fields in §7.
 ## 12. How this document was checked, and how to check it again
 
 A fresh session with no memory of the work reviewed the first draft on
-2026-09-05 against the six questions below and returned 23 corrections;
-all were applied except one deliberate deviation, recorded under
-question 3. The questions stand for the next review.
+2026-09-05 against the six questions below and returned 23 corrections,
+all applied; a second pass the same day found the creep and UAV actor
+layouts already archived from 08-30, which settled two of them outright.
+The questions stand for the next review.
 
 1. Does every row of the journal's four "Agreed capture" sections
    (decisions 2, 5, 6 and 7; decision 3 is the paragraph inside decision
@@ -366,19 +369,20 @@ question 3. The questions stand for the next review.
    names read on 09-02 (the 09-02 names); two "enabled" flags left
    unlabelled (§4 labels them); the creep actor's unspaced field names
    (08-30 transcription) versus the mortar's spaced names (09-02 layout)
-   (spaced, §6); the drone's owner on the call actor's
+   (spaced — both layouts carry the spaces, the journal's transcription
+   dropped them, §6); the drone's owner on the call actor's
    `DamageInstigatorController` (09-02) versus the pawn's `SQ PC` (09-05)
    (`SQ PC`, §7); a recon launcher deployable (09-04) versus the kit item
    (09-05) (the item, §10); the vote rules on the commander state (08-30
-   table) versus the manager (09-04) (the manager, §4). The one deliberate
-   deviation from the journal: the identity fields are omitted when the
-   seat is empty rather than written as an explicit `null` (§2, "Absent
-   reads").
+   table) versus the manager (09-04) (the manager, §4). The journal's
+   "explicit `null` when the seat is empty" is kept and generalised into
+   the two-way rule of §2, "Absent reads".
 4. Is every memory name here present in the archived layouts
    (`Misc/command-probe-2026-09-0*/` on Craig's machine, including
-   `struct_layouts_0905.txt`)? Names the archives do not hold, and this
-   document says so where it uses them: the `CommandAction_*` common base,
-   the creep and UAV actor classes.
+   `struct_layouts_0905.txt`, and the 08-30 archive's `cmd_layouts/`,
+   extracted to plain files on 09-05)? The one name the archives do not
+   hold, and this document says so where it uses it: the `CommandAction_*`
+   common base.
 5. Is anything here computed, inferred or defaulted on the recorder
    side beyond the three things §1 names?
 6. Does this document carry any state word — open, pending, outstanding,
