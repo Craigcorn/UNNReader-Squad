@@ -497,6 +497,13 @@ geometry marker subclasses, each carrying the master's `Distance`,
 09-05 layer (they load when a claim resolves), so their common base
 class remains to be named by reflection.
 
+Later the same day, test T11 (`scripts/probes/spec_names_check.py`)
+resolved every name the capture spec uses — 157 across 32 classes, none
+missing — and dumped the classes' full layouts; the properties the spec
+does not read are listed with reasons in the spec's §10, and three of
+them became decisions (D14 artillery fire-plan extras, D15 the action
+configs' `DisplayName`/`Description`, D16 their placement bounds).
+
 ## Agreed capture — the commander block (decision 2, 2026-09-04)
 
 The contract for the implementation plan. Every field is a direct read of

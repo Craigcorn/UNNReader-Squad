@@ -325,14 +325,170 @@ test is cited by tracker id; the fields do not change when it runs.
 
 ## 10. Deliberately not recorded
 
-`bDoubleCaptureSpeed` and `bCommandActionAttempted` (never left 0 across
-21,000 rows); any "ready in" or remaining-time number; any event line;
-any rule; the request circle radius; the bomb map circles; any
-last-damager for a command actor (none exists in memory); the drone's
-`Max Fly Height`, `BleedOutTime`, `EndFlightTimer`, zoom and FPV state;
-the recon launcher (no deployable exists — the launcher is the kit item
-in the soldier's inventory); the command marker's `Action` pointer
-(tracker D13).
+Two lists. First, the choices made when the contract was agreed:
+`bDoubleCaptureSpeed` and `bCommandActionAttempted` (never left 0
+across 21,000 rows); any "ready in" or remaining-time number; any
+event line; any rule; the request circle radius; the bomb map circles;
+any last-damager for a command actor (none exists in memory); the recon
+launcher (no deployable exists — the launcher is the kit item in the
+soldier's inventory); the command marker's `Action` pointer (tracker
+D13).
+
+Second, exhaustively, every other game-level property the classes of
+§3–§7 carry, from test T11's full layouts (2026-09-05), each with the
+reason it is not read. Identity and hop classes (`SQTeamState`,
+`SQPlayerState`, `Controller`, `Pawn`, `SQFlyingDrone`) are read for one
+pointer each and their other properties belong to other workstreams.
+Where a property is worth a decision it is cited by tracker id. Where
+a property is present on only some classes of a group, the class is
+named.
+
+| Class | Property (type) | Not recorded because |
+|---|---|---|
+| `SQCommanderState` | `VoteCooldownTimeSeconds` (Int) | copy of the manager's rules (§4) |
+| ″ | `bCommandActionAttempted` (Bool) | never left 0 across 21,000 rows (09-04) |
+| ″ | `bDoubleCaptureSpeed` (Bool) | never left 0 across 21,000 rows (09-04) |
+| ″ | `MinimumSquadSizeForVoting` (Int) | copy of the manager's rules (§4) |
+| ″ | `MinimumSquadsRequiredForVoting` (Int) | copy of the manager's rules (§4) |
+| ″ | `VotingTimeSeconds` (Int) | copy of the manager's rules (§4) |
+| ″ | `TeamCommands` (Object) | the faction's action DataTable, not runtime state |
+| ″ | `OnCommanderChangedEvent` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `OnNominationAvailableEvent` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `OnNominationEndedEvent` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `OnNominationStartedEvent` (MulticastInlineDelegate) | event hook, not state |
+| `SQCommanderManager` | `CommanderState` (Object) | structure pointer / category config read through the state |
+| ″ | `TeamCommands` (Object) | structure pointer / category config read through the state |
+| ″ | `Categories` (Array) | structure pointer / category config read through the state |
+| ″ | `bDoubleCaptureSpeed` (Bool) | never left 0 (09-04) |
+| `BP_FlyingDrone_C` (and, inherited, the recon subclass) | `HitBox` (Object) | engine or visual component |
+| ″ | `SC_QuadcoptersAudio` (Object) | engine or visual component |
+| ″ | `Camera` (Object) | engine or visual component |
+| ″ | `SQMapIcon` (Object) | engine or visual component |
+| ″ | `SQCoreState` (Object) | object pointer; a possible direct team source, unread — team derives from the owner (§9) |
+| ″ | `Blade4` (Object) | engine or visual component |
+| ″ | `Blade3` (Object) | engine or visual component |
+| ″ | `Blade2` (Object) | engine or visual component |
+| ″ | `Blade` (Object) | engine or visual component |
+| ″ | `Body` (Object) | engine or visual component |
+| ″ | `Explode Effect` (Object) | engine or visual component |
+| ″ | `Explode Sound` (Object) | engine or visual component |
+| ″ | `Can Possess` (Bool) | false at death; `dead` covers it (09-05) |
+| ″ | `CrashVelocity` (Double) | flight-model config |
+| ″ | `Max Fly Height` (Double) | constant 2200; meaning unresolved (09-05) |
+| ″ | `Can Increase Altitude` (Bool) | flight-model config |
+| ″ | `Altitude Timer` (Struct) | flight-model config |
+| ″ | `Zoom Level` (Int) | camera / FPV state |
+| ″ | `Desired Zoom` (Double) | camera / FPV state |
+| ″ | `Zoom Levels` (Array) | camera / FPV state |
+| ″ | `FPV Item Class` (Class) | camera / FPV state |
+| ″ | `BankAngleLimit` (Double) | flight-model config |
+| ″ | `DebugFloatHistory` (Struct) | internal |
+| ″ | `FPV Item` (Object) | camera / FPV state |
+| ″ | `BleedOutTime` (Double) | constant 30 / a timer handle — neither is a time (09-05) |
+| ″ | `EndFlightTimer` (Struct) | constant 30 / a timer handle — neither is a time (09-05) |
+| ″ | `CollisionDamageFactor` (Double) | flight-model config |
+| ″ | `TargetInventoryOffset` (Int) | internal |
+| ″ | `NAME_IMC_State` (Name) | internal |
+| ″ | `NuisanceTarget` (Object) | internal |
+| `BP_FlyingDrone_Recoverable_C`, its own additions only | `HealthComponent` (Object) | inherited; read on the parent class row (§7) |
+| ″ | `SQ PC` (Object) | inherited; read on the parent class row (§7) |
+| ″ | `Dead` (Bool) | inherited; read on the parent class row (§7) |
+| ″ | `Command Action` (Class) | inherited; read on the parent class row (§7) |
+| ″ | `UsableData` (Struct) | internal |
+| `HealthComponent_C` | `Health Gained` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `Health Lost` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `Health Zero` (MulticastInlineDelegate) | event hook, not state |
+| ″ | `Health Max` (MulticastInlineDelegate) | event hook, not state |
+| every command and director marker class (the same ten on all eight) | `Team` (Enum) | already recorded by the existing marker read |
+| ″ | `MapIcon` (Object) | cosmetic or replication plumbing |
+| ″ | `StateObject` (Object) | cosmetic or replication plumbing |
+| ″ | `bReplicateOwnerState` (Bool) | cosmetic or replication plumbing |
+| ″ | `OwnerPlayerState` (Object) | already recorded by the existing marker read |
+| ″ | `Squad` (Int) | already recorded by the existing marker read |
+| ″ | `FireTeamId` (Int) | already recorded by the existing marker read |
+| ″ | `PlacementEmote` (Enum) | cosmetic or replication plumbing |
+| ″ | `DefaultSceneRoot` (Object) | cosmetic or replication plumbing |
+| ″ | `DefaultTint` (Struct) | cosmetic or replication plumbing |
+| both artillery actors (creep 08-30, mortar 09-02: identical) | `Arrow` (Object) | engine or visual component |
+| ″ | `DefaultSceneRoot` (Object) | engine or visual component |
+| ″ | `Edge Only` (Bool) | placement config |
+| ″ | `Pre Warning Delay` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| ″ | `Barrage Interval` (Struct) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| ″ | `First Barrage Height Variance` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| ″ | `Main Barrage Height Variance` (Double) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| ″ | `Current Prewarning Shells` (Int) | fire-plan timing, scatter and pre-warning progress beyond the agreed plan fields — tracker D14 |
+| both strike actors (F/A-18 08-30/09-02, SU-25 bomb 09-02) | `Arrow` (Object) | engine or visual component |
+| ″ | `DefaultSceneRoot` (Object) | engine or visual component |
+| ″ | `Cam` (Object) | engine or visual component |
+| ″ | `FlybyAudio` (Object) | engine or visual component |
+| ″ | `HealthComponent` (Object) | engine or visual component |
+| ″ | `PrimaryWeapon` (Object) | engine or visual component |
+| ″ | `SplineLeft` (Object) | engine or visual component |
+| ″ | `SplineParent` (Object) | engine or visual component |
+| ″ | `Aircraft` (Object) | engine or visual component |
+| ″ | `Scale_NewTrack_0_D98340604061CF915BF9F68AF206DF47` (Float) | engine or visual component |
+| ″ | `Scale__Direction_D98340604061CF915BF9F68AF206DF47` (Byte) | engine or visual component |
+| ″ | `Scale` (Object) | engine or visual component |
+| ″ | `Flight Speed` (Double) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `Can Fly` (Bool) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `Selected Spline` (Object) | engine or visual component |
+| ″ | `Attack Duration` (Double) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `UseFireSplineDistance` (Bool) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `Fire Spline Point Index` (Int) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `Origin Forward` (Struct) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `Firing Timer` (Struct) | a timer handle |
+| ″ | `Explode Sound` (Object) | engine or visual component |
+| ″ | `Explode Effects` (Object) | engine or visual component |
+| ″ | `Fire Spline Distance` (Double) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `MuzzleEffect` (Object) | engine or visual component |
+| ″ | `Per Bullet Sound` (Object) | engine or visual component |
+| ″ | `One Shot On Fire Sound` (Object) | engine or visual component |
+| ″ | `One Shot End Fire Sound` (Object) | engine or visual component |
+| ″ | `Scaled In` (Bool) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `My Cam` (Object) | engine or visual component |
+| ″ | `Smooth Distance` (Double) | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `FA18_pylon_paveway` (Object) — only `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` | engine or visual component |
+| ″ | `FA18_pylon_apkws` (Object) — only `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` | engine or visual component |
+| ″ | `InitialSplinePoint` (Int) — only `BP_CommandActor_SU25_Bomb_Strafe_C` | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| ″ | `CalcTolerance` (Double) — only `BP_CommandActor_SU25_Bomb_Strafe_C` | run mechanics; position, `yaw` and `splineDistance` already carry the run |
+| `BP_CommandActor_UAV_MQ9_C` | `Arrow` (Object) | engine or visual component |
+| ″ | `DefaultSceneRoot` (Object) | engine or visual component |
+| ″ | `HealthComponent` (Object) | engine or visual component |
+| ″ | `Mesh` (Object) | engine or visual component |
+| ″ | `SpringArm` (Object) | engine or visual component |
+| ″ | `Cam` (Object) | engine or visual component |
+| ″ | `Timeline_0_NewTrack_0_719303D24143C95CB5BCE08AD124BFC2` (Float) | engine or visual component |
+| ″ | `Timeline_0__Direction_719303D24143C95CB5BCE08AD124BFC2` (Byte) | engine or visual component |
+| ″ | `Timeline_0` (Object) | engine or visual component |
+| ″ | `Min Flight Speed` (Double) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `Scaled In` (Bool) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `My Cam` (Object) | engine or visual component |
+| ″ | `Max Flight Speed` (Double) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `Explode Effect` (Object) | engine or visual component |
+| ″ | `Explode Sound` (Object) | engine or visual component |
+| ″ | `Actual Flight Speed` (Double) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `Current Rotation` (Double) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `Origin Scale` (Struct) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| ″ | `Height` (Double) | orbit mechanics; the coverage marker and the actor's position carry what the viewer draws |
+| `BP_CommandActor_Drone_C` | `Arrow` (Object) | engine or visual component |
+| ″ | `DefaultSceneRoot` (Object) | engine or visual component |
+| ″ | `Equippable Drone Item Class` (Class) | spawn plumbing |
+| ″ | `TargetInventorySlot` (Int) | spawn plumbing |
+| the action configs (three CDOs archived 09-02) | `DisplayName` (Str) | the game's own display text — tracker D15 |
+| ″ | `Description` (Str) | the game's own display text — tracker D15 |
+| ″ | `Texture` (Object) | UI: icon, tint, widget, sounds |
+| ″ | `Tint` (Struct) | UI: icon, tint, widget, sounds |
+| ″ | `CommandActor` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
+| ″ | `ControlWidget` (Class) | UI: icon, tint, widget, sounds |
+| ″ | `IconAngleOffset` (Float) | UI: icon, tint, widget, sounds |
+| ″ | `MaxAngleFromBase` (Float) | placement bounds — tracker D16 |
+| ″ | `CreateMapMarker` (Bool) | config flag with no agreed use |
+| ″ | `bAllowedInVehicle` (Bool) | config flag with no agreed use |
+| ″ | `bIgnoreActionEnabled` (Bool) | config flag with no agreed use |
+| ″ | `MapMarkerClass` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
+| ″ | `CommanderActionSoundsList` (Struct) | UI: icon, tint, widget, sounds |
+| ″ | `MinimumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — tracker D16 |
+| ″ | `MaximumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — tracker D16 |
 
 ## 11. Acceptance
 
@@ -377,12 +533,14 @@ The questions stand for the next review.
    table) versus the manager (09-04) (the manager, §4). The journal's
    "explicit `null` when the seat is empty" is kept and generalised into
    the two-way rule of §2, "Absent reads".
-4. Is every memory name here present in the archived layouts
-   (`Misc/command-probe-2026-09-0*/` on Craig's machine, including
-   `struct_layouts_0905.txt`, and the 08-30 archive's `cmd_layouts/`,
-   extracted to plain files on 09-05)? The one name the archives do not
-   hold, and this document says so where it uses it: the `CommandAction_*`
-   common base.
+4. Does every memory name here resolve by reflection? Test T11
+   (`scripts/probes/spec_names_check.py`) answers this mechanically — live
+   for loaded classes, from the archived layouts for per-call classes — and
+   on 2026-09-05 resolved all 157 names (§13). The one name reflection has
+   not yet supplied, and this document says so where it uses it: the
+   `CommandAction_*` common base, whose CDOs load only when a claim
+   resolves; the four properties themselves resolved on three archived
+   CDOs.
 5. Is anything here computed, inferred or defaulted on the recorder
    side beyond the three things §1 names?
 6. Does this document carry any state word — open, pending, outstanding,
@@ -390,3 +548,50 @@ The questions stand for the next review.
    states (a vote being open, a request pending approval) and this
    sentence? There should be none; unresolved interpretation is cited by
    tracker id.
+
+## 13. Names as resolved (test T11, 2026-09-05)
+
+Every class, struct and property this document names, resolved by
+reflection: live on the box for the classes loaded on 2026-09-05, from
+the archived layouts (08-30, 09-02) for the classes that exist only
+during a call. Types are the reflected property types; offsets are in
+the archived probe output (Misc `command-probe-2026-09-05/`,
+`spec_names_check.live.jsonl` and `.archive.jsonl`) and are values of
+their day, never read by the implementation. All 157 names resolved —
+57 on the box for 18 classes, 131 from the archives for 19, eight classes
+checked both ways, and one class (`SQTeamState`) live only.
+
+| Class | Source | Names → reflected type |
+|---|---|---|
+| `SQTeamState` | live, 09-05 | `CommanderState` Object |
+| `SQCommanderState` | live, 09-05 | `CurrentCommander` Object; `bCommanderIsActive` Bool; `bActionsEnabled` Bool; `bVoteInProgress` Bool; `CommanderVoteTimer` Int; `CommanderVoteTimestamp` Int; `bVoteCooldownActive` Bool; `VoteCooldownTimer` Int; `VoteCooldownTimestamp` Int; `CommanderCategories` Array; `LastCategoryGameTime` Array; `CommandIntervals` Struct; `NomineeStatus` Struct |
+| `SQCommanderManager` | live, 09-05 | `bCommanderActive` Bool; `VotingTimeSeconds` Int; `VoteCooldownTimeSeconds` Int; `ActionCooldownExtensionOnNewCommander` Float; `MinimumSquadSizeForVoting` Int; `MinimumSquadsRequiredForVoting` Int |
+| `SQCommandActionData` | live, 09-05 | `CommandActionData` Class; `GameTimeAtCreation` Float; `CooldownTimeRemaining` Float; `IsDestroyedDuringActive` Bool |
+| `SQCommandActionDataFASItem` | live, 09-05 | `Content` Struct |
+| `CommanderVoteNominee` | live, 09-05 | `NomineeState` Object; `VoteCount` Int |
+| `CommanderCategory` | live, 09-05 | `Name` Text; `CooldownDuration` Float |
+| `SQPlayerState` | live, 09-05 | `PlayerNamePrivate` Str; `OnlineUserId` Str |
+| `Controller` | live, 09-05 | `PlayerState` Object |
+| `Pawn` | live, 09-05 | `PlayerState` Object; `Controller` Object; `LastHitBy` Object |
+| `SQFlyingDrone` | live, 09-05 | `PlayerState` Object; `LastHitBy` Object |
+| `BP_FlyingDrone_C` | live, 09-05 | `SQ PC` Object; `HealthComponent` Object; `Dead` Bool; `Command Action` Class |
+| `BP_FlyingDrone_Recoverable_C` | live, 09-05 | `BatteryLifetimeMax` Double |
+| `HealthComponent_C` | live, 09-05 | `Health` Float; `Max Health` Double |
+| `BP_MapMarker_CommandMaster_C` | live, 09-05 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_DirectorMaster_C` | live, 09-05 | `Distance` Double |
+| `BP_MapMarker_CommandPath_C` | archive, 08-30 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_CommandLine_C` | archive, 09-02 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_CommandLineRadius_C` | archive, 09-02 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_CommandRadius_C` | archive, 09-02 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_CommandRadius_Friendly_C` | archive, 08-30 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_Command_Request_C` | live, 09-05 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_MapMarker_Command_SLRequest_C` | live, 09-05 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
+| `BP_CommandActor_Artillery_Creep_C` | archive, 08-30 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Barrage` Int; `Projectile` Class |
+| `BP_CommandActor_Mortar_Radius_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Barrage` Int; `Projectile` Class |
+| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_SU25_Bomb_Strafe_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_UAV_MQ9_C` | archive, 08-30 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool |
+| `BP_CommandActor_Drone_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `SQ PC` Object |
+| `CommandAction_Drone_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
+| `CommandAction_Mortar_Barrage_INS_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
+| `CommandAction_Mortar_Barrage_IMF_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
