@@ -218,7 +218,7 @@ archived in Misc `command-probe-2026-09-05/`).
 | `ownerEosId` | `SQ PC` → its player state | string | the deployer; persists through de-possession and death (09-05, 2026-09-07). A drone cannot change hands (T10, 2026-09-07), so it never moves |
 | `commandAction` | `Command Action` (class) | string | the calling action on a commander drone; `null` on a recon drone, where the pointer reads null (every recon row, 09-05) |
 | `batteryLifetimeMax` | `BatteryLifetimeMax` | number, s | the flight budget from spawn (100 on the recon class; the field does not exist on the commander drone's class, whose budget is its action's `activeSec` in §3) |
-| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; `null` until something has (every live row, 09-05); the killer at the kill (09-05 on a landed drone; 2026-09-07 in flight, in the same 100 ms sample as `dead`). Later hits on the falling pawn move it (a second shooter 1.1 s after the kill), so the killer is the value of the first frame carrying `dead`, exact to that frame's period — tracker D19 decides whether the 4 Hz line carries both |
+| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; `null` until something has (every live row, 09-05); the killer at the kill (09-05 on a landed drone; 2026-09-07 in flight, in the same 100 ms sample as `dead`). Later hits on the falling pawn move it (a second shooter 1.1 s after the kill), so the killer is the value of the first 4 Hz sample carrying `dead`, exact to a quarter second (decision D19) |
 
 The pawn's `PlayerState`, `Controller` and `LastHitBy` are `Pawn`'s own
 properties (`SQFlyingDrone` adds none); the reader's layout read merges
@@ -230,16 +230,19 @@ the viewer derives it from `ownerEosId` (§9).
 
 **Position line** (`{"t": "pos"}`, 4 Hz): a `drones` array joins
 `players` and `vehicles`, entries `{id, x, y, z, yaw}` with the same `id`
-as the full-frame entry, under the sampler's existing freshness gates
-(class pointer intact, position finite and in bounds; a freed pawn is
-omitted). No `h` or `team`: the drone's health changes only at death,
-which the full frame carries, and team derives from the owner; tracker
-D19 decides whether `dead` and `lastHitBy` join the line, each emitted
-only when set. Measured
-cost ~115 B of raw JSON per drone per sample, ~28 KB on disk per
-ten-minute flight, three to four small reads per drone per sample.
-Touch points: `possample.SampledEntities` / `sample_positions`, the
-position-frame key, the viewer's reconstructor, the schema register.
+as the full-frame entry, plus `dead` (true) once the pawn is dead and
+`lastHitBy` (the hitter's EOS id) once something has hit it, each of the
+two present only when set (decision D19, 2026-09-07), under the sampler's
+existing freshness gates (class pointer intact, position finite and in
+bounds; a freed pawn is omitted). No `h` or `team`: the drone's health
+changes only at death, and team derives from the owner. The killer of a
+drone is the `lastHitBy` of the first sample carrying `dead`, exact to a
+quarter second — on 2026-09-07 a second shooter moved the pointer 1.1 s
+after a kill, inside the full frame's one-second gap. Measured cost
+~115 B of raw JSON per drone per sample while it lives, about 50 B more
+per sample once hit for the minute or so a wreck lingers, ~28 KB on disk
+per ten-minute flight, three to four small reads per drone per sample
+plus one bool and one pointer chain.
 
 ## 8. Doctor coverage
 
@@ -364,8 +367,9 @@ test is cited by tracker id; the fields do not change when it runs.
   `ownerEosId` and team match one that just vanished is the same kit
   redeployed, if continuity is wanted; the recorder never joins them.
   Interpolate at 4 Hz knowing cruise is ~10 m/s (2.5 m per sample). The
-  killer is the `lastHitByEosId` of the first frame carrying `dead`
-  (§7). The drone's call actor draws nothing: its position is
+  killer is the `lastHitBy` of the first 4 Hz sample carrying `dead`,
+  the full frame's `lastHitByEosId` being the same value at lower
+  resolution (§7). The drone's call actor draws nothing: its position is
   meaningless and its life outruns the pawn's.
 - **Asset display names.** Each action entry carries the config's own
   `displayName` (decision D15; eleven read 2026-09-07). SquadCalc's
