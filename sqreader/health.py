@@ -444,10 +444,12 @@ def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
                 "BP_CommandActor_FA18_Rockets_Strafe_C",
             )
         ),
-        # The commander drone's call actor — the only command actor whose own
-        # health and owner are recorded. Optional: it exists only during a call.
+        # The commander drone's call actor — the only command actor whose owner
+        # is recorded. Its `Health` is declared and deliberately unwatched: no
+        # command actor records one (decision D18), the drone's health being
+        # its pawn's. Optional: the class exists only during a call.
         ("BP_CommandActor_Drone_C", "BlueprintGeneratedClass", True, [
-            "Health", "SQ PC"]),
+            "SQ PC"]),
     ]
 
 

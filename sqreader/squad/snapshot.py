@@ -4184,14 +4184,9 @@ COMMAND_ACTOR_NUMBERS = (
     ("barrageCount", "Barrage Count"),
     ("currentPrewarningShells", "Current Prewarning Shells"),
     ("currentBarrage", "Current Barrage"),
-    # `Health` is the drone call actor's, the one command actor whose own
-    # health is recorded (spec §6). It is looked for like every other name,
-    # because the alternative is a class-name test and the spec forbids one —
-    # so a UAV or strike class that also declares `Health` would emit it,
-    # which decision D18 and §10 say is not recorded. §13 carries no `Health`
-    # on those rows and the acceptance run reads the live answer; nothing here
-    # guesses either way.
-    ("health", "Health"),
+    # No `Health` — decision D18, extended 2026-09-07 to every command actor.
+    # Nothing here is looked for by class name, so a name in this table is a
+    # name on ALL of them; the drone's health is its pawn's (spec §7).
 )
 #: The two FVector structs, read with the reader's existing vector helper.
 COMMAND_ACTOR_VECTORS = (

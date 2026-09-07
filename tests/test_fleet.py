@@ -736,7 +736,9 @@ def test_the_command_actors_are_covered_at_the_class_that_declares_each_name():
                 "BP_CommandActor_SU25_Rockets_Strafe_C",
                 "BP_CommandActor_FA18_Rockets_Strafe_C"):
         assert rows[cls] == (True, strike), cls
-    assert rows["BP_CommandActor_Drone_C"] == (True, {"Health", "SQ PC"})
+    # The call actor declares `Health` too, and it is deliberately not watched:
+    # no command actor records one (decision D18), so nothing reads the name.
+    assert rows["BP_CommandActor_Drone_C"] == (True, {"SQ PC"})
 
 
 # ---- build detection + restart counter -----------------------------------

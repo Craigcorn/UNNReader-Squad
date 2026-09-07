@@ -109,7 +109,7 @@ CURRENT_BARRAGE = 3
 SHOTS_MADE = 4
 MAX_SHOTS = 12
 SPLINE_DISTANCE = 6000.0
-HEALTH = 100.0               # the call actor's, read throughout a call
+HEALTH = 100.0               # in every actor's bytes and read by nobody
 DESTROY_DELAY = 30.0
 
 CALLER_EOS = "eos-000000000000000000000000commander"
@@ -484,9 +484,11 @@ def test_the_artillery_actor_carries_its_whole_fire_plan():
 
 
 def test_the_strike_aircraft_carries_its_run_and_no_health():
-    """Four family fields and nothing else. `Health` and `Dead_0` are not
-    recorded on this family (decision D18) — neither name is declared on the
-    strike class here, so neither is read."""
+    """Four family fields and nothing else. Neither `Health` nor `Dead_0` is
+    recorded (decision D18, extended 2026-09-07 to every command actor):
+    `Dead_0` is never attempted, and `Health` is not a name the reader looks
+    for on anything — `test_a_command_actor_that_declares_health_emits_none`
+    declares it on this very class and still gets no key."""
     fx = build()
     assert fx.actor(STRIKE) == _common(fx, STRIKE) | {
         "shotsMade": SHOTS_MADE,
@@ -507,15 +509,39 @@ def test_the_uav_carries_the_common_fields_and_nothing_more():
         == MAX_SHOTS
 
 
-def test_the_drone_call_actor_carries_its_health_and_owner():
+def test_the_drone_call_actor_carries_only_its_owner():
     """`SQ PC` is a controller, one hop short of the player state the identity
-    comes off — the commander who called the drone (T14, 2026-09-07)."""
+    comes off — the commander who called the drone (T14, 2026-09-07). It is
+    the ONE field this family adds: its class declares `Health` beside it and
+    the read is not made, because no command actor records one (decision D18,
+    extended 2026-09-07 to every command actor). The drone's health is its
+    pawn's, on the `drones` list (spec §7)."""
     fx = build()
+    # The name is on the class and the value is in the bytes — the key's
+    # absence is the reader's rule, not a layout that lacks the field.
+    assert "Health" in [p["name"] for p in CALL_ACTOR_PROPS]
+    addr = fx.actors[CALL_ACTOR][0]
+    assert struct.unpack("<d", fx.pm.read(addr + HEALTH_OFF, 8))[0] == HEALTH
     assert fx.actor(CALL_ACTOR) == _common(
         fx, CALL_ACTOR, CALL_ACTOR_POSITION) | {
-        "health": HEALTH,
         "ownerEosId": OWNER_EOS,
     }
+
+
+def test_a_command_actor_that_declares_health_emits_none():
+    """The point of extending D18 to every command actor. Nothing is matched
+    on a class name, so `Health` in the reader's name table would have been a
+    key on ANY family that declares it — a UAV or a strike class as much as
+    the drone's call actor. The name is not in the table, so a strike class
+    grown a `Health` property emits no `health`, and its neighbours are
+    untouched."""
+    grown = build(strike_props=STRIKE_PROPS + [
+        {"name": "Health", "type_name": "DoubleProperty",
+         "offset": HEALTH_OFF}]).actor(STRIKE)
+    assert "health" not in grown
+    assert HEALTH not in grown.values()
+    assert grown["shotsMade"] == SHOTS_MADE
+    assert grown["splineDistance"] == SPLINE_DISTANCE
 
 
 @pytest.mark.parametrize("class_name", [CREEP, STRIKE, UAV, CALL_ACTOR])

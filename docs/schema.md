@@ -392,12 +392,14 @@ Every entry carries the common half:
 The family half rides wherever the actor's own class declares the name: the
 strike aircraft's `shotsMade`, `maxShots`, `splineDistance` and
 `originLocation`; the artillery's ten fire-plan fields above; the drone call
-actor's `health` and `ownerEosId`. A UAV declares none of them and carries the
-common half alone. No class name is ever matched against — every name is looked
-for on the actor's own reflected layout — so a class that gains or loses one is
-followed without a code change.
+actor's `ownerEosId`. A UAV declares none of them and carries the common half
+alone. No class name is ever matched against — every name is looked for on the
+actor's own reflected layout — so a class that gains or loses one is followed
+without a code change.
 
-Two things the list deliberately never holds. Who shot an actor down: no
+Three things the list deliberately never holds. A health figure on any command
+actor: none is recorded whichever class declares one, the drone's health being
+its pawn's on the `drones` list (decision D18). Who shot an actor down: no
 last-damager field exists on any command actor, the server log carries no line
 for it, and it is not inferred from anything nearby. And the shells, rockets
 and bombs an asset fires: those are already tracked projectiles with `firer`

@@ -91,8 +91,8 @@ follows [Semantic Versioning](https://semver.org/).
   along its run it is; an artillery plan's origin and target, its drop
   radius, its warning shells and their delay, its shells per barrage and
   which barrage it has reached, and the shell it is firing; the drone
-  call actor's health and owner. A UAV declares none of those and carries
-  the common half alone. No class name is matched against anywhere -
+  call actor's owner. A UAV declares none of those and carries the
+  common half alone. No class name is matched against anywhere -
   membership is the game's own class hierarchy and every field is looked
   for on the actor's own reflected layout, so a family that gains or
   loses a name is followed without a code change. The key is absent on
