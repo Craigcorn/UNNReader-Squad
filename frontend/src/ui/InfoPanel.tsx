@@ -366,6 +366,15 @@ function DroneBody({ e, snap }: { e: Drone; snap: Snapshot | null }) {
       {e.dead && (
         <Row label="STATE"><span className="info-danger">destroyed</span></Row>
       )}
+      {/* The airframe's own yaw, which the map draws as the view direction on
+          the player's word that the camera faces the airframe — not on a
+          camera rotation, which nothing records (spec §9, tracker T16). */}
+      {e.yaw != null && Number.isFinite(e.yaw) && (
+        <Row label="HEADING">
+          <span className="info-mono">{Math.round(e.yaw)}°</span>
+          <span className="info-mute"> · the airframe's; the camera faces it</span>
+        </Row>
+      )}
       {(e.health != null || e.maxHealth != null) && (
         <Bar label="HP" cur={e.health} max={e.maxHealth} />
       )}

@@ -98,6 +98,17 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- A drone now shows which way it is looking. The pawn's `yaw` was
+  recorded and sampled at 4 Hz from the day drones reached a file, and
+  the map drew a quadcopter that could have been facing anywhere; a
+  reviewer watching a recon flight could not say what the pilot was
+  looking at. The heading is drawn as a cone along that yaw, turning
+  with the drone between full frames, and the info panel names it as
+  the airframe's with the caveat in the same breath: the camera faces
+  the airframe on the player's word, not on anything in memory, and if
+  the camera's own rotation is ever recorded it replaces this. The UAV
+  gets none of it - its yaw is an orbit heading and its camera gimbals
+  independently, unrecorded.
 - A commander's call now shows what it actually put on the ground. The
   shells, rockets and bombs an asset fires have been tracked
   projectiles all along, but nothing joined them to the call that sent

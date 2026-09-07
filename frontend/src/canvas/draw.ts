@@ -2064,9 +2064,25 @@ function drawCommandActors(ctx: CanvasRenderingContext2D, snap: Snapshot,
   }
 }
 
+/** How wide the drone's view cone is drawn. A viewer figure, like the
+ *  request circle's 50 m: the game records no field of view, and the cone is
+ *  a legible way of saying "it is looking that way" rather than a claim about
+ *  how much it sees. */
+const DRONE_VIEW_HALF_DEG = 24;
+
 /** Every drone pawn up this frame — the commander's called one and the recon
  *  kit's alike. Stop drawing at `dead`: the pawn is still in the list while
- *  it falls, but it is no longer a drone anyone is flying. */
+ *  it falls, but it is no longer a drone anyone is flying.
+ *
+ *  A live drone gets its `yaw` drawn as the direction it is looking (spec §9,
+ *  "Drones"). That rests on the player's statement of 2026-09-07 that the
+ *  camera faces the airframe, and on nothing in memory: no camera rotation is
+ *  recorded, tracker T16 is the reading test and decision D22 the question of
+ *  recording the camera's own. The yaw itself is the pawn's own transform, at
+ *  4 Hz — the position line carries it, so the cone turns with the drone
+ *  between full frames rather than a second at a time. Nothing of the kind is
+ *  drawn for the UAV, whose yaw is its orbit heading and whose camera gimbals
+ *  independently, unrecorded. */
 function drawDrones(ctx: CanvasRenderingContext2D, snap: Snapshot,
                     view: ViewState, cs: CanvasSize) {
   const dpr = cs.dpr;
@@ -2091,6 +2107,30 @@ function drawDrones(ctx: CanvasRenderingContext2D, snap: Snapshot,
       ctx.stroke();
       ctx.restore();
       continue;
+    }
+    // Where it is looking, under the airframe: a cone along `yaw` with the
+    // needle down its middle, so the direction reads at a glance and at any
+    // zoom. Omitted entirely when the transform carried no yaw — a heading
+    // nobody read is not a heading of zero.
+    if (d.yaw != null && Number.isFinite(d.yaw)) {
+      const yaw = (d.yaw * Math.PI) / 180;
+      const half = (DRONE_VIEW_HALF_DEG * Math.PI) / 180;
+      const reach = r * 5.2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, reach, yaw - half, yaw + half);
+      ctx.closePath();
+      ctx.fillStyle = col;
+      ctx.globalAlpha = 0.18;
+      ctx.fill();
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.2 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(yaw) * reach, y + Math.sin(yaw) * reach);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     // Four rotors around a body — a quadcopter at a glance.
     ctx.beginPath();
