@@ -14,6 +14,21 @@ import type { Marker } from "../types";
  *  the recorder never will (spec §9, "Request circle"). */
 export const REQUEST_CIRCLE_CM = 5000;
 
+/** The pair of circles a precision bomb draws at each aim point: the bomb
+ *  config's 45 m and 100 m, in centimetres (spec §9, "Precision bombs").
+ *
+ *  Viewer constants for the same reason the request circle is one — nothing
+ *  in server memory carries them, so the recorder never will. Unlike it they
+ *  are NOT measured: the spec takes them from the bomb config and assumes
+ *  they are what the in-game map draws, because the ratio matches and every
+ *  observed bomb fell inside the inner one (five calls, 09-02/03). An
+ *  edge-stand during a bomb call settles them — tracker T9's item (f),
+ *  W20's B2, unrun because neither faction on the layer played carries a
+ *  bomb strike. If that stand moves them, these two numbers are the whole
+ *  of the change. */
+export const BOMB_INNER_CM = 4500;
+export const BOMB_OUTER_CM = 10000;
+
 /** How close two markers must sit to be one placement. The game gives no
  *  identity linking a request's two markers, so "same position" is the join
  *  and this is the viewer's own tolerance for it — 3 m, well under the

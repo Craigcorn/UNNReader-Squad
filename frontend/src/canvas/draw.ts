@@ -6,7 +6,10 @@ import type {
   CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState,
 } from "../state/types";
 import { isShotDown } from "../state/commander/assets";
-import { dedupeMarkers, requestsOnMap, REQUEST_CIRCLE_CM } from "../state/commander/markers";
+import {
+  dedupeMarkers, requestsOnMap,
+  BOMB_INNER_CM, BOMB_OUTER_CM, REQUEST_CIRCLE_CM,
+} from "../state/commander/markers";
 import { actionDisplayName } from "../state/commander/readyIn";
 import {
   drawIcon, drawIconCentered, deployableIconUrl, icon, iconBbox, mapTexture,
@@ -1805,6 +1808,16 @@ function drawCommandFootprints(ctx: CanvasRenderingContext2D,
       // itself is the projectiles, which the projectile layer already draws.
       const pts = fp.points.map(
         (p) => worldToScreen(view, cs, p.x, p.y) as [number, number]);
+      // Under both: the ground each bomb covers, a dashed pair at every aim
+      // point. Both radii are the viewer's, like the request circle — see
+      // BOMB_INNER_CM, and the caveat that they were never measured.
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      for (const p of fp.points) {
+        worldRing(ctx, view, cs, p.x, p.y, BOMB_INNER_CM, col, dpr, [5, 4]);
+        worldRing(ctx, view, cs, p.x, p.y, BOMB_OUTER_CM, col, dpr, [5, 4]);
+      }
+      ctx.restore();
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(pts[0]![0], pts[0]![1]);

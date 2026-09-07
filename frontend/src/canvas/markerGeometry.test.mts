@@ -4,6 +4,7 @@
 // standing where the drag began — indistinguishable from a spotted enemy.
 // Framework-free, same as the tests beside it.
 import { arrowEnd, commandFootprint, markerShape } from "./markerGeometry.ts";
+import { BOMB_INNER_CM, BOMB_OUTER_CM } from "../state/commander/markers.ts";
 
 let passed = 0, failed = 0;
 function ok(cond: any, msg: string) {
@@ -133,6 +134,32 @@ ok(arrowEnd(mk({ type: "director", arrowLength: 1000, arrowHeading: 45,
     ok(aim.points.length === 2, "exactly two");
     near(aim.points[0]!.x, 1000, "the first at the marker");
     near(aim.points[1]!.x, 1000 - 4475, "the second `distance` along the yaw");
+  }
+
+  // --- the bomb pair drawn at each of those points ---------------------------
+  // The circles are viewer constants, not readings: nothing in the recording
+  // carries them, so what a test can hold is that they are the spec's own
+  // figures and that the ground they cover is measured from the points the
+  // footprint returns. The spec flags both as unmeasured (§9, "Precision
+  // bombs"); if tracker T9's item (f) moves them, these numbers move with it
+  // and this test is what says so out loud.
+  near(BOMB_INNER_CM, 4500, "the inner bomb circle is the config's 45 m");
+  near(BOMB_OUTER_CM, 10000, "and the outer one its 100 m");
+  ok(BOMB_INNER_CM < BOMB_OUTER_CM, "the pair is inner-then-outer");
+  if (aim.kind === "aimPoints") {
+    // Every observed bomb fell inside the inner circle, so the inner circle
+    // has to reach at least as far as the aim points are apart for the pair
+    // to mean anything at this separation.
+    const [a, b] = aim.points as [{ x: number; y: number },
+                                  { x: number; y: number }];
+    const apart = Math.hypot(b.x - a.x, b.y - a.y);
+    near(apart, 4475, "the two aim points sit 4475 apart");
+    ok(apart < BOMB_INNER_CM * 2,
+       "at this separation the two inner circles overlap, as the map's do");
+    // The pair is drawn around BOTH points, so the shape's whole reach along
+    // the bearing is the far point plus the outer radius.
+    near(Math.max(a.x, b.x) + BOMB_OUTER_CM, 11000,
+         "the covered ground runs an outer radius past the last aim point");
   }
 }
 

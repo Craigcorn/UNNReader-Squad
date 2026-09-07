@@ -592,12 +592,16 @@ scenario(
   })());
 
 // 9. A precision strike's two aim points — the fourth shape, which no other
-//    scenario carries.
+//    scenario carries — and the bomb pair drawn at each of them.
 scenario(
   "footprint-aim-line", "Precision aim line",
   "A CommandLineRadius marker: two aim points, at 0 and 4475 along the "
-  + "marker's bearing, with the line between them.",
-  "§9 Asset shapes (CommandLineRadius); §5 distance",
+  + "marker's bearing, with the line between them and the bomb pair drawn at "
+  + "each — the config's 45 m and 100 m, both dashed. At 4475 apart the two "
+  + "pairs overlap, which is what this separation looks like on the ground; "
+  + "the radii are the viewer's own and the spec has never measured them.",
+  "§9 Asset shapes (CommandLineRadius); §9 Precision bombs (radii unmeasured, "
+  + "tracker T9 f); §5 distance",
   (() => {
     const claim = 990;
     const T = () => [seated(1, EOS.ruby, claim), team(2)];

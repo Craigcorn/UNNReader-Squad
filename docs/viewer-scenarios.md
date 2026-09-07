@@ -83,7 +83,7 @@ missing — the geometry, the bounds and the scale are the same either way.
 | `footprint-creep-path` | A `CommandPath` 45000 long with 7500 of drop scatter, drawn as a band along its bearing, **and** the creep walking its plan: first warning shell at +59.7 s of a 60 s enroute, second at +67.1 s, first barrage at +79.2 s — twelve seconds after it. | §9 *Asset shapes*; §9 *Artillery timeline*; §6 the creep's plan |
 | `footprint-strike-line` | A `CommandLine` 6000 long along its bearing, with the aircraft moving down the run and its shot counter climbing. | §9 *Asset shapes*; §6 the strike family |
 | `footprint-mortar-radius` | The mortar's fixed 7500 circle with its 4500 band, **and** its warning-free plan: counter and first barrage both reach 1 at the enroute, then eight barrages of ten every 8–9 s. | §9 *Asset shapes*; §9 *Artillery timeline* (the mortar's warning-free one); §6 the mortar's values |
-| `footprint-aim-line` | A `CommandLineRadius`: two aim points, at 0 and 4475 along the bearing, with the line between them. | §9 *Asset shapes* (`CommandLineRadius`) |
+| `footprint-aim-line` | A `CommandLineRadius`: two aim points, at 0 and 4475 along the bearing, the line between them, and the bomb pair at each — the config's 45 m and 100 m, both dashed. At 4475 apart the two pairs overlap, which is what that separation looks like on the ground. | §9 *Asset shapes* (`CommandLineRadius`); §9 *Precision bombs* (radii unmeasured — tracker T9 (f), W20's B2) |
 | `vote-in-progress` | A vote open on team 1 with three nominees and live tallies, the timer counting the 60 s window down, and the entries persisting into the frames after it resolves — the game's own state, recorded as read. | §9 *Commander seat and votes*; §3 the vote block |
 | `seat-cooling-and-ready` | The cooldown panel doing its arithmetic: the UAV ready, the strike held by the AIR category gate rather than by its own window, the artillery still on its own. | §9 *Ready-in arithmetic* (the later of entry and category; the category gate) |
 | `commander-change-restamp` | The seat changes hands at 1200. An entry still cooling has its stamp pushed forward by the server's 300 s extension with `remainingAtChange` written; one whose cooldown had run is re-stamped to come back 300 s after the change; the category stamps do not move. | §9 *Ready-in arithmetic* (at a commander change) |
@@ -153,6 +153,14 @@ on, and none of it contradicts a recorded one. The ones worth naming:
 - **Where on the map they sit.** The layer block is a recorded one, bounds
   and texture name included, but *where* in it each shape was placed is a
   fixture choice — see "Where they are staged" above.
+- **The bomb circles' 45 m and 100 m.** Both come from the bomb config, but
+  that they are what the in-game map draws is an assumption the spec flags:
+  the ratio matches and every observed bomb fell inside the inner one, and
+  neither absolute value has been measured. What `footprint-aim-line` draws
+  is two viewer constants, `BOMB_INNER_CM` and `BOMB_OUTER_CM`, exactly as
+  the 50 m request circle is a viewer constant. An edge-stand during a bomb
+  call settles them — tracker T9 (f), W20's B2 — and if it moves them, those
+  two numbers are the whole of the change.
 - **The cast.** Six players with invented names and EOS ids.
 
 ## What a scenario cannot show
