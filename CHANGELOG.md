@@ -7,6 +7,18 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- A commander scenario left to play did not appear to advance, and what
+  movement it had arrived in jerks: each was six or seven full frames three
+  to twenty seconds apart, while the viewer's playhead runs in real time and
+  draws by interpolating between the two frames bracketing it. Between such
+  frames there is nothing to move toward. The scenarios are regenerated at
+  the cadence a recording has - a full frame every second, three 4 Hz
+  position lines between each pair, 32 to 73 seconds each - so they play
+  like the recordings they stand in for, and everything a recording advances
+  every frame now advances in them too: the vote counting its window down,
+  the ready-in arithmetic against the game clock, the artillery counters on
+  their observed stamps, and a drone's death landing between two full frames
+  where only the 4 Hz line can catch it.
 - The viewer's commander scenarios were staged on an invented layer the
   viewer had no texture or bounds for, so they drew on a bare grid and a
   reviewer could not judge a footprint's scale. They now carry the real
