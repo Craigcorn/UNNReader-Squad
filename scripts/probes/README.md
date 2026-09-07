@@ -36,3 +36,8 @@ in `docs/tracker.md`). The design, decided 2026-09-04:
   sitting between them; the 08-30 archive had held every command marker's
   full layout all along. A full dump costs nothing and is what the next
   question is answered from.
+- **Skip the class defaults.** Every class has a `Default__` object that
+  passes a class filter and never changes; on an empty server the marker
+  probe listed three of them as placed markers (2026-09-07 smoke test).
+  Read a CDO on purpose — the action configs are read that way — and skip
+  them everywhere else.

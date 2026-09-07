@@ -118,6 +118,8 @@ while True:
         ca = cls_of(oa)
         if not ca or not is_marker(ca):
             continue
+        if (uname(oa) or "").startswith("Default__"):
+            continue          # the class default object, not a placed marker
         seen.add(oa)
         try:
             row = read_marker(oa)

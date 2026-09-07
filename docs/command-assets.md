@@ -830,3 +830,12 @@ and "ready in" matching what the commander's UI showed at A5 and A10.
   09-03 call had the only volunteer 12 m beyond the outer radius and
   proved nothing by itself; the second, with one soldier 44 m along the
   line, closed the question in a single call.
+- 2026-09-07: the probe is canonical as `scripts/probes/command_assets.py`
+  (attach via `probe_common`; raw rows, layouts and the chased arrays as
+  before; an `action-config` row per loaded `CommandAction_*` CDO with the
+  config values and the two strings, at first sight and on change). On
+  the box's build the FProperty header's `ElementSize` reads 0 for a plain
+  float array (`LastCategoryGameTime`), so a scalar array's stride comes
+  from the property type and a struct array's from the struct's reflected
+  size — the smoke test resolved 24 / 40 / 32 / 4 for categories,
+  intervals, nominees and last-use stamps.
