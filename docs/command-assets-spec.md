@@ -242,7 +242,9 @@ after a kill, inside the full frame's one-second gap. Measured cost
 ~115 B of raw JSON per drone per sample while it lives, about 50 B more
 per sample once hit for the minute or so a wreck lingers, ~28 KB on disk
 per ten-minute flight, three to four small reads per drone per sample
-plus one bool and one pointer chain.
+plus one bool and one pointer chain. Touch points:
+`possample.SampledEntities` / `sample_positions`, the position-frame key,
+the viewer's reconstructor, the schema register.
 
 ## 8. Doctor coverage
 
