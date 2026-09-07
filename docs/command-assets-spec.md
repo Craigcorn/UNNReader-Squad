@@ -220,8 +220,10 @@ pawn's `LastHitBy` is recorded in §7.
 
 The shells, rockets and bombs an asset fires are already tracked
 projectiles with `firer` = the commander (bombs 09-02/03; 155 mm shells
-at 97 % impact capture in a production recording), so the actor record
-adds the plan and its progress, never the impacts.
+at 97 % impact capture in a production recording; on 2026-09-07 the
+155 mm shells, the heavy mortar's rounds and the F/A-18's APKWS rockets,
+each with the commander as `firer` — §9 "Asset impacts" lists them), so
+the actor record adds the plan and its progress, never the impacts.
 
 ## 7. Surface E — the `drones` list and the position-line `drones` key
 
@@ -400,14 +402,32 @@ test is cited by tracker id; the fields do not change when it runs.
   `destroyedDuringActive` says the same. Who did it is not recorded
   (D18). The drone's call actor never sets the flag; its shoot-down is
   the pawn's `dead` and `lastHitByEosId` (§7).
-- **Asset impacts.** Every shell, rocket and bomb an asset fires is a
-  tracked projectile (§6): its `firer` is the caller, and for artillery
-  the actor's `projectile` names its class. Draw each round's impact at
-  its rest position in the first frame `hasImpacted` reads true, joined
-  to the call by firer and class, and count them per barrage against
-  `shellsPerBarrage`. Projectiles are sampled in full frames only, so an
-  impact is exact to the second and to the rest point, and a round's
-  flight between frames is interpolated (tracker C1 would sample it).
+- **Asset impacts.** The rounds an asset fires are tracked projectiles
+  (§6) whose `firer` is the caller. Seen in recordings so far: the
+  155 mm shells `BP_Projectile_155mm_Artillery_C` (50 rounds, every one
+  seen at rest, 2026-09-07), the heavy mortar's `BP_Heavy_Mortarround4_C`
+  (71 of the plan's eighty — the count is what the once-a-second frames
+  caught), the F/A-18 rocket strike's `BP_APKWS_Proj2_C` (13, all at
+  rest) and the 500 lb bomb (09-02). A gun strafe's cannon rounds have
+  never been seen in a recording. Join a round to a call by firer,
+  through the frame's roster: `firer` is the firing player's name and
+  `callerEosId` an id, and only `players[]` carries both, so a caller
+  off the roster joins nothing. Where the actor names a `projectile`
+  (artillery only) the round's `classShort` must match it too; a strike
+  names none, so its rounds are the caller's tracked rounds during the
+  actor's life, and the viewer carries no list of rocket classes. Two
+  live calls by one caller with the same class cannot be told apart by
+  the recording: a round goes to the call naming its class, else to the
+  first live one (a viewer reading, 2026-09-07). Draw each round's
+  impact at its rest position in the first frame `hasImpacted` reads
+  true, and count the rounds caught per barrage against
+  `shellsPerBarrage` as a lower bound. Projectiles are sampled in full
+  frames only, so an impact is exact to the second and to the rest
+  point, and a round's flight between frames is interpolated (tracker
+  C1 would sample it). T8's recording settles whether the
+  artillery actor's `projectile` is the same string as its shells'
+  `classShort` (no probe has read the actor's value), and whether a
+  gun strafe's rounds are tracked at all.
 - **Actions enabled.** `commander.actionsEnabled` is the commander's
   presence in a command zone, both ways (walked out and back in,
   2026-09-07), and the viewer may say so.

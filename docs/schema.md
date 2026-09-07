@@ -364,7 +364,7 @@ says by carrying no key at all.
     "preWarningShells": 2, "preWarningDelaySec": 12.0,
     "shellsPerBarrage": 10, "barrageCount": 8,
     "currentPrewarningShells": 1, "currentBarrage": 3,
-    "projectile": "BP_Projectile_155mm_C"
+    "projectile": "BP_Projectile_…_C"
   }
 ]
 ```

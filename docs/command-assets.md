@@ -999,3 +999,26 @@ Times below are the server's game clock unless marked.
   is not enough; run the stop as a script file, or hide the path in a
   variable. Restart every probe after a layer roll. The command-assets
   probe wrote 1.09 GB of raw rows in 3 h 40 min.
+- **Recordings re-read (2026-09-07, evening) — which asset rounds a
+  recording tracks.** The two Al Basrah recordings of the session were
+  scanned for their `projectiles` (a read-only pass over every full
+  frame's array; `firer` compared by name). USMC half (recording
+  `2026-09-07_000633_…`): `BP_Projectile_155mm_Artillery_C` 50 rounds,
+  all 50 seen at rest, every one with `firer` = the commander;
+  `BP_APKWS_Proj2_C` 13 rounds, all at rest, all the commander's — the
+  F/A-18 rocket strike, the only strike USMC carries on this layer;
+  `BP_Projectile_30mm_HE_Red_C` 46 rounds from three other players (the
+  LAV fire at the UAV; 2 with `firer` null), `BP_40MM_MK19_Proj_C` 33
+  (the commander's own vehicle fire, none seen at rest), M18 smoke and
+  two M72 rockets. MEI half (`2026-09-07_020347_…`):
+  `BP_Heavy_Mortarround4_C` 71 rounds, all at rest, all the commander's,
+  against a plan of eight barrages of ten — the once-a-second frames
+  caught 71 of 80; `BP_S5_Proj2_C` 36 (another player's), RDG2 smoke 13,
+  125 mm frag 2. So the join by firer alone parts a call's rounds from
+  the vehicle fire around it in both matches, the class half is only
+  ever needed between two of the commander's own calls, and the mortar's
+  count shows the per-barrage tally is a lower bound. Still unread: the
+  artillery actor's `Projectile` value — the probe rows carry the
+  property in the layouts and never decoded its value — so whether it
+  equals the shells' `classShort` waits for T8's recording, as does a
+  gun strafe, which no recording has ever caught firing.
