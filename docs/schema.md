@@ -40,7 +40,7 @@ moves only with the set of index-tracked lists.
 | `projectiles` | tracked projectiles with `firer` and `team` (since 2026-08-28) | upstream | sent whole |
 | `damageEvents` | damage and kill events; log-derived in serve mode today (the memory detail is lost — tracker W21) | upstream | sent whole |
 | `reviveEvents` | revives from the server log; present only on ticks with revives | 2026-08-30 | sent whole |
-| `commandActions` | one entry per live command actor | planned, decision 6 (2026-09-04) | sent whole |
+| `commandActions` | one entry per live command actor; present only while one exists | 2026-09-07 | sent whole |
 | `drones` | one entry per live drone pawn | planned, decision 7 (2026-09-04) | sent whole |
 
 ### Position line (`{"t": "pos", ...}`, 4 Hz, between full frames)
@@ -332,3 +332,81 @@ Absence keeps the two meanings the commander block gave it (spec §2):
 A consumer reads these where they exist and draws nothing where they do not.
 Recordings made before 2026-09-07 carry none of them, and no value is
 defaulted or carried from the previous frame.
+
+---
+
+## `commandActions`
+
+A new top-level list: one entry per live command actor — the strike aircraft
+flying its run, the artillery fire plan and its progress, the UAV on station,
+the drone's call actor. The contract is `docs/command-assets-spec.md` §6 — this
+section is the wire shape.
+
+**The key is present only while such an actor exists**, which is a handful of
+windows per match, 30 s to 10 min each. An absent key means "no command asset
+in the air this frame", exactly what every recording made before 2026-09-07
+says by carrying no key at all.
+
+```json
+"commandActions": [
+  {
+    "id": "0x707db0c584a0",
+    "class": "BP_CommandActor_Artillery_Creep_C",
+    "team": 1,
+    "action": "CommandAction_Artillery_Creep_USMC_C",
+    "callerEosId": "eos-…",
+    "position": {"x": 12345.5, "y": -6789.25, "z": 42.0}, "yaw": 45.0,
+    "actionDestroyed": false,
+    "distance": 45000.0,
+    "originLocation": {"x": 1000.0, "y": 2000.0, "z": 30.0},
+    "targetLocation": {"x": 4000.0, "y": 5000.0, "z": 60.0},
+    "maxDropRadius": 1.0,
+    "preWarningShells": 2, "preWarningDelaySec": 12.0,
+    "shellsPerBarrage": 10, "barrageCount": 8,
+    "currentPrewarningShells": 1, "currentBarrage": 3,
+    "projectile": "BP_Projectile_155mm_C"
+  }
+]
+```
+
+Every entry carries the common half:
+
+- `id` is the actor's address as a lowercase hex string, the same form vehicles
+  and markers use — new on every call, never a join across matches.
+- `class` is the actor's class name verbatim; `action` is the `CommandAction_*`
+  config it belongs to, a join to the `teams[].commander.cooldowns.actions[]`
+  entry that produced it. `action` is `null` on a null pointer, which is what
+  the level's template actors read at a layer load.
+- `team` is the owning team. `callerEosId` is the commander who called it — the
+  attribution pointer the game itself uses for the asset's kills, resolved
+  through the object array with its serial check, so a recycled slot omits the
+  key rather than naming the wrong player.
+- `position` and `yaw` are where the actor is this frame, off the same
+  `ComponentToWorld` transform everything else uses: aircraft move along their
+  run, artillery sits at its origin, and the drone's call actor reads
+  `(0, 0, z)` and means nothing by it.
+- `actionDestroyed` says the call was cut short — it reads true while a
+  shot-down actor lingers, and a natural end removes the actor without any
+  frame reading it. `distance` is the actor's own length figure.
+
+The family half rides wherever the actor's own class declares the name: the
+strike aircraft's `shotsMade`, `maxShots`, `splineDistance` and
+`originLocation`; the artillery's ten fire-plan fields above; the drone call
+actor's `health` and `ownerEosId`. A UAV declares none of them and carries the
+common half alone. No class name is ever matched against — every name is looked
+for on the actor's own reflected layout — so a class that gains or loses one is
+followed without a code change.
+
+Two things the list deliberately never holds. Who shot an actor down: no
+last-damager field exists on any command actor, the server log carries no line
+for it, and it is not inferred from anything nearby. And the shells, rockets
+and bombs an asset fires: those are already tracked projectiles with `firer`
+set to the commander, so the actor record carries the plan and its progress and
+never the impacts.
+
+Absence keeps the two meanings the sections above gave it (spec §2): `null`
+where the game's own value is empty — a pointer that reads null — and the key
+absent where the class does not declare the name (what a Squad rename looks
+like) or the read failed. An actor whose root position reads exactly
+`(0, 0, 0)` is dropped from the list entirely, the junk-actor rule vehicles
+already use; a class default object is never an entry.

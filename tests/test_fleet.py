@@ -702,6 +702,43 @@ def test_the_marker_geometry_is_covered_on_both_masters():
     assert optional is True
 
 
+def test_the_command_actors_are_covered_at_the_class_that_declares_each_name():
+    """`commandActions` reads every name off the actor's own class, but each
+    name is DECLARED somewhere up the chain — the four common ones on the
+    native base, the destroyed flag on the Blueprint base, the ten artillery
+    fields on the artillery parent — so watching the declaring class watches
+    every actor that inherits it (spec §8). The strike family has no such
+    parent yet, so its rows are the concrete classes archived so far."""
+    rows = {c: (opt, set(names)) for c, _k, opt, names in
+            health.required_reflection_names()}
+    optional, names = rows["SQCommandActor"]
+    assert names == {"Distance", "Team", "DamageInstigatorController", "Action"}
+    assert optional is False          # native: absence is a rename, not a layer
+    optional, names = rows["BP_CommandActor_C"]
+    # The delay is watched and deliberately unread (spec §10) — the linger is
+    # observed from the actor still existing, never from its config.
+    assert names == {"Action Destroyed",
+                     "Destroy Delay after Action Destroyed"}
+    assert optional is True           # content: loads with a layer
+    optional, names = rows["BP_CommandActor_ArtilleryBase_C"]
+    assert names == {"Origin Location", "target location", "Max Drop Radius",
+                     "Pre Warning Shells", "Pre Warning Delay",
+                     "Shells Per Barrage", "Barrage Count",
+                     "Current Prewarning Shells", "Current Barrage",
+                     "Projectile"}
+    assert optional is True
+    strike = {"CurrentShotsMade", "MaxShots", "Spline Distance",
+              "Origin Location"}
+    for cls in ("BP_CommandActor_FA18_Rockets_Strafe_USMC_C",
+                "BP_CommandActor_SU25_Bomb_Strafe_C",
+                "BP_CommandActor_FA18_Strafe_C",
+                "BP_CommandActor_A10_Strafe_2_C",
+                "BP_CommandActor_SU25_Rockets_Strafe_C",
+                "BP_CommandActor_FA18_Rockets_Strafe_C"):
+        assert rows[cls] == (True, strike), cls
+    assert rows["BP_CommandActor_Drone_C"] == (True, {"Health", "SQ PC"})
+
+
 # ---- build detection + restart counter -----------------------------------
 
 def test_build_sha256_off_proc_is_none():

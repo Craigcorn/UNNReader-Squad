@@ -77,6 +77,31 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- The commander's assets now reach a recording as themselves, not just as
+  the marker that named them. A strike run, a creeping barrage, a UAV on
+  station and the drone's call actor each spawn an actor that lives for
+  the length of the call, and until now a replay could show where the
+  call was drawn and never what it then did. A new `commandActions` list
+  carries one entry per such actor on every full frame it exists: which
+  call it is and which config it belongs to, the commander who called it
+  - the game's own attribution pointer, the one it credits the asset's
+  kills to - where the actor is and which way it faces, and whether the
+  call was cut short. Beside that, whatever the actor's own class
+  declares: an aircraft's shots fired against its magazine and how far
+  along its run it is; an artillery plan's origin and target, its drop
+  radius, its warning shells and their delay, its shells per barrage and
+  which barrage it has reached, and the shell it is firing; the drone
+  call actor's health and owner. A UAV declares none of those and carries
+  the common half alone. No class name is matched against anywhere -
+  membership is the game's own class hierarchy and every field is looked
+  for on the actor's own reflected layout, so a family that gains or
+  loses a name is followed without a code change. The key is absent on
+  every frame with nothing in the air, which is what every older
+  recording already says; an actor parked at the world origin is dropped
+  as junk the way vehicles are, and the drone call actor's meaningless
+  (0, 0, z) is not, because the test is the raw triple and not a guess.
+  Who shot an asset down stays unrecorded: no last-damager field exists
+  on any of these actors and none is inferred.
 - Command markers now record the shape the commander drew. A UAV
   coverage circle, a strike run, a creeping barrage's path and a mortar
   radius have all reached recordings as a class name and a point, which

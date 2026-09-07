@@ -406,6 +406,48 @@ def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
             "Distance", "AddDistance", "Action"]),
         ("BP_MapMarker_DirectorMaster_C", "BlueprintGeneratedClass", True, [
             "Distance"]),
+        # ---- the command actors (spec §6 and §8) ----
+        # The four common fields are declared on the native base every command
+        # asset derives from, so this one row watches every family's shared
+        # half — and the base is also the membership test for the list.
+        ("SQCommandActor", "Class", False, [
+            "Distance", "Team", "DamageInstigatorController", "Action"]),
+        # `Action Destroyed` is declared one step down, on the Blueprint every
+        # command actor inherits from. `Destroy Delay after Action Destroyed`
+        # is watched beside it and deliberately not recorded (spec §10): the
+        # linger is read from the actor still being there, not from its config.
+        # Optional for the observed reason: content that loads with a layer,
+        # answered on an idle server (Sanxian Seed v1, 2026-09-07).
+        ("BP_CommandActor_C", "BlueprintGeneratedClass", True, [
+            "Action Destroyed", "Destroy Delay after Action Destroyed"]),
+        # All ten artillery fields are declared on the family's parent, so one
+        # row watches the creep, the static barrage and the mortar together.
+        ("BP_CommandActor_ArtilleryBase_C", "BlueprintGeneratedClass", True, [
+            "Origin Location", "target location", "Max Drop Radius",
+            "Pre Warning Shells", "Pre Warning Delay", "Shells Per Barrage",
+            "Barrage Count", "Current Prewarning Shells", "Current Barrage",
+            "Projectile"]),
+        # The strike family has no such parent in reflection, so its four names
+        # are watched on the concrete classes archived so far; a strike parent,
+        # if a call ever shows one, replaces these rows. Optional for the
+        # reason they share: these classes exist only during a call.
+        *(
+            (cls, "BlueprintGeneratedClass", True, [
+                "CurrentShotsMade", "MaxShots", "Spline Distance",
+                "Origin Location"])
+            for cls in (
+                "BP_CommandActor_FA18_Rockets_Strafe_USMC_C",
+                "BP_CommandActor_SU25_Bomb_Strafe_C",
+                "BP_CommandActor_FA18_Strafe_C",
+                "BP_CommandActor_A10_Strafe_2_C",
+                "BP_CommandActor_SU25_Rockets_Strafe_C",
+                "BP_CommandActor_FA18_Rockets_Strafe_C",
+            )
+        ),
+        # The commander drone's call actor — the only command actor whose own
+        # health and owner are recorded. Optional: it exists only during a call.
+        ("BP_CommandActor_Drone_C", "BlueprintGeneratedClass", True, [
+            "Health", "SQ PC"]),
     ]
 
 

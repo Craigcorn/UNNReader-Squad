@@ -1088,6 +1088,13 @@ LANE_VISUALIZER_ROUTE_INDEX_OFF = 0xd8
 # `_is_subclass_of` kept the type checker from noticing.
 SubclassCacheValue = tuple[int, bool] | bool
 
+# What one command-actor class's reflected layout comes back as (spec §6):
+# {name: (offset, reflected type)} for every §6 name the class declares, plus
+# the FBoolProperty (effective offset, mask) pairs for whichever of them are
+# bools. Two dicts rather than one because a bool needs its mask and no other
+# type has one — see `_command_actor_props`.
+CommandActorProps = tuple[dict[str, tuple[int, str]], dict[str, tuple[int, int]]]
+
 
 @dataclass
 class SnapshotCaches:
@@ -1139,6 +1146,9 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQCommanderManager? (the vote rules)
     is_commander_manager: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
+    # class_addr -> is-subclass-of-SQCommandActor? (the per-call assets)
+    is_command_actor: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
     # CommandAction_* class addr -> (gen, its default object's config values,
     # or None when they could not be read). The lookup behind it walks the
     # object array for `Default__<class>`, so it is paid once per action class
@@ -1155,6 +1165,14 @@ class SnapshotCaches:
     # a walk that failed mid-tick would otherwise be remembered forever as
     # "this class has no such field", and the rolling reset is the retry.
     marker_geometry: dict[int, tuple[int, dict[str, tuple[int, str]]]] = field(
+        default_factory=dict)
+    # Command-actor class addr -> (gen, the §6 names that class declares). Same
+    # bargain as `marker_geometry`, one family along: a class's layout belongs
+    # to the class, so the strike aircraft's four names and the artillery's ten
+    # are reflected once per class instead of once per actor per tick, and the
+    # empty answer — a class that declares none of them — is worth caching just
+    # as much. Gen-aware, and pruned by the rolling reset with the rest.
+    command_actor_props: dict[int, tuple[int, "CommandActorProps"]] = field(
         default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
@@ -1270,11 +1288,13 @@ class SnapshotCaches:
             "is_subgs", "is_vehicle", "is_marker", "is_deployable",
             "is_vehicle_spawner", "is_rally", "is_squad_data_marker",
             "is_tracked_projectile", "is_lane_initializer",
-            "is_raas_visualizer",
+            "is_raas_visualizer", "is_command_actor",
             # Same (gen, value) shape, same reason: a map transition brings a
             # new set of marker classes and the old ones' layouts would
-            # otherwise sit here for the rest of the process's life.
-            "marker_geometry",
+            # otherwise sit here for the rest of the process's life. The
+            # command-actor layouts churn harder still — those classes exist
+            # only while a call is in the air.
+            "marker_geometry", "command_actor_props",
         ):
             sub_cache = getattr(self, cache_attr)
             stale_keys = [k for k, v in sub_cache.items()
@@ -1777,6 +1797,12 @@ class SnapshotPaths:
     # 0 when a class is not loaded, and every read below guards on it.
     sq_commander_state_class: int = 0
     sq_commander_manager_class: int = 0
+    # SQCommandActor — the native base every per-call command asset derives
+    # from through the Blueprint BP_CommandActor_C (spec §6). It is the
+    # MEMBERSHIP test for `commandActions` and nothing else: what an entry
+    # carries is read off the actor's own class layout. 0 when the class is
+    # not loaded, and then the list is never built.
+    sq_command_actor_class: int = 0
     # Their reflected offsets, strides and bool masks. None when neither class
     # resolved — then no commander block and no rules are emitted at all.
     commander: CommanderPaths | None = None
@@ -1856,6 +1882,10 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # blank the commander block, never fail the whole snapshot.
         "SQCommanderState": "Class",
         "SQCommanderManager": "Class",
+        # SQCommandActor — the native base of the per-call command assets.
+        # Optional here for the same reason: a build without it must blank
+        # `commandActions`, never fail the snapshot. The doctor requires it.
+        "SQCommandActor": "Class",
         # Carried by autoresolve_offsets, not read directly here: their
         # field offsets are hardcoded constants and these are the classes
         # whose reflection data corrects them. (SQProjectile, which upstream
@@ -2091,6 +2121,7 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         sq_commander_state_class=sq_commander_state_class_addr,
         sq_commander_manager_class=sq_commander_manager_class_addr,
         commander=commander_paths,
+        sq_command_actor_class=_addr("SQCommandActor"),
         soldier_take_hit_off=(sd_layout["LastTakeHitInfo"].offset
                               if "LastTakeHitInfo" in sd_layout
                               else SQ_SOLDIER_TAKE_HIT_INFO_OFFSET),
@@ -4128,6 +4159,241 @@ def read_root_pos_yaw(pm: ProcessMemory, actor_addr: int,
     return out
 
 
+# ----- the command actors (docs/command-assets-spec.md §6) ------------------
+#
+# One entry per live actor deriving from the native SQCommandActor: the strike
+# aircraft flying its run, the artillery fire plan and its progress, the UAV on
+# station, the drone's call actor. Membership is a subclass test on that base,
+# the way the tracked projectiles test theirs — and it is the ONLY thing a
+# class name decides. What an entry carries is read off the actor's own class
+# layout, so the family tables of the spec are evidence for which class held
+# which name on the day it was read, never a test: a class that gains or loses
+# one is followed without a code change.
+
+#: Wire key -> reflection name for every value read AS the type reflection
+#: reports it (spec §2, "Numbers"). `Distance` is a Float here where the
+#: markers' is a Double, which is exactly why no width is assumed anywhere.
+COMMAND_ACTOR_NUMBERS = (
+    ("shotsMade", "CurrentShotsMade"),
+    ("maxShots", "MaxShots"),
+    ("splineDistance", "Spline Distance"),
+    ("maxDropRadius", "Max Drop Radius"),
+    ("preWarningShells", "Pre Warning Shells"),
+    ("preWarningDelaySec", "Pre Warning Delay"),
+    ("shellsPerBarrage", "Shells Per Barrage"),
+    ("barrageCount", "Barrage Count"),
+    ("currentPrewarningShells", "Current Prewarning Shells"),
+    ("currentBarrage", "Current Barrage"),
+    # `Health` is the drone call actor's, the one command actor whose own
+    # health is recorded (spec §6). It is looked for like every other name,
+    # because the alternative is a class-name test and the spec forbids one —
+    # so a UAV or strike class that also declares `Health` would emit it,
+    # which decision D18 and §10 say is not recorded. §13 carries no `Health`
+    # on those rows and the acceptance run reads the live answer; nothing here
+    # guesses either way.
+    ("health", "Health"),
+)
+#: The two FVector structs, read with the reader's existing vector helper.
+COMMAND_ACTOR_VECTORS = (
+    ("originLocation", "Origin Location"),
+    ("targetLocation", "target location"),
+)
+#: Class pointers, recorded as the pointed class's name; `null` when the
+#: pointer reads null, which is the game's own empty (spec §2).
+COMMAND_ACTOR_CLASS_PTRS = (("action", "Action"), ("projectile", "Projectile"))
+#: The one bool, read through its FBoolProperty mask.
+COMMAND_ACTOR_BOOLS = (("actionDestroyed", "Action Destroyed"),)
+#: Every name the layout walk looks for, in one tuple. `Team` and `Distance`
+#: join the numbers, `DamageInstigatorController` (a weak pointer) and `SQ PC`
+#: (a controller pointer) the pointer chains that end at a player state.
+COMMAND_ACTOR_NAMES = (
+    "Team", "Distance", "DamageInstigatorController", "SQ PC",
+    *(n for _k, n in COMMAND_ACTOR_NUMBERS),
+    *(n for _k, n in COMMAND_ACTOR_VECTORS),
+    *(n for _k, n in COMMAND_ACTOR_CLASS_PTRS),
+    *(n for _k, n in COMMAND_ACTOR_BOOLS),
+)
+
+
+def _command_actor_props(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                         caches: "SnapshotCaches | None",
+                         cls_addr: int) -> CommandActorProps:
+    """Which of the §6 names this command-actor class declares, and where.
+
+    ({name: (offset, reflected type)}, {name: (byte offset, mask)}) — the empty
+    pair for a class that declares none. Cached per class address, absence
+    included (`SnapshotCaches.command_actor_props`): the layout belongs to the
+    class, so this is one reflection walk per class instead of one per actor
+    per tick, and the rolling reset is the retry for a walk that failed."""
+    if not cls_addr:
+        return {}, {}
+    gen = caches.subclass_gen if caches is not None else 0
+    if caches is not None:
+        hit = caches.command_actor_props.get(cls_addr)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+    layout = get_class_layout(pm, cls_addr, alloc)
+    props = {n: (layout[n].offset, layout[n].type_name)
+             for n in COMMAND_ACTOR_NAMES if n in layout}
+    masks: dict[str, tuple[int, int]] = {}
+    for _key, name in COMMAND_ACTOR_BOOLS:
+        if name not in props:
+            continue
+        mask = bool_property_mask(pm, cls_addr, name, alloc)
+        if mask is not None:
+            masks[name] = mask
+    value: CommandActorProps = (props, masks)
+    if caches is not None:
+        caches.command_actor_props[cls_addr] = (gen, value)
+    return value
+
+
+def _controller_eos_id(pm: ProcessMemory, paths: SnapshotPaths,
+                       ctrl_addr: int,
+                       caches: "SnapshotCaches | None") -> str | None:
+    """The EOS id of the player a controller belongs to, or None when the hop
+    does not reach one — the caller then omits the key rather than guessing
+    (spec §2). The controller -> player state offset is the reader's existing
+    reflection-first, doctor-watched one."""
+    off = paths.pc_playerstate_off
+    if not ctrl_addr or off is None:
+        return None
+    ps = _safe(lambda: pm.read_u64(ctrl_addr + off))
+    if not ps:
+        return None
+    return _player_identity(pm, paths, ps, caches)[1]
+
+
+def read_command_actor(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                       arr: "GUObjectArray | None", paths: SnapshotPaths,
+                       a_addr: int, class_name: str | None,
+                       cls_addr: int = 0,
+                       caches: "SnapshotCaches | None" = None
+                       ) -> dict[str, Any]:
+    """One `commandActions` entry — the call this actor IS (spec §6).
+
+    The common fields ride every command actor because the native base
+    declares them; the family fields ride wherever the actor's own class
+    declares the name. Nothing is defaulted: a name the class does not carry
+    omits its key, a pointer that reads null gives `null`, and a pointer that
+    reaches something other than a player state omits its key too."""
+    out: dict[str, Any] = {
+        "id": f"{a_addr:#x}",
+        "class": class_name,
+    }
+    props, masks = _command_actor_props(pm, alloc, caches, cls_addr)
+
+    def _number(key: str, name: str) -> None:
+        prop = props.get(name)
+        if prop is None:
+            return
+        v = _read_by_reflected_type(pm, a_addr + prop[0], prop[1])
+        if v is not None:
+            out[key] = v
+
+    def _class_ptr(key: str, name: str) -> None:
+        prop = props.get(name)
+        if prop is None:
+            return
+        ptr = _safe(lambda: pm.read_u64(a_addr + prop[0]))
+        if ptr == 0:
+            # The game's own empty — the layer's template actors spawn with
+            # this pointer null and are recorded as read (spec §6).
+            out[key] = None
+        elif ptr:
+            nm = _class_name_cached(pm, alloc, caches, ptr)
+            if nm is not None:
+                out[key] = nm
+
+    def _vector(key: str, name: str) -> None:
+        prop = props.get(name)
+        # Read as a vector only where reflection still says "struct": a name
+        # that came back as something else is omitted, not decoded anyway.
+        if prop is None or prop[1] != "StructProperty":
+            return
+        v = read_fvector(pm, a_addr + prop[0])
+        if v is not None:
+            out[key] = {"x": v.x, "y": v.y, "z": v.z}
+
+    _number("team", "Team")
+    _class_ptr("action", "Action")
+    # The commander who called it: the attribution pointer the game itself
+    # uses for the asset's kills. A weak pointer, so the object array and the
+    # serial check decide whether it still points at anything — an empty one
+    # is the game's own `null`, a stale one reaches no player state and the
+    # key is absent instead (spec §2).
+    caller = props.get("DamageInstigatorController")
+    if caller is not None and arr is not None:
+        wp = read_fweak_object_ptr(pm, a_addr + caller[0])
+        if wp is not None and wp.object_index <= 0:
+            out["callerEosId"] = None
+        elif wp is not None:
+            eos = _controller_eos_id(
+                pm, paths, _resolve_weak_obj(pm, arr, a_addr + caller[0]),
+                caches)
+            if eos is not None:
+                out["callerEosId"] = eos
+    # Where the actor is this frame — aircraft move along their run, artillery
+    # sits at its origin. `attached` is not part of this surface (spec §6).
+    pose = read_root_pos_yaw(pm, a_addr, paths)
+    for key in ("position", "yaw"):
+        if key in pose:
+            out[key] = pose[key]
+    for key, name in COMMAND_ACTOR_BOOLS:
+        v = _read_masked_bool(pm, a_addr, masks.get(name))
+        if v is not None:
+            out[key] = v
+    _number("distance", "Distance")
+    for key, name in COMMAND_ACTOR_NUMBERS:
+        _number(key, name)
+    for key, name in COMMAND_ACTOR_VECTORS:
+        _vector(key, name)
+    _class_ptr("projectile", "Projectile")
+    # The drone call actor's owner: `SQ PC` is a controller, one hop short of
+    # the player state the identity comes off (the same hop the probe makes).
+    owner = props.get("SQ PC")
+    if owner is not None:
+        ptr = _safe(lambda: pm.read_u64(a_addr + owner[0]))
+        if ptr == 0:
+            out["ownerEosId"] = None
+        elif ptr:
+            eos = _controller_eos_id(pm, paths, ptr, caches)
+            if eos is not None:
+                out["ownerEosId"] = eos
+    return out
+
+
+def build_command_actions(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                          arr: "GUObjectArray | None", paths: SnapshotPaths,
+                          actors: "list[tuple[int, int]]",
+                          caches: "SnapshotCaches | None" = None
+                          ) -> list[dict[str, Any]]:
+    """The `commandActions` list: one entry per live command actor, minus the
+    ones the position exclusion drops.
+
+    Spec §2 applies the junk-actor rule to this list: an entry whose root
+    position reads exactly (0, 0, 0) is not recorded. The drone's call actor
+    reads (0, 0, z) and stays — the test is the raw triple, never a guess
+    about which actor a position belongs to.
+
+    A class default object is never an entry (spec §6). The object walk
+    already drops them by name before this is called; the rule is repeated
+    here because it belongs to the list, and one name read per command actor
+    — a handful per match — is not a cost worth trading it for."""
+    out: list[dict[str, Any]] = []
+    for a_addr, cls_addr in actors:
+        if (_uobject_name(pm, a_addr, alloc) or "").startswith("Default__"):
+            continue
+        rec = read_command_actor(
+            pm, alloc, arr, paths, a_addr,
+            _class_name_cached(pm, alloc, caches, cls_addr), cls_addr, caches)
+        pos = rec.get("position")
+        if pos and pos["x"] == 0.0 and pos["y"] == 0.0 and pos["z"] == 0.0:
+            continue
+        out.append(rec)
+    return out
+
+
 def read_vehicle(pm: ProcessMemory, alloc: FNameEntryAllocator,
                  paths: SnapshotPaths, vh_addr: int,
                  class_name: str | None,
@@ -4770,6 +5036,7 @@ _CAT_MARKER = 3
 _CAT_DEPLOYABLE = 4
 _CAT_SPAWNER = 5
 _CAT_RALLY = 6
+_CAT_COMMAND_ACTOR = 7
 
 
 def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
@@ -4827,6 +5094,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     is_raas_visualizer_cache = caches.is_raas_visualizer
     sq_commander_manager_class = paths.sq_commander_manager_class
     is_commander_manager_cache = caches.is_commander_manager
+    sq_command_actor_class = paths.sq_command_actor_class
+    is_command_actor_cache = caches.is_command_actor
 
     players_raw: list[int] = []
     game_state_addr: int | None = None
@@ -4845,6 +5114,7 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     deployables_raw: list[tuple[int, int]] = []
     vehicle_spawners_raw: list[tuple[int, int]] = []
     rally_points_raw: list[tuple[int, int]] = []
+    command_actors_raw: list[tuple[int, int]] = []
     marker_manager_addr: int | None = None
     commander_manager_addr: int | None = None
     ammo_weps_raw: list[tuple[int, int]] = []
@@ -4900,6 +5170,14 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 pm, class_addr, sq_squad_rally_point_class,
                 is_rally_cache, _subgen):
             return _CAT_RALLY
+        # The per-call command assets. Last in the ladder because they are the
+        # newest arrival and every category above it keeps its old priority —
+        # SQCommandActor derives straight from Actor, so nothing it could
+        # shadow is up there anyway.
+        if sq_command_actor_class and _is_subclass_of(
+                pm, class_addr, sq_command_actor_class,
+                is_command_actor_cache, _subgen):
+            return _CAT_COMMAND_ACTOR
         return _CAT_NONE
 
     class_category = caches.class_category
@@ -5040,6 +5318,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             nm = _uobject_name(pm, obj_addr, alloc) or ""
             if not nm.startswith("Default__"):
                 return (_wd.KIND_RALLY, obj_addr, class_addr)
+            return None
+        if cat == _CAT_COMMAND_ACTOR:  # strike runs, barrages, UAVs, drone calls
+            nm = _uobject_name(pm, obj_addr, alloc) or ""
+            if not nm.startswith("Default__"):
+                return (_wd.KIND_COMMAND_ACTOR, obj_addr, class_addr)
             return None
 
         # Map-marker manager component — singleton attached to the
@@ -5216,6 +5499,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             vehicle_spawners_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_RALLY:
             rally_points_raw.append((obj_addr, extra))
+        elif kind == _wd.KIND_COMMAND_ACTOR:
+            command_actors_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_AMMOWEP:
             ammo_weps_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_PROJECTILE:
@@ -5575,6 +5860,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
         for rp_addr, cls_addr in rally_points_raw
     ]
     rally_points = [r for r in rally_points if not r.get("stale")]
+    # The per-call command assets (spec §6). Built after the transform verify
+    # like everything else that reads a world position, and empty on almost
+    # every frame: a handful per match, 30 s to 10 min each.
+    command_actions = build_command_actions(
+        pm, alloc, arr, paths, command_actors_raw, caches)
     # Guided missiles (TOW / Kornet / HJ-8) are stamped kind "guided" from
     # the class hierarchy — SQGuidedProjectile is the engine's own
     # definition of a steerable round, so a new missile classifies
@@ -5815,6 +6105,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
         "projectiles": projectiles,
         "damageEvents": damage_events,
     }
+    # `commandActions` rides only while such an actor exists (spec §6). An
+    # absent key says "no command asset in the air this frame" — which is what
+    # every recording made before this one says, and why nothing versions.
+    if command_actions:
+        _snapshot["commandActions"] = command_actions
     if _PROFILE:
         profiling.emit()
     return _snapshot
@@ -5827,6 +6122,7 @@ __all__ = [
     "read_vehicle", "read_vehicle_seats",
     "read_lane_graph",
     "read_commander_block", "read_commander_rules", "resolve_commander_paths",
+    "read_command_actor", "build_command_actions",
     "find_subclass_instance", "SnapshotPaths", "SnapshotCaches",
     "CommanderPaths",
     "DamageTracker", "clean_nonfinite",
