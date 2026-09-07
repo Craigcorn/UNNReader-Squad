@@ -147,7 +147,7 @@ the format rule and entered in the schema doc's frame-key register.
 | D6 | Possession hand-off: give the drone to a squad mate and take it back; watch `PlayerState`, `Controller`, `SQ PC` | two players | that `pilotEosId` follows the game and what `SQ PC` does on a hand-off | tracker T10 (two players) |
 | D7 | Team and owner of a pilotless drone | a pilot who lands and exits | whether `team` can be emitted | 2026-09-05: `SQ PC` holds the deployer/last pilot through de-possession and death → `ownerEosId`, team derived |
 | D8 | The 4 Hz sample on a live drone: gates admit it, omit it cleanly at death and at the zeroed position | any drone flight with the two-tier recorder running the new code | that the fast tier behaves | tracker W18 then T8 (acceptance of the implementation) |
-| D9 | Commander drone confirmations: `SQ PC` persistence, health value, linger, `Command Action` set | a commander calling the drone (rides test T8) | that the commander drone matches the recon findings where the class is shared | tracker T8 (rides the six-player run) |
+| D9 | Commander drone confirmations: `SQ PC` persistence, health value, linger, `Command Action` set | a commander calling the drone | that the commander drone matches the recon findings where the class is shared | tracker T14 (its own test since 2026-09-07; a rider on T8 before) |
 
 The harness is `scripts/probes/drone_track.py` (tracker test T7): the
 `bomb_track.py` pattern — reflection-resolved fields, change-triggered

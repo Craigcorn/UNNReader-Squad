@@ -182,7 +182,7 @@ contain spaces and are used verbatim.
 | Strike aircraft (`*_Strafe_*`, gun and bomb): a shootable pawn flying its run | `health` (number), `dead` (bool), `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts) |
 | Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values read on 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
 | UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, kept by decision D17). No UAV or aircraft has been shot down in a session, so `Dead_0` flipping is unobserved — tracker T9. The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
-| Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is confirmed under tracker T8 |
+| Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is observed under tracker T14, the commander-drone test |
 
 Not recorded: who damaged or destroyed an actor. No last-damager field
 exists in the reflected lists of the six command actors archived (creep,
@@ -245,7 +245,9 @@ position-frame key, the viewer's reconstructor, the schema register.
 Every read above is reflection-resolved, so each class gains a
 `required_reflection_names()` row (type, meta-class, optional?,
 [property names]); no hardcoded offset is introduced, so
-`hardcoded_offset_tables()` gains nothing. The register takes exact
+`hardcoded_offset_tables()` gains nothing. The player-state identity
+fields of §2 ride the reader's existing identity read and its existing
+doctor rows. The register takes exact
 class names. Rows marked optional carry the observed reason the register
 demands: Blueprint content classes load with a layer, a claim or a call,
 and their absence on an idle server is not drift.
@@ -261,6 +263,7 @@ and their absence on an idle server is not drift.
 | `CommanderCategory` | ScriptStruct | no | `Name`, `CooldownDuration` |
 | the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves, so none was loaded on the 09-05 layer) | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration` |
 | `SQFlyingDrone` | Class | no | `PlayerState`, `LastHitBy` (inherited from `Pawn`; present on an idle server, 09-04 self-test) |
+| `Controller` | Class | no | `PlayerState` — the hop from a drone's `LastHitBy` to the shooter's player state (§7). The reader's existing controller read is a reflection-first, doctor-checked offset on `SQPlayerController`, the same field by inheritance; this row names the base class the pawn's pointer is typed as |
 | `BP_FlyingDrone_C` | Class | yes — content, loads with a layer that has it | `SQ PC`, `HealthComponent`, `Dead`, `Command Action` |
 | `BP_FlyingDrone_Recoverable_C` | Class | yes — content | `BatteryLifetimeMax` |
 | `HealthComponent_C` | Class | yes — content | `Health`, `Max Health` |
@@ -319,8 +322,8 @@ test is cited by tracker id; the fields do not change when it runs.
   `preWarningDelaySec` (observed 12.1 s after the second warning shell);
   barrages then advance `currentBarrage` at the game's own interval, which
   is not recorded, roughly every six to seven seconds on the 08-30 creep.
-  Whether the mortar follows the same shape is unobserved — it rides the
-  acceptance run's mortar call (T8).
+  Whether the mortar follows the same shape is unobserved — tracker T9's
+  item (g), the mortar actor's rows across one call.
 - **Actions enabled.** `commander.actionsEnabled` is displayed as read;
   its reading as "the commander stands in a command zone" is an
   inference the viewer may label as such (tracker W20's item R8).
@@ -508,8 +511,11 @@ named.
 Tracker T8: a six-player run with the command-assets probe as oracle,
 after W18 lands, comparing recorded values against the probe at the same
 instants, the doctor clean with the rows of §8, the parity harness
-green, and the viewer drawing the shapes, actors and drones of §9. T8
-also carries the commander-drone confirmations of the fields in §7.
+green, and the viewer drawing the shapes, actors and drones of §9. The
+observations this document waits for — the marker `Action` pointer (T12),
+the action configs' strings (T13), the commander drone and its call actor
+(T14), the mortar's fire-plan shape (T9) — run before its text is final;
+T8 verifies and discovers nothing.
 
 ## 12. How this document was checked, and how to check it again
 
