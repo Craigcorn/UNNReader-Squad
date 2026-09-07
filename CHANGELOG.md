@@ -77,6 +77,33 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- Recordings now carry the commander: every full frame gets the seat's
+  own state on each team record - whether the system is active, whether
+  the team may issue commands, the vote with its timer, its end stamp,
+  its cooldown and every nominee's live tally, the per-category gate
+  with the stamp of its last use, and one entry per action the team can
+  call carrying what the game holds about it (when it was created, what
+  it had left at the last commander change, whether it was destroyed
+  while active) plus that action's own config values - display name,
+  category, enroute, active and cooldown durations - read from the
+  action class's default object and sent every frame, so a seek into the
+  middle of a replay is self-describing. The server's own commander
+  settings ride `gameState.commanderRules` beside them. Everything a
+  viewer wants on top of this - "ready in", "vote resolved", "commander
+  changed" - is derived from the per-frame state and can be corrected
+  for every recording at once, so the recorder computes none of it.
+  Absence says which kind it is: `null` where the game's own value is
+  empty (an unclaimed seat, a category never called), the key absent
+  where the read could not be made, which is also what a Squad rename
+  now looks like - every name is reflection-resolved with no constant to
+  fall back on, every array stride comes from the element's own
+  reflected size rather than a number, and the doctor watches the lot.
+- The commander's name and account id, which have shipped empty since
+  the day they were added. The read treated `SQTeamState.CommanderState`
+  as a player state; it points at the team's commander-state actor, and
+  the seat is `CurrentCommander` on that actor. One hop further and the
+  fields carry a commander - or an explicit `null` when nobody holds the
+  seat, which is a different thing from the silence they used to emit.
 - Vehicle seats now record their whole weapon inventory, not only the gun
   currently selected. A Loach CAS flown on the test box showed the gap:
   the pilot fires a minigun, a rocket pod and a smoke pod, and the

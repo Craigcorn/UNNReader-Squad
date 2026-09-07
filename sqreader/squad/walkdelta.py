@@ -63,6 +63,7 @@ KIND_LANE_INIT = 14
 KIND_LANE_VIS = 15
 KIND_SOLDIER = 16
 KIND_SEAT = 17
+KIND_COMMANDER_MGR = 18
 
 Contribution = tuple[int, int, Any]
 VisitFn = Callable[[int, int, int], "Contribution | None"]

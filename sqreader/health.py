@@ -341,22 +341,60 @@ def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
     into a drift report instead.
 
     The `optional` column carries the same meaning it does in the class
-    tables, and every row is currently REQUIRED. That is evidence, not
-    optimism: these are all native SQ* classes, registered when the C++ module
-    loads rather than when content spawns, and all four were present on a
-    0-player server with nothing built (2026-08-30). Treating them as optional
-    made a class-level rename of SQHealingEquipableItem or SQCommanderState an
-    eternal silent skip — the exact blind spot this tier exists to close. Mark
-    a row optional only with an observed reason for it."""
+    tables, and every NATIVE row is REQUIRED. That is evidence, not optimism:
+    the SQ* classes are registered when the C++ module loads rather than when
+    content spawns, and they were present on a 0-player server with nothing
+    built (2026-08-30). Treating them as optional made a class-level rename of
+    SQHealingEquipableItem or SQCommanderState an eternal silent skip — the
+    exact blind spot this tier exists to close. Mark a row optional only with
+    an observed reason for it, and only a content class can have one."""
     return [
         # Medical capture (per-player `medical` dict).
         ("SQSoldier", "Class", False, ["CurrentHeldItem"]),
         ("SQHealingEquipableItem", "Class", False,
          ["HealedTarget", "ItemCount"]),
-        # Commander identity: the team-state pointer and the hop the
-        # identity read takes through the commander-state actor.
+        # ---- the commander (docs/command-assets-spec.md §8) ----
+        # Identity: the team-state pointer and the hop through the
+        # commander-state actor that reaches the seat's player state.
         ("SQTeamState", "Class", False, ["CommanderState"]),
-        ("SQCommanderState", "Class", False, ["CurrentCommander"]),
+        # Everything `teams[].commander` reads. Native: absence is a rename.
+        ("SQCommanderState", "Class", False, [
+            "CurrentCommander", "bCommanderIsActive", "bActionsEnabled",
+            "bVoteInProgress", "CommanderVoteTimer", "CommanderVoteTimestamp",
+            "bVoteCooldownActive", "VoteCooldownTimer", "VoteCooldownTimestamp",
+            "CommanderCategories", "LastCategoryGameTime", "CommandIntervals",
+            "NomineeStatus"]),
+        # `gameState.commanderRules` — the server's own settings.
+        ("SQCommanderManager", "Class", False, [
+            "bCommanderActive", "VotingTimeSeconds", "VoteCooldownTimeSeconds",
+            "ActionCooldownExtensionOnNewCommander", "MinimumSquadSizeForVoting",
+            "MinimumSquadsRequiredForVoting"]),
+        # The structs the commander state's arrays are made of. The two
+        # FastArray wrappers carry the element array `Items`, whose inner
+        # struct's REFLECTED SIZE is the stride the reader walks at — so a
+        # rename of `Items` blanks the entries rather than mis-striding them.
+        ("SQCommanderActionDataArray", "ScriptStruct", False, ["Items"]),
+        ("SQCommandActionDataFASItem", "ScriptStruct", False, ["Content"]),
+        ("SQCommandActionData", "ScriptStruct", False, [
+            "CommandActionData", "GameTimeAtCreation", "CooldownTimeRemaining",
+            "IsDestroyedDuringActive"]),
+        ("CommanderNomineeArray", "ScriptStruct", False, ["Items"]),
+        ("CommanderVoteNominee", "ScriptStruct", False,
+         ["NomineeState", "VoteCount"]),
+        ("CommanderCategory", "ScriptStruct", False,
+         ["Name", "CooldownDuration"]),
+        # The action configs' five values, read off each class's own default
+        # object. Their common base has no name yet — the CDOs load only when
+        # a commander claim resolves, and none was loaded on the 09-05 layer
+        # nor on the idle one of 2026-09-07 — so the rows are two concrete
+        # configs until reflection names it (spec §8 and §13). Optional for
+        # that same observed reason: content that loads at a claim.
+        ("CommandAction_Drone_C", "BlueprintGeneratedClass", True, [
+            "CategoryId", "EnrouteDuration", "ActiveDuration",
+            "CooldownDuration", "DisplayName"]),
+        ("CommandAction_Mortar_Barrage_INS_C", "BlueprintGeneratedClass", True, [
+            "CategoryId", "EnrouteDuration", "ActiveDuration",
+            "CooldownDuration", "DisplayName"]),
     ]
 
 

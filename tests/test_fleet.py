@@ -76,16 +76,16 @@ def test_required_names_drift_when_a_loaded_type_lost_a_name(monkeypatch):
     the property it used to declare is not. Without this test the drift path
     is exercised nowhere — the run_doctor tests' mock resolves no classes, so
     every row would silently take the absent branch."""
-    names = {row[0] for row in health.required_reflection_names()}
-    arr = _Arr(resolves=names)
+    rows = health.required_reflection_names()
+    arr = _Arr(resolves={row[0] for row in rows})
 
     import sqreader.ue.reflection as refl
-    # Layout carries the commander names but NOT CurrentHeldItem.
+    # Every registered name is declared except the one that was renamed away,
+    # so the row list can grow without this test drowning in its own noise.
+    live = {n: object() for _c, _k, _o, names in rows for n in names
+            if n != "CurrentHeldItem"}
     monkeypatch.setattr(refl, "get_class_layout",
-                        lambda pm, addr, alloc: {"CommanderState": object(),
-                                                 "CurrentCommander": object(),
-                                                 "HealedTarget": object(),
-                                                 "ItemCount": object()})
+                        lambda pm, addr, alloc: dict(live))
     drift, skipped = health.check_required_names(None, arr, None)
     assert skipped == []
     assert [(d["class"], d["field"]) for d in drift] == [
@@ -424,18 +424,26 @@ def test_only_content_loaded_types_are_optional():
                    "SQPlayerController", "SQMapMarkerManagerComponent",
                    "SQDeployable", "SQVehicle"):
         assert tables.get(native) is False, native
-    assert all(not opt for _c, _k, opt, _n in health.required_reflection_names())
+    # Same rule in the reflection tier. The action configs are the first rows
+    # here that may be optional: their CDOs load when a commander claim
+    # resolves, and none was loaded on two idle layers (09-05, 2026-09-07).
+    for cls, kind, optional, _names in health.required_reflection_names():
+        if optional:
+            assert kind == "BlueprintGeneratedClass" and cls.endswith("_C"), cls
+        else:
+            assert kind in {"Class", "ScriptStruct"}, cls
 
 
 def test_required_name_row_absence_is_drift_now(monkeypatch):
     """The blind spot Item B closes: a class-level rename of
     SQHealingEquipableItem used to look exactly like "no medic item in this
-    level" and skipped forever."""
+    level" and skipped forever. Only a row that says it is content — the
+    action configs, which load at a commander claim — may skip."""
+    rows = health.required_reflection_names()
     arr = _Arr(resolves=set())
     drift, skipped = health.check_required_names(None, arr, None)
-    assert skipped == []
-    assert {d["class"] for d in drift} == {
-        row[0] for row in health.required_reflection_names()}
+    assert {s["class"] for s in skipped} == {c for c, _k, o, _n in rows if o}
+    assert {d["class"] for d in drift} == {c for c, _k, o, _n in rows if not o}
     assert all(d["problem"] == "class not found" for d in drift)
 
 
@@ -642,8 +650,40 @@ def test_required_reflection_names_cover_the_fallbackless_reads():
     assert {"HealedTarget", "ItemCount"} <= by_cls["SQHealingEquipableItem"]
     assert "CurrentCommander" in by_cls["SQCommanderState"]
     for _cls, kind, optional, names in rows:
-        assert kind in {"Class", "ScriptStruct"} and names
-        assert isinstance(optional, bool)
+        assert kind in {"Class", "ScriptStruct", "BlueprintGeneratedClass"}
+        assert names and isinstance(optional, bool)
+
+
+def test_the_commander_block_is_covered_name_for_name():
+    """Every name `teams[].commander` and `gameState.commanderRules` read is
+    reflection-only — no constant to drift, nothing for the offset tables to
+    watch — so these rows are the entire alarm (spec §8)."""
+    by_cls = {c: set(names) for c, _k, _o, names in
+              health.required_reflection_names()}
+    assert {"CommanderState"} <= by_cls["SQTeamState"]
+    assert {"CurrentCommander", "bCommanderIsActive", "bActionsEnabled",
+            "bVoteInProgress", "CommanderVoteTimer", "CommanderVoteTimestamp",
+            "bVoteCooldownActive", "VoteCooldownTimer", "VoteCooldownTimestamp",
+            "CommanderCategories", "LastCategoryGameTime", "CommandIntervals",
+            "NomineeStatus"} <= by_cls["SQCommanderState"]
+    assert {"bCommanderActive", "VotingTimeSeconds", "VoteCooldownTimeSeconds",
+            "ActionCooldownExtensionOnNewCommander", "MinimumSquadSizeForVoting",
+            "MinimumSquadsRequiredForVoting"} <= by_cls["SQCommanderManager"]
+    # The FastArray wrappers and the structs their entries are made of. The
+    # stride the reader walks at IS the inner struct's reflected size, so a
+    # rename of `Items` has to be loud.
+    assert by_cls["SQCommanderActionDataArray"] == {"Items"}
+    assert by_cls["CommanderNomineeArray"] == {"Items"}
+    assert by_cls["SQCommandActionDataFASItem"] == {"Content"}
+    assert {"CommandActionData", "GameTimeAtCreation", "CooldownTimeRemaining",
+            "IsDestroyedDuringActive"} <= by_cls["SQCommandActionData"]
+    assert by_cls["CommanderVoteNominee"] == {"NomineeState", "VoteCount"}
+    assert by_cls["CommanderCategory"] == {"Name", "CooldownDuration"}
+    # The action configs' five values, until their common base is named.
+    config = {"CategoryId", "EnrouteDuration", "ActiveDuration",
+              "CooldownDuration", "DisplayName"}
+    assert by_cls["CommandAction_Drone_C"] == config
+    assert by_cls["CommandAction_Mortar_Barrage_INS_C"] == config
 
 
 # ---- build detection + restart counter -----------------------------------

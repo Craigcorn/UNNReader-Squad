@@ -36,8 +36,10 @@ from .. import profiling
 from ..mem import ProcessMemory
 from ..ue.fname import FNameEntryAllocator
 from ..ue.reflection import (
-    bool_property_mask, get_class_layout, read_field_struct,
-    read_ustruct_header, struct_layout_for_field, walk_super_chain,
+    bool_property_mask, find_field_by_name_with_super, get_class_layout,
+    read_farrayproperty_inner, read_field_struct, read_fproperty,
+    read_fstructproperty_struct, read_ustruct_header, struct_layout_for_field,
+    walk_super_chain,
 )
 from ..ue.uobject import (
     GUObjectArray,
@@ -45,8 +47,8 @@ from ..ue.uobject import (
     UOBJ_NAME_PRIVATE,
 )
 from ..ue.value import (
-    iter_tarray_pointers, read_fstring, read_frotator, read_ftext,
-    read_fvector, read_fweak_object_ptr, read_tarray_header,
+    TArrayHeader, iter_tarray_pointers, read_fstring, read_frotator,
+    read_ftext, read_fvector, read_fweak_object_ptr, read_tarray_header,
 )
 from .capzones import attach_static_capzones, attach_static_to_lane
 from .metadata import Metadata
@@ -1114,6 +1116,16 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQHealingEquipableItem? (dressings/bags)
     is_healing_item: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
+    # class_addr -> is-subclass-of-SQCommanderManager? (the vote rules)
+    is_commander_manager: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
+    # CommandAction_* class addr -> (gen, its default object's config values,
+    # or None when they could not be read). The lookup behind it walks the
+    # object array for `Default__<class>`, so it is paid once per action class
+    # per generation; a failure is cached too, and the rolling _light_reset
+    # bumps the generation about once a minute, which is the retry.
+    command_action_configs: dict[int, tuple[int, dict[str, Any] | None]] = field(
+        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -1376,6 +1388,191 @@ class DamageTracker:
         self.last_ts.clear()
 
 
+# Sizes of the scalar property types a TArray may hold — the type's own size,
+# because the array property header's ElementSize reads 0 on this build for a
+# plain float array (2026-09-07; `docs/command-assets-spec.md` §1). A struct
+# array's stride is the inner struct's reflected size instead; neither is ever
+# a constant, which is what the 09-02 probe learned when a guessed 32-byte
+# stride sliced 40-byte items and lost a sample.
+_SCALAR_PROPERTY_SIZES = {
+    "FloatProperty": 4, "IntProperty": 4, "UInt32Property": 4,
+    "DoubleProperty": 8, "Int64Property": 8, "ByteProperty": 1,
+    "BoolProperty": 1, "ObjectProperty": 8, "ClassProperty": 8,
+    "WeakObjectProperty": 8, "NameProperty": 8, "StrProperty": 16,
+}
+
+
+def _array_element_size(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                        array_field_addr: int) -> int:
+    """Stride of a TArray property's elements, from reflection alone.
+
+    The inner struct's reflected size for an array of structs, the scalar
+    type's own size for a plain array. 0 when it cannot be resolved — and a
+    caller that gets 0 reads nothing at all rather than walking a guessed
+    stride."""
+    inner = read_farrayproperty_inner(pm, array_field_addr)
+    info = read_fproperty(pm, inner, alloc) if inner else None
+    if info is None:
+        return 0
+    if info.type_name == "StructProperty":
+        st = read_fstructproperty_struct(pm, inner)
+        size = read_ustruct_header(pm, st, alloc).properties_size if st else 0
+    else:
+        size = _SCALAR_PROPERTY_SIZES.get(info.type_name, 0) or info.element_size
+    return size if size > 0 else 0
+
+
+@dataclass(frozen=True)
+class CommanderPaths:
+    """Everything the commander block and the commander rules read, resolved
+    by reflection off `SQCommanderState` and `SQCommanderManager`.
+
+    No constant fallback anywhere in here, by the same rule the medical block
+    follows: a Squad rename must blank the block, not read whatever now lives
+    at a remembered offset. Every field is either present because reflection
+    named it or absent, and an absent name simply omits its key.
+
+    The three arrays are reached the way `scripts/probes/command_assets.py`
+    reaches them. `CommanderCategories` is a plain TArray of structs on the
+    state; `CommandIntervals` and `NomineeStatus` are FastArrays, so the
+    entries sit in the `Items` array INSIDE the wrapper struct
+    (`SQCommanderActionDataArray`, `CommanderNomineeArray`) and the offsets
+    below are relative to that wrapper. Strides are reflected sizes."""
+    # SQCommanderState scalars + the bitfield bools' (byte offset, mask).
+    state_offsets: dict[str, int]
+    state_bool_masks: dict[str, tuple[int, int]]
+    # SQCommanderManager's six rule values.
+    manager_offsets: dict[str, int]
+    manager_bool_masks: dict[str, tuple[int, int]]
+    # CommanderCategories -> CommanderCategory {Name, CooldownDuration}
+    category_offsets: dict[str, int]
+    category_stride: int
+    # LastCategoryGameTime: TArray<float>, indexed by category
+    last_use_stride: int
+    # CommandIntervals.Items -> SQCommandActionDataFASItem.Content ->
+    # SQCommandActionData {CommandActionData, GameTimeAtCreation,
+    # CooldownTimeRemaining, IsDestroyedDuringActive}
+    intervals_items_off: int | None
+    interval_stride: int
+    interval_content_off: int | None
+    action_data_offsets: dict[str, int]
+    action_data_bool_masks: dict[str, tuple[int, int]]
+    # NomineeStatus.Items -> CommanderVoteNominee {NomineeState, VoteCount}
+    nominees_items_off: int | None
+    nominee_stride: int
+    nominee_offsets: dict[str, int]
+
+
+def resolve_commander_paths(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                            state_class_addr: int,
+                            manager_class_addr: int) -> CommanderPaths | None:
+    """Reflect the commander classes. None when neither class is loaded."""
+    if not state_class_addr and not manager_class_addr:
+        return None
+    state_layout = (get_class_layout(pm, state_class_addr, alloc)
+                    if state_class_addr else {})
+    mgr_layout = (get_class_layout(pm, manager_class_addr, alloc)
+                  if manager_class_addr else {})
+
+    def _grab(layout: dict[str, Any], names: list[str]) -> dict[str, int]:
+        return {n: layout[n].offset for n in names if n in layout}
+
+    def _masks(class_addr: int, names: list[str]) -> dict[str, tuple[int, int]]:
+        out: dict[str, tuple[int, int]] = {}
+        for n in names if class_addr else []:
+            m = bool_property_mask(pm, class_addr, n, alloc)
+            if m is not None:
+                out[n] = m
+        return out
+
+    def _plain_array(field_name: str, item_names: list[str]
+                     ) -> tuple[dict[str, int], int]:
+        """(element field offsets, stride) for a TArray<struct> member."""
+        ff = (find_field_by_name_with_super(pm, state_class_addr, field_name,
+                                            alloc) if state_class_addr else None)
+        if not ff:
+            return {}, 0
+        stride = _array_element_size(pm, alloc, ff)
+        st = read_field_struct(pm, ff, alloc)
+        layout = get_class_layout(pm, st, alloc) if st else {}
+        return _grab(layout, item_names), stride
+
+    def _fast_array(field_name: str) -> tuple[int | None, int, int]:
+        """(Items offset within the wrapper struct, stride, item struct)."""
+        if not state_class_addr:
+            return None, 0, 0
+        wrapper = struct_layout_for_field(pm, state_class_addr, field_name, alloc)
+        items = wrapper.get("Items")
+        if items is None:
+            return None, 0, 0
+        return (items.offset, _array_element_size(pm, alloc, items.addr),
+                read_field_struct(pm, items.addr, alloc))
+
+    category_offsets, category_stride = _plain_array(
+        "CommanderCategories", ["Name", "CooldownDuration"])
+    last_use_field = (
+        find_field_by_name_with_super(pm, state_class_addr,
+                                      "LastCategoryGameTime", alloc)
+        if state_class_addr else None)
+    last_use_stride = (_array_element_size(pm, alloc, last_use_field)
+                       if last_use_field else 0)
+
+    # The action entries live one struct deeper than the nominees: the
+    # FastArray item is an SQCommandActionDataFASItem whose `Content` IS the
+    # SQCommandActionData the four fields belong to.
+    intervals_items_off, interval_stride, item_struct = _fast_array("CommandIntervals")
+    interval_content_off: int | None = None
+    action_data_offsets: dict[str, int] = {}
+    action_data_bool_masks: dict[str, tuple[int, int]] = {}
+    if item_struct:
+        content = get_class_layout(pm, item_struct, alloc).get("Content")
+        if content is not None:
+            interval_content_off = content.offset
+            data_struct = read_field_struct(pm, content.addr, alloc)
+            if data_struct:
+                action_data_offsets = _grab(
+                    get_class_layout(pm, data_struct, alloc),
+                    ["CommandActionData", "GameTimeAtCreation",
+                     "CooldownTimeRemaining", "IsDestroyedDuringActive"])
+                action_data_bool_masks = _masks(
+                    data_struct, ["IsDestroyedDuringActive"])
+
+    nominees_items_off, nominee_stride, nominee_struct = _fast_array("NomineeStatus")
+    nominee_offsets = (_grab(get_class_layout(pm, nominee_struct, alloc),
+                             ["NomineeState", "VoteCount"])
+                       if nominee_struct else {})
+
+    return CommanderPaths(
+        state_offsets=_grab(state_layout, [
+            "CurrentCommander", "CommanderVoteTimer", "CommanderVoteTimestamp",
+            "VoteCooldownTimer", "VoteCooldownTimestamp",
+            "CommanderCategories", "LastCategoryGameTime",
+            "CommandIntervals", "NomineeStatus",
+        ]),
+        state_bool_masks=_masks(state_class_addr, [
+            "bCommanderIsActive", "bActionsEnabled", "bVoteInProgress",
+            "bVoteCooldownActive",
+        ]),
+        manager_offsets=_grab(mgr_layout, [
+            "VotingTimeSeconds", "VoteCooldownTimeSeconds",
+            "ActionCooldownExtensionOnNewCommander",
+            "MinimumSquadSizeForVoting", "MinimumSquadsRequiredForVoting",
+        ]),
+        manager_bool_masks=_masks(manager_class_addr, ["bCommanderActive"]),
+        category_offsets=category_offsets,
+        category_stride=category_stride,
+        last_use_stride=last_use_stride,
+        intervals_items_off=intervals_items_off,
+        interval_stride=interval_stride,
+        interval_content_off=interval_content_off,
+        action_data_offsets=action_data_offsets,
+        action_data_bool_masks=action_data_bool_masks,
+        nominees_items_off=nominees_items_off,
+        nominee_stride=nominee_stride,
+        nominee_offsets=nominee_offsets,
+    )
+
+
 @dataclass
 class SnapshotPaths:
     """Resolved class pointers + per-class field offsets we need."""
@@ -1539,6 +1736,16 @@ class SnapshotPaths:
     # with NO hardcoded fallback: a rename must blank the medical block, not
     # read whatever now lives at a remembered offset.
     healing_item_offsets: dict[str, int] = field(default_factory=dict)
+    # ----- The commander (docs/command-assets-spec.md §3 and §4) -----
+    # SQCommanderState is reached through SQTeamState.CommanderState, so only
+    # its class address is needed — to reflect it. SQCommanderManager's live
+    # instance is collected by the object walk (several exist; the first wins).
+    # 0 when a class is not loaded, and every read below guards on it.
+    sq_commander_state_class: int = 0
+    sq_commander_manager_class: int = 0
+    # Their reflected offsets, strides and bool masks. None when neither class
+    # resolved — then no commander block and no rules are emitted at all.
+    commander: CommanderPaths | None = None
 
 
 def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
@@ -1609,6 +1816,12 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # dressings, medic bags). Optional: it only loads once such an item
         # exists in the level, and every medical read is gated on it.
         "SQHealingEquipableItem": "Class",
+        # The commander pair. Native, and the doctor requires both (a rename
+        # is drift, not an empty level) — but they are optional HERE for the
+        # same reason every other read-through class is: a missing class must
+        # blank the commander block, never fail the whole snapshot.
+        "SQCommanderState": "Class",
+        "SQCommanderManager": "Class",
         # Carried by autoresolve_offsets, not read directly here: their
         # field offsets are hardcoded constants and these are the classes
         # whose reflection data corrects them. (SQProjectile, which upstream
@@ -1704,6 +1917,13 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     sq_healing_item_class_addr = _addr("SQHealingEquipableItem")
     heal_layout = (get_class_layout(pm, sq_healing_item_class_addr, alloc)
                    if sq_healing_item_class_addr else {})
+    # The commander classes: the state the team record hops into, and the
+    # manager that holds the server's own vote rules. Every offset, stride and
+    # bool mask under them comes back in one CommanderPaths (or None).
+    sq_commander_state_class_addr = _addr("SQCommanderState")
+    sq_commander_manager_class_addr = _addr("SQCommanderManager")
+    commander_paths = resolve_commander_paths(
+        pm, alloc, sq_commander_state_class_addr, sq_commander_manager_class_addr)
     # SQPawnInventoryComponent - CurrentWeapon and the Inventory group array.
     # The group struct (FSQWeaponGroupData) is reached through the array's
     # inner property, so its field offsets AND its size come from the live
@@ -1834,6 +2054,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         seatcfg_socket_off=seatcfg_socket_off,
         sq_healing_item_class=sq_healing_item_class_addr,
         healing_item_offsets=grab(heal_layout, ["HealedTarget", "ItemCount"]),
+        sq_commander_state_class=sq_commander_state_class_addr,
+        sq_commander_manager_class=sq_commander_manager_class_addr,
+        commander=commander_paths,
         soldier_take_hit_off=(sd_layout["LastTakeHitInfo"].offset
                               if "LastTakeHitInfo" in sd_layout
                               else SQ_SOLDIER_TAKE_HIT_INFO_OFFSET),
@@ -2113,8 +2336,418 @@ def read_game_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
     return out
 
 
+# ----- the commander (docs/command-assets-spec.md §3 and §4) ----------------
+#
+# Emission is the spec's §2 throughout, and it is two-way on purpose: a key is
+# EMITTED when its read succeeds, OMITTED when the recorder could not read it
+# (the name is not in the layout, a pointer leads nowhere, the read fails), and
+# `null` when the game's own value is empty and was read successfully — an
+# empty seat, an array with no element at that index. So a consumer that sees
+# `null` knows "none" and one that sees nothing knows "unknown". Nothing here
+# is defaulted, inferred, or carried from the previous frame.
+
+# A TArray whose header claims more entries than any commander array could
+# hold is a torn read, not a long list: the whole list is then omitted rather
+# than truncated, because a truncated list looks complete to a consumer. The
+# real counts are single digits (categories, actions) up to a team's size
+# (nominees).
+_COMMANDER_ARRAY_MAX = 256
+
+
+def _read_f32(pm: ProcessMemory, addr: int) -> float | None:
+    b = pm.try_read(addr, 4)
+    return struct.unpack("<f", b)[0] if b and len(b) == 4 else None
+
+
+def _read_masked_bool(pm: ProcessMemory, base: int,
+                      mask: tuple[int, int] | None) -> bool | None:
+    """A bitfield bool through its FBoolProperty mask; None if unreadable."""
+    if mask is None:
+        return None
+    eff_off, byte_mask = mask
+    byte = _safe(lambda: pm.read_u8(base + eff_off))
+    return None if byte is None else bool(byte & byte_mask)
+
+
+def _read_by_reflected_type(pm: ProcessMemory, addr: int,
+                            type_name: str) -> Any:
+    """Read one value AS the type reflection says it is (spec §2, "Numbers").
+
+    Used for the action configs, whose classes load only when a claim
+    resolves — the same dispatch `read_cdo` in the command-assets probe does.
+    A type this does not decode returns None, so the field is omitted rather
+    than read as something it is not."""
+    if type_name == "ByteProperty":
+        v = _safe(lambda: pm.read_u8(addr))
+        return None if v is None else int(v)
+    if type_name in ("IntProperty", "UInt32Property"):
+        v = _safe(lambda: pm.read_i32(addr))
+        return None if v is None else int(v)
+    if type_name == "FloatProperty":
+        return _read_f32(pm, addr)
+    if type_name == "DoubleProperty":
+        b = pm.try_read(addr, 8)
+        return struct.unpack("<d", b)[0] if b and len(b) == 8 else None
+    if type_name == "StrProperty":
+        return read_fstring(pm, addr)
+    if type_name == "TextProperty":
+        return read_ftext(pm, addr)
+    return None
+
+
+def _player_identity(pm: ProcessMemory, paths: SnapshotPaths, ps_addr: int,
+                     caches: "SnapshotCaches | None" = None
+                     ) -> tuple[str | None, str | None]:
+    """(name, eosId) of a player state, through the reader's existing identity
+    read and its caches. A value that reads empty comes back None — the caller
+    omits the key rather than emitting an empty string."""
+    o = paths.ps_offsets
+    name = eos = None
+    if "PlayerNamePrivate" in o:
+        if caches is not None:
+            name = caches.player_names.get(ps_addr)
+            if name is None and ps_addr not in caches.player_names:
+                name = read_fstring(pm, ps_addr + o["PlayerNamePrivate"])
+                if name:
+                    caches.player_names[ps_addr] = name
+        else:
+            name = read_fstring(pm, ps_addr + o["PlayerNamePrivate"])
+    if "OnlineUserId" in o:
+        if caches is not None:
+            eos = caches.player_eos_ids.get(ps_addr)
+            if eos is None and ps_addr not in caches.player_eos_ids:
+                eos = read_fstring(pm, ps_addr + o["OnlineUserId"])
+                if eos:
+                    caches.player_eos_ids[ps_addr] = eos
+        else:
+            eos = read_fstring(pm, ps_addr + o["OnlineUserId"])
+    return (name or None, eos or None)
+
+
+def _read_action_configs(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                         arr: "GUObjectArray | None",
+                         class_addrs: list[int],
+                         caches: "SnapshotCaches | None"
+                         ) -> dict[int, dict[str, Any] | None]:
+    """The five config values of each CommandAction_* class, from that class's
+    own default object (spec §3, "from that class's defaults").
+
+    The default object is the UObject named `Default__<class name>`; UClass's
+    pointer to it is a private C++ member with no property name, so there is
+    nothing to reflect and a hardcoded offset is not an option. Every class
+    still missing its values is therefore looked up in ONE object-array walk
+    for the whole entry list — the trick `resolve_paths` and the doctor
+    already use — and the answer is cached per class address."""
+    gen = caches.subclass_gen if caches is not None else 0
+    out: dict[int, dict[str, Any] | None] = {}
+    wanted: dict[str, int] = {}
+    for ca in class_addrs:
+        if ca in out or ca in wanted.values():
+            continue
+        if caches is not None:
+            hit = caches.command_action_configs.get(ca)
+            if hit is not None and hit[0] == gen:
+                out[ca] = hit[1]
+                continue
+        nm = _uobject_name(pm, ca, alloc) if arr is not None else None
+        if nm:
+            wanted[f"Default__{nm}"] = ca
+        else:
+            out[ca] = None
+    if wanted and arr is not None:
+        found = arr.find_all_by_names(dict.fromkeys(wanted, None), alloc=alloc)
+        for default_name, ca in wanted.items():
+            cdo = found.get(default_name)
+            values: dict[str, Any] | None = None
+            if cdo:
+                layout = get_class_layout(pm, ca, alloc)
+                values = {}
+                for key, prop_name in (("categoryId", "CategoryId"),
+                                       ("enrouteSec", "EnrouteDuration"),
+                                       ("activeSec", "ActiveDuration"),
+                                       ("cooldownSec", "CooldownDuration"),
+                                       ("displayName", "DisplayName")):
+                    p = layout.get(prop_name)
+                    if p is None:
+                        continue
+                    v = _read_by_reflected_type(pm, cdo[1] + p.offset, p.type_name)
+                    if v is not None:
+                        values[key] = v
+                values = values or None
+            out[ca] = values
+            if caches is not None:
+                caches.command_action_configs[ca] = (gen, values)
+    return out
+
+
+def _read_commander_nominees(pm: ProcessMemory, paths: SnapshotPaths,
+                             cs_addr: int,
+                             caches: "SnapshotCaches | None"
+                             ) -> list[dict[str, Any]] | None:
+    """`vote.nominees[]` — each nominee and the live tally. `[]` while the
+    array is empty; None (the key omitted) when it cannot be read."""
+    cp = paths.commander
+    if cp is None:
+        return None
+    o = cp.state_offsets
+    if ("NomineeStatus" not in o or cp.nominees_items_off is None
+            or cp.nominee_stride <= 0):
+        return None
+    hdr = read_tarray_header(
+        pm, cs_addr + o["NomineeStatus"] + cp.nominees_items_off)
+    if hdr is None or hdr.count > _COMMANDER_ARRAY_MAX:
+        return None
+    out: list[dict[str, Any]] = []
+    if hdr.count <= 0 or not hdr.data_ptr:
+        return out
+    no = cp.nominee_offsets
+    for i in range(hdr.count):
+        base = hdr.data_ptr + i * cp.nominee_stride
+        entry: dict[str, Any] = {}
+        if "NomineeState" in no:
+            ps = _safe(lambda base=base: pm.read_u64(base + no["NomineeState"]))
+            if ps == 0:
+                entry["eosId"] = None
+                entry["name"] = None
+            elif ps:
+                name, eos = _player_identity(pm, paths, ps, caches)
+                if eos is not None:
+                    entry["eosId"] = eos
+                if name is not None:
+                    entry["name"] = name
+        if "VoteCount" in no:
+            votes = _safe(lambda base=base: pm.read_i32(base + no["VoteCount"]))
+            if votes is not None:
+                entry["votes"] = int(votes)
+        out.append(entry)
+    return out
+
+
+def _read_commander_categories(pm: ProcessMemory, paths: SnapshotPaths,
+                               cs_addr: int) -> list[dict[str, Any]] | None:
+    """`cooldowns.categories[]` — the per-category gate.
+
+    `id` is the array index: the index `LastCategoryGameTime` uses and the
+    value an action entry's `categoryId` carries. It is the one key the
+    recorder produces rather than reads. `lastUseGameTime` is `null` while
+    that array has no element at the index — it is empty until the first
+    call — and omitted when it could not be read at all."""
+    cp = paths.commander
+    if cp is None:
+        return None
+    o = cp.state_offsets
+    if "CommanderCategories" not in o or cp.category_stride <= 0:
+        return None
+    hdr = read_tarray_header(pm, cs_addr + o["CommanderCategories"])
+    if hdr is None or hdr.count > _COMMANDER_ARRAY_MAX:
+        return None
+    out: list[dict[str, Any]] = []
+    if hdr.count <= 0 or not hdr.data_ptr:
+        return out
+    last: TArrayHeader | None = None
+    if "LastCategoryGameTime" in o and cp.last_use_stride > 0:
+        last = read_tarray_header(pm, cs_addr + o["LastCategoryGameTime"])
+        if last is not None and last.count > _COMMANDER_ARRAY_MAX:
+            last = None
+    co = cp.category_offsets
+    for i in range(hdr.count):
+        base = hdr.data_ptr + i * cp.category_stride
+        entry: dict[str, Any] = {"id": i}
+        if "Name" in co:
+            nm = read_ftext(pm, base + co["Name"])
+            if nm is not None:
+                entry["name"] = nm
+        if "CooldownDuration" in co:
+            v = _read_f32(pm, base + co["CooldownDuration"])
+            if v is not None:
+                entry["intervalSec"] = v
+        if last is not None:
+            if i < last.count and last.data_ptr:
+                v = _read_f32(pm, last.data_ptr + i * cp.last_use_stride)
+                if v is not None:
+                    entry["lastUseGameTime"] = v
+            else:
+                entry["lastUseGameTime"] = None
+        out.append(entry)
+    return out
+
+
+def _read_commander_actions(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                            arr: "GUObjectArray | None",
+                            paths: SnapshotPaths, cs_addr: int,
+                            caches: "SnapshotCaches | None"
+                            ) -> list[dict[str, Any]] | None:
+    """`cooldowns.actions[]` — one entry per action the team can call.
+
+    The four live values come from the entry itself; the five config values
+    come from the action class's default object and ride every frame, so a
+    seek into a replay is self-describing. An entry whose `CommandActionData`
+    reads null carries `action` `null` and no config values, because there is
+    no class to read them from."""
+    cp = paths.commander
+    if cp is None:
+        return None
+    o = cp.state_offsets
+    if ("CommandIntervals" not in o or cp.intervals_items_off is None
+            or cp.interval_stride <= 0 or cp.interval_content_off is None):
+        return None
+    hdr = read_tarray_header(
+        pm, cs_addr + o["CommandIntervals"] + cp.intervals_items_off)
+    if hdr is None or hdr.count > _COMMANDER_ARRAY_MAX:
+        return None
+    out: list[dict[str, Any]] = []
+    if hdr.count <= 0 or not hdr.data_ptr:
+        return out
+    ao = cp.action_data_offsets
+    contents = [hdr.data_ptr + i * cp.interval_stride + cp.interval_content_off
+                for i in range(hdr.count)]
+    # Read every entry's action class first, so the default objects they need
+    # are resolved in one walk instead of one walk each.
+    class_addrs: list[int | None] = []
+    for content in contents:
+        if "CommandActionData" not in ao:
+            class_addrs.append(None)
+            continue
+        class_addrs.append(_safe(
+            lambda content=content: pm.read_u64(content + ao["CommandActionData"])))
+    configs = _read_action_configs(
+        pm, alloc, arr, [ca for ca in class_addrs if ca], caches)
+    for content, class_addr in zip(contents, class_addrs, strict=True):
+        entry: dict[str, Any] = {}
+        if class_addr == 0:
+            entry["action"] = None
+        elif class_addr:
+            nm = _uobject_name(pm, class_addr, alloc)
+            if nm is not None:
+                entry["action"] = nm
+        config = configs.get(class_addr) if class_addr else None
+        if config and "displayName" in config:
+            entry["displayName"] = config["displayName"]
+        if "GameTimeAtCreation" in ao:
+            v = _read_f32(pm, content + ao["GameTimeAtCreation"])
+            if v is not None:
+                entry["createdGameTime"] = v
+        if "CooldownTimeRemaining" in ao:
+            v = _read_f32(pm, content + ao["CooldownTimeRemaining"])
+            if v is not None:
+                entry["remainingAtChange"] = v
+        destroyed = _read_masked_bool(
+            pm, content, cp.action_data_bool_masks.get("IsDestroyedDuringActive"))
+        if destroyed is not None:
+            entry["destroyedDuringActive"] = destroyed
+        if config:
+            for key in ("categoryId", "enrouteSec", "activeSec", "cooldownSec"):
+                if key in config:
+                    entry[key] = config[key]
+        out.append(entry)
+    return out
+
+
+def read_commander_block(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                         arr: "GUObjectArray | None", paths: SnapshotPaths,
+                         cs_addr: int,
+                         caches: "SnapshotCaches | None" = None
+                         ) -> dict[str, Any] | None:
+    """`teams[].commander` — the seat's own state, the vote, the cooldowns.
+
+    Read off the SQCommanderState the team record points at (spec §3). None
+    when the commander classes are not loaded or nothing could be read; the
+    key is then absent, which means "unknown", not "no commander"."""
+    cp = paths.commander
+    if cp is None or not cs_addr:
+        return None
+    out: dict[str, Any] = {}
+    # `enabled` is "the commander system exists on this layer", not "claimed":
+    # it read 1 on both teams while one of them had no commander (08-30/31).
+    for key, name in (("enabled", "bCommanderIsActive"),
+                      ("actionsEnabled", "bActionsEnabled")):
+        v = _read_masked_bool(pm, cs_addr, cp.state_bool_masks.get(name))
+        if v is not None:
+            out[key] = v
+
+    o = cp.state_offsets
+    vote: dict[str, Any] = {}
+    v = _read_masked_bool(pm, cs_addr, cp.state_bool_masks.get("bVoteInProgress"))
+    if v is not None:
+        vote["inProgress"] = v
+    for key, name in (("timer", "CommanderVoteTimer"),
+                      ("endsGameTime", "CommanderVoteTimestamp")):
+        if name in o:
+            n = _safe(lambda name=name: pm.read_i32(cs_addr + o[name]))
+            if n is not None:
+                vote[key] = int(n)
+    # Entries persist after a vote resolves, so the frame after `inProgress`
+    # drops still carries the final tallies. That is the game's own state and
+    # it is recorded as read; the recorder keeps no memory across frames.
+    nominees = _read_commander_nominees(pm, paths, cs_addr, caches)
+    if nominees is not None:
+        vote["nominees"] = nominees
+    v = _read_masked_bool(pm, cs_addr,
+                          cp.state_bool_masks.get("bVoteCooldownActive"))
+    if v is not None:
+        vote["cooldownActive"] = v
+    for key, name in (("cooldownTimer", "VoteCooldownTimer"),
+                      ("cooldownEndsGameTime", "VoteCooldownTimestamp")):
+        if name in o:
+            n = _safe(lambda name=name: pm.read_i32(cs_addr + o[name]))
+            if n is not None:
+                vote[key] = int(n)
+    if vote:
+        out["vote"] = vote
+
+    cooldowns: dict[str, Any] = {}
+    categories = _read_commander_categories(pm, paths, cs_addr)
+    if categories is not None:
+        cooldowns["categories"] = categories
+    actions = _read_commander_actions(pm, alloc, arr, paths, cs_addr, caches)
+    if actions is not None:
+        cooldowns["actions"] = actions
+    if cooldowns:
+        out["cooldowns"] = cooldowns
+    return out or None
+
+
+def read_commander_rules(pm: ProcessMemory, paths: SnapshotPaths,
+                         mgr_addr: int) -> dict[str, Any] | None:
+    """`gameState.commanderRules` — the server's own commander settings, read
+    off one live SQCommanderManager (spec §4).
+
+    Six scalars every frame rather than once, so a seek into the middle of a
+    replay is self-describing. The manager's `enabled` is the server setting;
+    a team's `commander.enabled` is that team's state — two flags with the
+    same word, deliberately distinct."""
+    cp = paths.commander
+    if cp is None or not mgr_addr:
+        return None
+    out: dict[str, Any] = {}
+    v = _read_masked_bool(pm, mgr_addr,
+                          cp.manager_bool_masks.get("bCommanderActive"))
+    if v is not None:
+        out["enabled"] = v
+    o = cp.manager_offsets
+    for key, name in (("votingTimeSec", "VotingTimeSeconds"),
+                      ("voteCooldownSec", "VoteCooldownTimeSeconds")):
+        if name in o:
+            n = _safe(lambda name=name: pm.read_i32(mgr_addr + o[name]))
+            if n is not None:
+                out[key] = int(n)
+    if "ActionCooldownExtensionOnNewCommander" in o:
+        f = _read_f32(pm, mgr_addr + o["ActionCooldownExtensionOnNewCommander"])
+        if f is not None:
+            out["newCommanderExtensionSec"] = f
+    for key, name in (("minSquadSize", "MinimumSquadSizeForVoting"),
+                      ("minSquads", "MinimumSquadsRequiredForVoting")):
+        if name in o:
+            n = _safe(lambda name=name: pm.read_i32(mgr_addr + o[name]))
+            if n is not None:
+                out[key] = int(n)
+    return out or None
+
+
 def read_team_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
-                    paths: SnapshotPaths, ts_addr: int) -> dict[str, Any]:
+                    paths: SnapshotPaths, ts_addr: int,
+                    arr: "GUObjectArray | None" = None,
+                    caches: "SnapshotCaches | None" = None) -> dict[str, Any]:
     """Read scalar/string fields from a SQTeamState instance."""
     o = paths.ts_offsets
     out: dict[str, Any] = {"_addr": f"{ts_addr:#x}"}
@@ -2139,29 +2772,35 @@ def read_team_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
     if "FactionSetupId" in o:
         out["factionId"] = _read_fname(pm, ts_addr + o["FactionSetupId"], alloc)
     if "CommanderState" in o:
-        # The commander's own PlayerState — identity read from the pointed
-        # state exactly as a seat occupant's is, so the record carries a
-        # verified name and account id rather than a join. Null pointer =
-        # the team has no commander; the fields stay absent, never guessed.
-        # The offset has been grabbed since the team reader existed; this
-        # is the read that was never written.
+        # The commander's own PlayerState, one hop further than this read used
+        # to go. CommanderState points at the team's SQCommanderState ACTOR,
+        # not at a player state — reading a name off it emitted nothing at all
+        # for as long as the field has shipped (tracker W10, live-verified in
+        # the 08-30/31 sessions). The seat is `CurrentCommander` ON that actor,
+        # and the identity comes off the player state it points at.
+        #
+        # Null CurrentCommander is explicit `null`, both fields: the game says
+        # the seat is empty and it was read successfully (spec §2). An absent
+        # key means the recorder could not read — never "no commander".
         cs = _safe(lambda: pm.read_u64(ts_addr + o["CommanderState"]))
         if cs:
-            pso = paths.ps_offsets
             out["commanderStateAddr"] = f"{cs:#x}"
-            # With no commander the pointer can still reference a
-            # placeholder state whose name reads empty — absence beats
-            # an empty string, so identity fields are only emitted when
-            # they actually carry one (live-verified on an empty server:
-            # pointer set, name "").
-            if "PlayerNamePrivate" in pso:
-                nm = read_fstring(pm, cs + pso["PlayerNamePrivate"])
-                if nm:
-                    out["commanderName"] = nm
-            if "OnlineUserId" in pso:
-                eos = read_fstring(pm, cs + pso["OnlineUserId"])
-                if eos:
-                    out["commanderEosId"] = eos
+            cp = paths.commander
+            co = cp.state_offsets if cp is not None else {}
+            if "CurrentCommander" in co:
+                ps = _safe(lambda: pm.read_u64(cs + co["CurrentCommander"]))
+                if ps == 0:
+                    out["commanderName"] = None
+                    out["commanderEosId"] = None
+                elif ps:
+                    name, eos = _player_identity(pm, paths, ps, caches)
+                    if name is not None:
+                        out["commanderName"] = name
+                    if eos is not None:
+                        out["commanderEosId"] = eos
+            block = read_commander_block(pm, alloc, arr, paths, cs, caches)
+            if block is not None:
+                out["commander"] = block
     # array sizes are useful structural diagnostics
     for arr_name, key in [
         ("PlayerStates", "playerCount"),
@@ -2177,7 +2816,10 @@ def read_team_state(pm: ProcessMemory, alloc: FNameEntryAllocator,
 
 
 def read_team_states(pm: ProcessMemory, alloc: FNameEntryAllocator,
-                     paths: SnapshotPaths, gs_addr: int) -> list[dict[str, Any]]:
+                     paths: SnapshotPaths, gs_addr: int,
+                     arr: "GUObjectArray | None" = None,
+                     caches: "SnapshotCaches | None" = None
+                     ) -> list[dict[str, Any]]:
     """Walk SQGameState.TeamStates TArray<SQTeamState*> and read each."""
     if paths.gs_team_states_off is None:
         return []
@@ -2185,7 +2827,7 @@ def read_team_states(pm: ProcessMemory, alloc: FNameEntryAllocator,
     for ts_addr in iter_tarray_pointers(pm, gs_addr + paths.gs_team_states_off):
         if ts_addr == 0:
             continue
-        out.append(read_team_state(pm, alloc, paths, ts_addr))
+        out.append(read_team_state(pm, alloc, paths, ts_addr, arr, caches))
     return out
 
 
@@ -4083,6 +4725,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     sq_graph_raas_visualizer_class = paths.sq_graph_raas_visualizer_class
     is_lane_initializer_cache = caches.is_lane_initializer
     is_raas_visualizer_cache = caches.is_raas_visualizer
+    sq_commander_manager_class = paths.sq_commander_manager_class
+    is_commander_manager_cache = caches.is_commander_manager
 
     players_raw: list[int] = []
     game_state_addr: int | None = None
@@ -4102,6 +4746,7 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     vehicle_spawners_raw: list[tuple[int, int]] = []
     rally_points_raw: list[tuple[int, int]] = []
     marker_manager_addr: int | None = None
+    commander_manager_addr: int | None = None
     ammo_weps_raw: list[tuple[int, int]] = []
     projectiles_raw: list[tuple[int, int]] = []
     # First live (non-CDO) instance of each stats-collector singleton, by
@@ -4381,6 +5026,18 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 return (_wd.KIND_LANE_VIS, obj_addr, 0)
             return None
 
+        # The commander manager holds the server's vote rules. Several live
+        # instances exist at once — four in one match on 2026-09-07, two in
+        # the next, the worlds the server holds — and all read the same six
+        # values, so the first non-CDO one is the one read (spec §4).
+        if (sq_commander_manager_class
+                and _is_subclass_of(pm, class_addr, sq_commander_manager_class,
+                                    is_commander_manager_cache, _subgen)):
+            nm = _uobject_name(pm, obj_addr, alloc) or ""
+            if not nm.startswith("Default__"):
+                return (_wd.KIND_COMMANDER_MGR, obj_addr, 0)
+            return None
+
         # Class-count diagnostics
         cn = class_cache.get(class_addr)
         if cn is None:
@@ -4473,6 +5130,9 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
         elif kind == _wd.KIND_MARKER_MGR:
             if marker_manager_addr is None:
                 marker_manager_addr = obj_addr
+        elif kind == _wd.KIND_COMMANDER_MGR:
+            if commander_manager_addr is None:
+                commander_manager_addr = obj_addr
         elif kind == _wd.KIND_COLLECTOR:
             if extra not in collector_instances:
                 collector_instances[extra] = obj_addr
@@ -4650,7 +5310,14 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             if lane_initializer_addr else None)
     if game_state is not None:
         game_state["lane"] = lane
-    teams = (read_team_states(pm, alloc, paths, game_state_addr)
+        # The server's commander settings, off whichever manager the walk saw
+        # first. Omitted entirely when no manager is live or none of the six
+        # values could be read — never defaulted (spec §4).
+        rules = (read_commander_rules(pm, paths, commander_manager_addr)
+                 if commander_manager_addr else None)
+        if rules is not None:
+            game_state["commanderRules"] = rules
+    teams = (read_team_states(pm, alloc, paths, game_state_addr, arr, caches)
              if game_state_addr else [])
     squads = [read_squad_state(pm, alloc, paths, a) for a in squad_states_raw]
     # If the SQCaptureZone actor offset wasn't resolved at startup (the BP
@@ -5058,7 +5725,9 @@ __all__ = [
     "read_squad_state", "read_squad_states",
     "read_vehicle", "read_vehicle_seats",
     "read_lane_graph",
+    "read_commander_block", "read_commander_rules", "resolve_commander_paths",
     "find_subclass_instance", "SnapshotPaths", "SnapshotCaches",
+    "CommanderPaths",
     "DamageTracker", "clean_nonfinite",
     "LANE_GRAPH_OFFSETS", "LANE_LINK_NODEA_OFF", "LANE_LINK_NODEB_OFF",
     "LANE_LINK_SIZE", "LANE_VISUALIZER_ROUTE_INDEX_OFF",

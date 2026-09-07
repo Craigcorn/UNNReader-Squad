@@ -27,8 +27,8 @@ moves only with the set of index-tracked lists.
 | `tick` | the reader's tick counter | upstream | sent whole |
 | `perf` | reader diagnostics (build time, cache counters) | upstream | sent whole |
 | `counts` | entity counts | upstream | sent whole |
-| `gameState` | match and layer state, incl. `worldTimeSec`; the commander rules block joins it (planned, `docs/command-assets.md` decision 2) | upstream; rules block planned 2026-09-04 | sent whole |
-| `teams` | per-team record; the commander block joins it (planned, decision 2) | upstream; commander block planned 2026-09-04 | sent whole |
+| `gameState` | match and layer state, incl. `worldTimeSec`; `commanderRules` (the server's commander settings) rides inside it | upstream; `commanderRules` 2026-09-07 | sent whole |
+| `teams` | per-team record; `commander` (the seat's state, the vote, the cooldowns) rides inside each entry | upstream; `commander` 2026-09-07 | sent whole |
 | `squads` | per-squad record | upstream | sent whole |
 | `players` | per-player record with `soldier` (`soldier.medical` since 2026-08-30) | upstream | **index-tracked** |
 | `vehicles` | per-vehicle record with `turrets` (`turrets[].weapons` and the driver record since 2026-09-04) | upstream | **index-tracked** |
@@ -124,6 +124,107 @@ none of them:
 - `ts` is epoch seconds, parsed from the log line's own timestamp.
 - The log is the only place a revive is evented at all: memory shows the
   medic's item and target while a channel runs, never the completion.
+
+## Commander block
+
+Two additions and one repair, all on existing records: `teams[].commander`,
+`gameState.commanderRules`, and the two commander identity fields that have
+shipped empty since 2026-08-30. The contract is
+`docs/command-assets-spec.md` §3 and §4 — this section is the wire shape; the
+spec says what each value means and what evidence it rests on.
+
+Absence has two meanings here, and they are kept apart deliberately (spec §2):
+
+- **`null`** — the game's own value is empty and was read successfully: no
+  commander in the seat, no element at that index yet.
+- **the key absent** — the recorder could not read it: the property is not in
+  the class (a Squad rename), a pointer led nowhere, the read failed.
+
+So a consumer that sees `null` knows "none" and one that sees nothing knows
+"unknown". Nothing is defaulted, and nothing is carried over from the previous
+frame — every value is that frame's own read.
+
+### `teams[].commanderName` / `commanderEosId`
+
+Present since 2026-08-30 and never populated: the read treated
+`SQTeamState.CommanderState` as a player state, and it points at the team's
+commander-state actor. The seat is `CurrentCommander` on that actor, and the
+identity comes off the player state it points at. Both fields are `null` when
+that pointer reads null — an unclaimed seat — and absent when the read could
+not be made. `commanderStateAddr` is unchanged.
+
+### `teams[].commander`
+
+Present on every full frame whose team record reaches a commander state:
+
+```json
+"commander": {
+  "enabled": true,
+  "actionsEnabled": true,
+  "vote": {
+    "inProgress": false, "timer": 0, "endsGameTime": 1043,
+    "nominees": [{"eosId": "eos-…", "name": "Ruby", "votes": 3}],
+    "cooldownActive": true, "cooldownTimer": 217,
+    "cooldownEndsGameTime": 1343
+  },
+  "cooldowns": {
+    "categories": [
+      {"id": 0, "name": "Air Support", "intervalSec": 300.0,
+       "lastUseGameTime": null}
+    ],
+    "actions": [
+      {"action": "CommandAction_UAV_MQ9_USMC_C", "displayName": "MQ-9 UAV Recon",
+       "createdGameTime": 843.6, "remainingAtChange": 0.0,
+       "destroyedDuringActive": false, "categoryId": 1,
+       "enrouteSec": 60.0, "activeSec": 330.0, "cooldownSec": 600.0}
+    ]
+  }
+}
+```
+
+- `enabled` is "the commander system exists on this layer", not "claimed" — it
+  reads true on both teams while one of them has no commander.
+  `actionsEnabled` is live state: whether the team may issue commands this
+  frame.
+- The `vote` block rides every frame, open or not, so a seek into the middle
+  of a replay is self-describing. `timer` counts the vote window down and
+  reads 0 when none is open; `endsGameTime` and `cooldownEndsGameTime` are end
+  times on the same game clock as `gameState.worldTimeSec`. `nominees` keeps
+  its entries after a vote resolves — that is the game's own state, recorded
+  as read.
+- `nominees[]` is `[]` while the array is empty (read, and none). A nominee
+  whose player-state pointer reads null carries `eosId` and `name` `null`.
+- `categories[]` is the per-category gate. `id` is the array index — the index
+  the last-use stamps are keyed by and the value an action's `categoryId`
+  carries — and it is the one key in the whole block the recorder produces
+  rather than reads. `lastUseGameTime` is `null` until something in that
+  category has been called.
+- `actions[]` is `[]` before the first claim, then one entry per action the
+  team can call. The four live values come from the entry; the five config
+  values (`displayName`, `categoryId`, `enrouteSec`, `activeSec`,
+  `cooldownSec`) are the action class's own defaults and ride every frame, so
+  a seek is self-describing there too. An entry whose action class reads null
+  carries `action` `null` and no config values — there is no class to read
+  them from.
+- Every "ready in", every "vote resolved", every rule about how the timers
+  combine is the consumer's to derive from this per-frame state; the recorder
+  computes none of it (spec §9 carries the arithmetic).
+
+### `gameState.commanderRules`
+
+The server's own commander settings, read off one live `SQCommanderManager`
+(several exist at once and read alike). Six scalars every frame rather than
+once, for the same seek-safety reason:
+
+```json
+"commanderRules": {"enabled": true, "votingTimeSec": 60,
+                   "voteCooldownSec": 300, "newCommanderExtensionSec": 300.0,
+                   "minSquadSize": 2, "minSquads": 3}
+```
+
+`commanderRules.enabled` is the server setting; `commander.enabled` is a
+team's state. Two flags with the same word, deliberately distinct. The whole
+block is absent when no manager is live or none of the six could be read.
 
 ## Vehicle seat inventory
 
