@@ -50,15 +50,20 @@ export function hitTest(snap: Snapshot | null, wx: number, wy: number,
     consider({ type: "player", e: p }, p.soldier.position, r2);
   }
   for (const pr of snap.projectiles ?? []) consider({ type: "projectile", e: pr }, pr.position, r2);
-  // The de-duped list, not the raw one: a marker the map merged away is not
-  // drawn, and an invisible hover target is worse than a visible one.
-  for (const m of dedupeMarkers(snap.markers)) consider({ type: "marker", e: m }, m.position, r2);
+  // A called asset BEFORE its own footprint marker. Artillery sits exactly on
+  // the marker it was called with, and on an exact tie the first considered
+  // wins — which should be the actor, because it carries the fire plan and
+  // its progress while the marker carries only the shape. Same idea as the
+  // emplacement gun above: where two records describe one thing, the hit goes
+  // to the one worth opening. The drone's CALL actor is not on the map at all
+  // — its position reads (0, 0, z) and means nothing — so it is never a hit.
   for (const a of snap.commandActions ?? []) {
-    // The drone's call actor is not on the map — its position reads (0, 0, z)
-    // and means nothing — so it must not be clickable either.
     if (a.position && (a.position.x !== 0 || a.position.y !== 0))
       consider({ type: "commandAction", e: a }, a.position, r2);
   }
+  // The de-duped list, not the raw one: a marker the map merged away is not
+  // drawn, and an invisible hover target is worse than a visible one.
+  for (const m of dedupeMarkers(snap.markers)) consider({ type: "marker", e: m }, m.position, r2);
   for (const d of snap.drones ?? []) consider({ type: "drone", e: d }, d.position, r2);
   // Emplacement guns are not drawn (the deployable badge is the ONE map
   // element for an emplacement), so they must not capture hovers either.

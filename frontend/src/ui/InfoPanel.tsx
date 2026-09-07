@@ -261,8 +261,13 @@ function CommandActionBody({ e, snap }: { e: CommandAction; snap: Snapshot | nul
         {phase && <Row label="PHASE">{phase}</Row>}
         {t.gunsOpenGameTime != null && now != null && (
           <Row label="GUNS OPEN">
+            {/* The enroute is usually behind by the time anyone looks, so the
+                row reads as a time either side of now rather than as a
+                countdown that has gone negative. */}
             <span className="info-mono">
-              {fmtDuration(t.gunsOpenGameTime - now) ?? "—"}
+              {t.gunsOpenGameTime > now
+                ? `in ${fmtDuration(t.gunsOpenGameTime - now)}`
+                : `${fmtDuration(now - t.gunsOpenGameTime)} ago`}
             </span>
           </Row>
         )}
