@@ -77,6 +77,23 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- The 4 Hz position line now follows drones too, so one flies smoothly
+  instead of jumping 10 m a second, and a shoot-down is placed to the
+  quarter second rather than somewhere inside a one-second gap. Each
+  sample carries the pawn's position and heading under the same
+  freshness gates the players and vehicles pass, and two keys nothing
+  else has: whether it is dead, and who last hit it - each written only
+  once it is set. That is the one place in a recording where a missing
+  key means "not set" rather than "unknown", and it is what keeps the
+  sample at about 115 bytes per drone; the full frame a second away
+  still carries the two-way reading. The killer of a drone is the last
+  hitter of the first sample that says it is dead - which matters,
+  because a second shooter has been seen taking that pointer 1.1 s
+  after the kill, inside the gap a one-second frame leaves. Neither
+  health nor team rides along: a drone's health changes only at death,
+  and its team comes from its owner. A pawn that fails a gate is left
+  out of that sample rather than nulled, and the key is absent
+  altogether on every line with no drone up.
 - Drones now reach a recording at all. Both of them - the one a commander
   calls and the one a recon kit carries - are Characters rather than
   vehicles, so they belonged to neither of the lists that already reached

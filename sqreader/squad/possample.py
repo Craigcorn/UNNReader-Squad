@@ -1,11 +1,17 @@
 """4 Hz position sampler — the fast tier of the two-tier recording.
 
 Given the entity set from the last full snapshot (player-state addresses + stable
-keys, vehicle addresses), re-read ONLY each entity's world position + health at
-4 Hz — NO GUObjectArray walk, NO reflection, NO name resolution, NO components /
-deployables / markers. O(players+vehicles) small reads (~20-50 ms at 100 players),
-so the recorder gets smooth 4 Hz movement while the heavy full build runs at ~1 Hz
-in the background.
+keys, vehicle addresses, drone pawn addresses), re-read ONLY each entity's world
+position + health at 4 Hz — NO GUObjectArray walk, NO reflection, NO FName
+resolution, NO components / deployables / markers. O(players+vehicles+drones)
+small reads (~20-50 ms at 100 players), so the recorder gets smooth 4 Hz movement
+while the heavy full build runs at ~1 Hz in the background.
+
+A drone carries two more reads than the others — a bool and a pointer chain that
+ends at the shooter's id — because its death is the one thing about it that
+happens between full frames, and the killer is the value of the first sample
+carrying `dead` (spec §7). Both offsets come resolved on `SnapshotPaths`, so
+this stays reflection-free.
 
 Every read is validated per-entity with the SAME freshness gates the full build
 trusts (`_read_soldier`: ClassPrivate must point into the heap; Health in range),
@@ -23,7 +29,7 @@ from typing import Any
 
 from ..mem import ProcessMemory
 from ..ue.uobject import UOBJ_CLASS_PRIVATE
-from .snapshot import SnapshotPaths, read_root_pos_yaw
+from .snapshot import SnapshotPaths, _controller_eos_id, read_root_pos_yaw
 
 SCHEMA_POS = "sqr-pos-1"
 _MAX_COORD_CM = 5_000_000.0     # 50 km — matches the actor-position sanity gate
@@ -34,10 +40,15 @@ class SampledEntities:
     """Stable entity pointers + keys, derived for free from a full snapshot.
 
     `ps_addr` is stable for a player's whole session; `vh_addr` for a vehicle's
-    life. The key is the same identity the viewer matches on (eosId, else name)."""
+    life; `d_addr` for a drone's deploy, which is the whole of its life (a
+    pickup or a re-arm destroys the pawn and the redeploy is a new one). The
+    key is the same identity the viewer matches on (eosId, else name)."""
     full_tick: int
     players: tuple[tuple[int, str], ...]     # (ps_addr, key)
     vehicles: tuple[tuple[int, str], ...]    # (vh_addr, id_hex)
+    # Defaulted so a caller that predates the key still constructs: a snapshot
+    # with no drone in the air carries no `drones` list, which is most of them.
+    drones: tuple[tuple[int, str], ...] = ()  # (d_addr, id_hex)
 
     @classmethod
     def from_snapshot(cls, snap: dict[str, Any]) -> SampledEntities:
@@ -53,8 +64,15 @@ class SampledEntities:
             addr = _hex_to_int(vid)
             if addr and vid:
                 vehicles.append((addr, str(vid)))
+        drones: list[tuple[int, str]] = []
+        for d in snap.get("drones") or []:
+            did = d.get("id")
+            addr = _hex_to_int(did)
+            if addr and did:
+                drones.append((addr, str(did)))
         return cls(full_tick=int(snap.get("tick") or 0),
-                   players=tuple(players), vehicles=tuple(vehicles))
+                   players=tuple(players), vehicles=tuple(vehicles),
+                   drones=tuple(drones))
 
 
 def _hex_to_int(h: Any) -> int | None:
@@ -178,6 +196,54 @@ def sample_positions(pm: ProcessMemory, paths: SnapshotPaths,
                 rec["team"] = tb[0]
         vehicles_out.append(rec)
 
+    # Drones, at the same 4 Hz and under the same gates (spec §7). A drone
+    # cruises at ~10 m/s — 2.5 m per sample — so one frame a second draws it in
+    # steps; and its death is the one thing about it that happens between full
+    # frames, which is why two extra keys ride here.
+    #
+    # `dead` and `lastHitBy` are written only once they are set. That is the
+    # one deliberate departure from the "emit what you read" rule, named in
+    # spec §1 and §2: absence here means "not set", never "unknown", and the
+    # full frame carries the two-way reading a second at a time. It is what
+    # keeps the sample at ~115 B per drone. Both offsets were resolved once at
+    # `resolve_paths`, so nothing here reflects.
+    #
+    # The killer of a drone is the `lastHitBy` of the first sample carrying
+    # `dead`, exact to a quarter second: on 2026-09-07 a second shooter moved
+    # the pointer 1.1 s after a kill, inside the full frame's one-second gap.
+    dead_mask = paths.drone_dead_mask
+    last_hit_off = paths.drone_last_hit_by_off
+    drones_out: list[dict[str, Any]] = []
+    for d_addr, did in entities.drones:
+        if not _class_ok(pm, d_addr):                # freed pawn
+            continue
+        rpy = read_root_pos_yaw(pm, d_addr, paths)
+        pos = _sane_pos(rpy.get("position"))
+        if pos is None:
+            continue
+        # The junk rule of spec §2, doing its second job: a dead pawn's final
+        # tick zeroes to the map origin before the pawn is freed.
+        if pos["x"] == 0.0 and pos["y"] == 0.0 and pos.get("z") == 0.0:
+            continue
+        rec = {"id": did, "x": pos["x"], "y": pos["y"], "z": pos.get("z")}
+        if "yaw" in rpy:
+            rec["yaw"] = rpy["yaw"]
+        # No `h`: a drone's health changes only at death, which `dead` says.
+        # No `team`: the pawn carries none, and it derives from the owner.
+        if dead_mask is not None:
+            eff_off, byte_mask = dead_mask
+            db = pm.try_read(d_addr + eff_off, 1)
+            if db and (db[0] & byte_mask):
+                rec["dead"] = True
+        if last_hit_off is not None:
+            hb = pm.try_read(d_addr + last_hit_off, 8)
+            ctrl = struct.unpack("<Q", hb)[0] if hb and len(hb) == 8 else 0
+            if ctrl:
+                eos = _controller_eos_id(pm, paths, ctrl, None)
+                if eos:
+                    rec["lastHitBy"] = eos
+        drones_out.append(rec)
+
     # Projectiles are deliberately NOT sampled. It was tried: on real
     # 100-player matches 90-180 rounds are airborne at barrage peaks, so
     # sampling them cost 2-7% of file size and out-read the entire player
@@ -186,7 +252,7 @@ def sample_positions(pm: ProcessMemory, paths: SnapshotPaths,
     # guided TOW) diverges from the firer's client anyway. The viewer
     # smooths projectile motion between full frames instead
     # (frontend replayReconstruct: interpolateProjectilesBetweenFulls).
-    return {
+    line: dict[str, Any] = {
         "t": "pos",
         "tick": tick,
         "timestamp": ts,
@@ -194,3 +260,9 @@ def sample_positions(pm: ProcessMemory, paths: SnapshotPaths,
         "players": players_out,
         "vehicles": vehicles_out,
     }
+    # The drone key rides the same rule the full frame's list does: written
+    # only while there is a drone to write, absent otherwise — which is what
+    # every line recorded before this one says by carrying no key at all.
+    if drones_out:
+        line["drones"] = drones_out
+    return line

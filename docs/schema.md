@@ -56,7 +56,7 @@ construction.
 | `players[]` | `{id, x, y, z, h, yaw}`; `id` is the player's eosId, else name | 2026-08-28 |
 | `vehicles[]` | `{id, x, y, h, yaw, team}`; `id` is the vehicle id | 2026-08-28 |
 | `projectiles[]` | `{id, x, y, z}`; optional — the sampler does not emit it today (shipped and reverted 2026-08-29); the viewer reads it when present | 2026-08-29 |
-| `drones[]` | `{id, x, y, z, yaw}`; `id` is the pawn address, the same id as the full-frame entry | planned, decision 7 (2026-09-04) |
+| `drones[]` | `{id, x, y, z, yaw}`, plus `dead` (`true`) once the pawn is dead and `lastHitBy` (the hitter's eosId) once something has hit it — each present only when set; `id` is the pawn address, the same id as the full-frame entry. Optional: the key is written only while a drone is up | 2026-09-07 |
 
 ---
 
@@ -478,6 +478,41 @@ carried one.
   at the kill, and it moves again as later hits land on the falling pawn. At
   one frame a second that is the killer at lower resolution; the 4 Hz line
   carries the same value quarter-second by quarter-second.
+
+### The position line's `drones` array
+
+A drone moves at about 10 m/s, and its death is the one thing about it that
+happens between full frames, so it is sampled at 4 Hz beside the players and
+vehicles:
+
+```json
+"drones": [
+  {"id": "0x707db0c584a0", "x": 12345.5, "y": -6789.25, "z": 4200.0,
+   "yaw": 45.0},
+  {"id": "0x707db0c58aa0", "x": 20100.0, "y": -1200.0, "z": 90.0,
+   "yaw": 200.5, "dead": true, "lastHitBy": "eos-…"}
+]
+```
+
+`id` is the same id as the full-frame entry, so the two join without a lookup.
+There is no `h` — the health changes only at death, and `dead` says that — and
+no `team`, which the pawn does not carry either.
+
+`dead` and `lastHitBy` are the one place in the recording where an absent key
+does **not** mean "unknown": they are written only once they are set, so
+absence there means "not set", and the full frame a second away carries the
+two-way reading. That is deliberate, to keep the sample near 115 bytes per
+drone (`docs/command-assets-spec.md` §1 and §2 name it as the single exception
+to the emission rules). A consumer reads the killer of a drone as the
+`lastHitBy` of the first sample carrying `dead`, exact to a quarter second: a
+second shooter has been seen moving the pointer 1.1 s after a kill, inside the
+full frame's one-second gap.
+
+A drone that fails one of the sampler's gates — a freed pawn, a position that
+is not finite and in bounds, the `(0, 0, 0)` of a dead pawn's final tick — is
+omitted from that sample and never nulled, exactly as a player or a vehicle is;
+the next full frame corrects the roster. The whole key is absent on a line with
+no drone up, which is every line recorded before 2026-09-07.
 
 There is no remaining-flight-time field, because none exists in memory: nothing
 on the pawn counts down, and remaining time is the `worldTimeSec` of the frame

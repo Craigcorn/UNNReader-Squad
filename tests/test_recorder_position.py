@@ -63,6 +63,28 @@ def test_extract_metadata_skips_position_frames(tmp_path):
     assert meta["mapName"] == "Yehorivka"
 
 
+def test_position_frame_carrying_drones_is_written_unchanged(tmp_path):
+    """The position line is a side channel: `write_position_frame` appends the
+    bytes the sampler produced and reads nothing out of them, so the `drones`
+    array — the conditional `dead` and `lastHitBy` keys included — reaches the
+    file exactly as it was sampled (spec §7)."""
+    st, path = _state(tmp_path)
+    line = json.dumps({
+        "t": "pos", "tick": 2, "timestamp": "2026-01-01T00:00:00.25+00:00",
+        "fullTick": 1, "players": [], "vehicles": [],
+        "drones": [{"id": "0x4000", "x": 1.0, "y": 2.0, "z": 3.0, "yaw": 45.0},
+                   {"id": "0x5000", "x": 4.0, "y": 5.0, "z": 6.0, "yaw": 90.0,
+                    "dead": True, "lastHitBy": "eos-" + "0" * 28 + "six"}],
+    }) + "\n"
+    assert write_position_frame({"current": st}, line) > 0
+    assert st.tick_count == 0                # a position frame is not a tick
+    st.writer.close()
+    from sqreader.sqrx import SqrxReader
+    with SqrxReader(str(path)) as r:
+        written = [json.loads(ln) for ln in r.lines()]
+    assert written == [json.loads(line)]
+
+
 def test_extract_metadata_old_sqrx_has_no_position_frames(tmp_path):
     st, path = _state(tmp_path)
     st.writer.write_line(_full(1, 40, "2026-01-01T00:00:00+00:00"))
