@@ -1271,6 +1271,10 @@ class SnapshotCaches:
             "is_vehicle_spawner", "is_rally", "is_squad_data_marker",
             "is_tracked_projectile", "is_lane_initializer",
             "is_raas_visualizer",
+            # Same (gen, value) shape, same reason: a map transition brings a
+            # new set of marker classes and the old ones' layouts would
+            # otherwise sit here for the rest of the process's life.
+            "marker_geometry",
         ):
             sub_cache = getattr(self, cache_attr)
             stale_keys = [k for k, v in sub_cache.items()

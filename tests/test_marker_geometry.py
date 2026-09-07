@@ -452,11 +452,15 @@ def test_the_absence_of_the_names_is_cached_too(monkeypatch):
 
 def test_a_generation_bump_re_reflects_the_class(monkeypatch):
     """The rolling reset is the retry for a reflection walk that failed
-    mid-tick: a cached empty answer must not outlive it."""
+    mid-tick: a cached empty answer must not outlive it. The stale entry is
+    dropped as it goes, so a map transition's dead marker classes do not sit
+    here for the rest of the process's life."""
     fx = build()
     calls = _count_layout_walks(monkeypatch)
     fx.marker(FOOTPRINT)
+    assert len(fx.caches.marker_geometry) == 1
     fx.caches._light_reset(tick=60, reason="rolling")
+    assert fx.caches.marker_geometry == {}
     fx.marker(FOOTPRINT)
     assert len(calls) == 2
 
