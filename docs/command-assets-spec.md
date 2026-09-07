@@ -400,6 +400,14 @@ test is cited by tracker id; the fields do not change when it runs.
   `destroyedDuringActive` says the same. Who did it is not recorded
   (D18). The drone's call actor never sets the flag; its shoot-down is
   the pawn's `dead` and `lastHitByEosId` (§7).
+- **Asset impacts.** Every shell, rocket and bomb an asset fires is a
+  tracked projectile (§6): its `firer` is the caller, and for artillery
+  the actor's `projectile` names its class. Draw each round's impact at
+  its rest position in the first frame `hasImpacted` reads true, joined
+  to the call by firer and class, and count them per barrage against
+  `shellsPerBarrage`. Projectiles are sampled in full frames only, so an
+  impact is exact to the second and to the rest point, and a round's
+  flight between frames is interpolated (tracker C1 would sample it).
 - **Actions enabled.** `commander.actionsEnabled` is the commander's
   presence in a command zone, both ways (walked out and back in,
   2026-09-07), and the viewer may say so.
@@ -413,7 +421,12 @@ test is cited by tracker id; the fields do not change when it runs.
   killer is the `lastHitBy` of the first 4 Hz sample carrying `dead`,
   the full frame's `lastHitByEosId` being the same value at lower
   resolution (§7). The drone's call actor draws nothing: its position is
-  meaningless and its life outruns the pawn's.
+  meaningless and its life outruns the pawn's. Draw the drone's `yaw` as
+  its view direction: the camera faces the airframe (player statement,
+  2026-09-07), a reading tracker T16 replaces with the camera's own
+  rotation if decision D22 records it. The UAV's `yaw` is its orbit
+  heading only; its camera gimbals independently and is unrecorded, so
+  no view is drawn for it.
 - **Asset display names.** Each action entry carries the config's own
   `displayName` (decision D15; eleven read 2026-09-07). SquadCalc's
   per-asset table, which agreed with the config values (2026-09-04), is
