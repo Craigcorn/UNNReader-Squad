@@ -59,6 +59,15 @@
 //      frames → impacted at the last known location. One absent frame
 //      is not death — a dropped or omitted record must not ring.
 //
+// A COMMANDER'S rounds ring in their call's own colour rather than the
+// generic red (spec §9, "Asset impacts"): the caller sends a dozen shells
+// into one footprint and the point of watching them is seeing whose call
+// they are. The join is made outside this module — it is a rule about
+// recorded fields, not about rendering (state/commander/impacts.ts) — and
+// arrives as a colour per projectile id. Nothing else about those rounds
+// draws differently, and a round with no colour is every round that was
+// drawn before this existed.
+//
 // Replay seeks: tracker state accumulates in playback order, so a tick
 // REGRESSION (rewind, restart) clears everything — trails rebuild as the
 // replay plays forward, and the reset also suppresses the spurious rings
@@ -102,6 +111,8 @@ const VANISH_DEAD_TICKS = 2;   // absent across N tick advances
 const SAMPLE_JUMP_SQ   = 60_000 * 60_000;                // 600 m
 
 const MORTAR_ICON_URL  = "./icons/deployables/mortar_round.svg";
+// The ring a round with no call behind it has always drawn.
+const IMPACT_COLOR     = "#ff2418";
 
 interface CanvasSize {
   width: number; height: number; cssWidth: number; cssHeight: number; dpr: number;
@@ -126,6 +137,7 @@ interface Track {
   frozenTicks: number;      // consecutive tick-advances with identical pos
   dead: boolean;            // impacted / frozen / vanished — icon off
   diedAt: number;           // wall-clock ms dead was set (0 while alive)
+  callCol: string | null;   // the colour of the call that fired it, if any
 }
 
 interface Impact {
@@ -133,6 +145,7 @@ interface Impact {
   y: number;
   startAt: number;
   kind: string;
+  col: string;
 }
 
 // Module-level tracker state. Shared across renderScene calls so
@@ -177,14 +190,14 @@ function signature(p: Projectile): string {
 }
 
 function spawnRing(sig: string, x: number, y: number,
-                   kind: string, now: number) {
+                   kind: string, now: number, col: string | null) {
   if (impactSpawned.has(sig)) return;
-  impacts.push({ x, y, startAt: now, kind });
+  impacts.push({ x, y, startAt: now, kind, col: col ?? IMPACT_COLOR });
   impactSpawned.set(sig, now);
 }
 
 function markDead(sig: string, t: Track, x: number, y: number, now: number) {
-  spawnRing(sig, x, y, t.kind, now);
+  spawnRing(sig, x, y, t.kind, now, t.callCol);
   if (!t.dead) {
     t.dead = true;
     t.diedAt = now;
@@ -196,6 +209,10 @@ export function drawProjectilesAndImpacts(
   snap: Snapshot,
   view: ViewState,
   cs: CanvasSize,
+  /** Projectile id → the colour of the commander's call that fired it, for
+   *  the rounds a call can be joined to (spec §9, "Asset impacts"). Absent
+   *  for every other round, which rings exactly as it always has. */
+  callColors?: Map<string, string> | null,
 ) {
   const now = Date.now();
   const tick = snap.tick ?? null;
@@ -250,9 +267,14 @@ export function drawProjectilesAndImpacts(
       hx: r.position.x, hy: r.position.y,
       heading: null, lastSeenAt: now, lastSeenTick: tick, kind,
       team: r.team ?? null, path: [], lastTick: tick, frozenTicks: 0,
-      dead: false, diedAt: 0,
+      dead: false, diedAt: 0, callCol: null,
     };
     tracks.set(sig, track);
+    // Whose call fired it, once anything has said so. Kept on the track so
+    // the ring is that call's colour however the death is detected — the
+    // vanish path has no record left to look it up on.
+    const col = callColors?.get(r.id);
+    if (col) track.callCol = col;
     // A newborn guided track gets its trail anchored to the LAUNCHER:
     // the firer's name is on the round, and whichever vehicle (an
     // emplacement gun or an ATGM truck) has that player in a seat within
@@ -493,16 +515,27 @@ function drawImpacts(
     // Fast fade-in (0..0.2) → slow fade-out (0.2..1).
     const fade = t < 0.2 ? (t / 0.2) : (1 - (t - 0.2) / 0.8);
 
+    const called = e.col !== IMPACT_COLOR;
     ctx.save();
     ctx.globalAlpha = fade * 0.85;
-    ctx.strokeStyle = "#ff2418";
+    ctx.strokeStyle = e.col;
     ctx.lineWidth = 2.5 * cs.dpr;
     ctx.beginPath();
     ctx.arc(sx, sy, ringR, 0, 2 * Math.PI);
     ctx.stroke();
+    // A called round gets a second, tighter ring in the same colour — the
+    // one thing that separates a commander's barrage from the mortar pit
+    // firing into the same square.
+    if (called) {
+      ctx.globalAlpha = fade * 0.6;
+      ctx.lineWidth = 1.4 * cs.dpr;
+      ctx.beginPath();
+      ctx.arc(sx, sy, ringR * 0.55, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
     if (t < 0.5) {
       ctx.globalAlpha = (1 - t * 2) * 0.7;
-      ctx.fillStyle = "#ff5040";
+      ctx.fillStyle = called ? e.col : "#ff5040";
       ctx.beginPath();
       ctx.arc(sx, sy, 3 * cs.dpr, 0, 2 * Math.PI);
       ctx.fill();

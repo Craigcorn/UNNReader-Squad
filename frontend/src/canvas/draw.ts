@@ -3,9 +3,11 @@
 // icon helpers do their own caching; everything else is per-frame.
 
 import type {
-  CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState,
+  CapGeometry, CommandAction, Deployable, Marker, Player, Snapshot, Vehicle,
+  ViewState,
 } from "../state/types";
 import { isShotDown } from "../state/commander/assets";
+import { roundsByCall } from "../state/commander/impacts";
 import {
   dedupeMarkers, requestsOnMap,
   BOMB_INNER_CM, BOMB_OUTER_CM, REQUEST_CIRCLE_CM,
@@ -1680,9 +1682,20 @@ function drawPlayers(ctx: CanvasRenderingContext2D, snap: Snapshot,
 // Delegates to the projectiles module which owns the cross-tick
 // tracker, heading derivation, and impact ring animation. Kept as a
 // thin wrapper so renderScene's call sequence stays uniform.
+//
+// `callRounds` is the frame's rounds joined to the calls that fired them
+// (spec §9, "Asset impacts"); it becomes a ring colour per round, so a
+// commander's shells ring in their call's colour and everything else rings
+// as it always did.
 function drawProjectiles(ctx: CanvasRenderingContext2D, snap: Snapshot,
-                         view: ViewState, cs: CanvasSize) {
-  drawProjectilesAndImpacts(ctx, snap, view, cs);
+                         view: ViewState, cs: CanvasSize,
+                         callRounds: Map<string, CommandAction>) {
+  let cols: Map<string, string> | null = null;
+  if (callRounds.size) {
+    cols = new Map();
+    for (const [id, a] of callRounds) cols.set(id, teamColor(a.team ?? null));
+  }
+  drawProjectilesAndImpacts(ctx, snap, view, cs, cols);
 }
 
 // Thin "command line" from each action marker back to the placer's
@@ -1933,6 +1946,45 @@ function drawRequests(ctx: CanvasRenderingContext2D, markers: Marker[],
   }
 }
 
+/** Where a call's own rounds are lying, this frame.
+ *
+ *  Spec §9, "Asset impacts": a round's impact is its rest position in the
+ *  first frame `hasImpacted` reads true, and the record then lingers at that
+ *  spot for a few frames — so this marks every round of a call that is at
+ *  rest in the frame on screen, in the call's own colour, on the footprint it
+ *  was called onto. The projectile layer's ring is the moment of the landing
+ *  and fades in a second; this is the shell still sitting there, and it is
+ *  purely frame-local — nothing is accumulated across frames, because the
+ *  recording says a round landed only in the frame it is first seen at rest.
+ *
+ *  A round belongs to a call by firer and, where the actor names one, class
+ *  (`state/commander/impacts.ts`), which is the whole of the join §9 gives. */
+function drawCallImpacts(ctx: CanvasRenderingContext2D, snap: Snapshot,
+                         callRounds: Map<string, CommandAction>,
+                         view: ViewState, cs: CanvasSize) {
+  if (!callRounds.size) return;
+  const dpr = cs.dpr;
+  for (const p of snap.projectiles ?? []) {
+    if (p.hasImpacted !== true || !p.position) continue;
+    const a = callRounds.get(p.id);
+    if (!a) continue;
+    const [x, y] = worldToScreen(view, cs, p.position.x, p.position.y);
+    if (x < -40 || x > cs.width + 40 || y < -40 || y > cs.height + 40) continue;
+    const r = 3.4 * dpr;
+    ctx.save();
+    ctx.lineWidth = 2.6 * dpr;
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+    ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+    ctx.stroke();
+    ctx.lineWidth = 1.4 * dpr;
+    ctx.strokeStyle = teamColor(a.team ?? null);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 /** A label with a dark outline, the way every other map label is drawn. */
 function mapLabel(ctx: CanvasRenderingContext2D, text: string,
                   x: number, y: number, cs: CanvasSize) {
@@ -2094,6 +2146,11 @@ export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
   // and it happens once here so the drawn list and the hit-tested one cannot
   // disagree.
   const markers = dedupeMarkers(snap.markers);
+  // Which of this frame's rounds belong to a commander's call. Wanted by two
+  // layers — the marks on the ground and the ring colours — so it is joined
+  // once here, and not at all when neither layer is on.
+  const callRounds = (on("commandAssets") || on("projectiles"))
+    ? roundsByCall(snap) : new Map<string, CommandAction>();
   const hadTex = drawMapTexture(ctx, snap, view, cs);
   // Background overlays first — FOB radii are giant translucent discs
   // that should sit between the map texture and the entity badges.
@@ -2105,6 +2162,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
   if (on("commandAssets")) {
     drawCommandFootprints(ctx, markers, view, cs);
     drawRequests(ctx, markers, view, cs);
+    drawCallImpacts(ctx, snap, callRounds, view, cs);
   }
   // Action-marker command lines as a low-level overlay — drawn before
   // any entity icon so vehicles / deployables / markers / players all
@@ -2119,7 +2177,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
   if (on("drones")) drawDrones(ctx, snap, view, cs);
   if (on("rallies")) drawRallyPoints(ctx, snap, view, cs);
   if (on("players")) drawPlayers(ctx, snap, view, cs, showSLNumbers, showAllNumbers, follow ?? null);
-  if (on("projectiles")) drawProjectiles(ctx, snap, view, cs);
+  if (on("projectiles")) drawProjectiles(ctx, snap, view, cs, callRounds);
   // Last, and never gated by a layer toggle: a measurement is something the
   // viewer asked for a second ago, so it has to be on top of whatever it was
   // drawn across.

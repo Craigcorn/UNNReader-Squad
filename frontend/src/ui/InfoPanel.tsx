@@ -18,6 +18,7 @@ import {
 import {
   buildDroneTracks, droneBudgetSec, droneRemainingSec, droneTeam,
 } from "../state/commander/drones";
+import { buildCallImpacts, landedBy } from "../state/commander/impacts";
 import { actionDisplayName, findActionEntry } from "../state/commander/readyIn";
 import {
   fmtDuration, fmtInt, ftLabel, findPlacer, markerLabel, playerLabel,
@@ -234,11 +235,41 @@ function ProjectileBody({ e }: { e: Projectile }) {
  *  last-damager field exists on any command actor, the server log carries no
  *  line for it, and nothing nearby is read as one (decision D18). */
 function CommandActionBody({ e, snap }: { e: CommandAction; snap: Snapshot | null }) {
+  const frames = useViewerStore((s) => s.replay.frames);
   const entry = findActionEntry(e.action, snap?.teams, e.team ?? null);
   const now = snap?.gameState?.worldTimeSec ?? null;
   const caller = playerLabel(e.callerEosId, snap?.players);
   const t = isArtillery(e) ? artilleryTimeline(e, entry) : null;
   const phase = t ? artilleryPhase(t, now) : null;
+  // What this call has put on the ground (spec §9, "Asset impacts"): its own
+  // rounds, joined by firer and — where the actor names one — class, counted
+  // at the first frame each read `hasImpacted`. It is a whole-recording
+  // answer, like the drone's killer: a round that landed forty seconds ago is
+  // not in this frame's projectile list any more. Live mode has no frame list
+  // and so has no count, rather than a count of the last second.
+  const impacts = useMemo(
+    () => (frames.length ? buildCallImpacts(frames, e.id) : null),
+    [frames, e.id]);
+  const landed = impacts ? landedBy(impacts.events, now) : null;
+  const thisBarrage = (landed && e.currentBarrage != null)
+    ? landed.perBarrage.find((b) => b.barrage === e.currentBarrage) ?? null
+    : null;
+  // The barrage's own rounds against the plan's own figure — and, while the
+  // counter is still 0, the warning shells against `preWarningShells`, which
+  // is the total that phase is counted against and not `shellsPerBarrage`.
+  const barrageLabel = (() => {
+    if (!thisBarrage || e.currentBarrage == null) return null;
+    const warning = e.currentBarrage === 0;
+    const of = warning ? e.preWarningShells : e.shellsPerBarrage;
+    const what = warning ? "warning" : `barrage ${e.currentBarrage}`;
+    return of == null ? `${what}: ${thisBarrage.landed}`
+      : `${what}: ${thisBarrage.landed} / ${of}`;
+  })();
+  // An actor that carries no firing figure at all and has landed nothing —
+  // the UAV, the drone's call actor — gets no row rather than a permanent
+  // zero. The test is the actor's own fields, never its class name.
+  const fires = e.shellsPerBarrage != null || e.barrageCount != null
+    || e.maxShots != null || e.projectile != null;
   return (
     <>
       <Row label="TEAM">{e.team ?? "—"}</Row>
@@ -282,6 +313,17 @@ function CommandActionBody({ e, snap }: { e: CommandAction; snap: Snapshot | nul
           <Row label="ROUND"><span className="info-mono">{e.projectile}</span></Row>
         )}
       </>}
+      {/* What the call has actually put on the ground: its own rounds, at the
+          first frame each read `hasImpacted`. Absent in live mode, which has
+          no frame list to count over. */}
+      {landed && (fires || landed.landed > 0) && (
+        <Row label="ROUNDS">
+          {fmtInt(landed.landed)}<span className="info-mute"> landed</span>
+          {barrageLabel && (
+            <span className="info-mute"> · {barrageLabel}</span>
+          )}
+        </Row>
+      )}
       {e.action !== undefined && (
         <Row label="ACTION">
           <span className="info-mono">{e.action ?? "—"}</span>

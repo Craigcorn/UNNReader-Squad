@@ -98,6 +98,22 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- A commander's call now shows what it actually put on the ground. The
+  shells, rockets and bombs an asset fires have been tracked
+  projectiles all along, but nothing joined them to the call that sent
+  them, so a barrage was a circle on the map and its rounds were
+  anonymous red rings that could as easily have come from a mortar pit
+  in the same square. The viewer joins them the only way the recording
+  allows - the round's firer is the caller, and where the actor names
+  its projectile class that class too - and draws each round's impact
+  at the rest position of the first frame it reads as landed, in the
+  call's own colour, with a mark left where the shell is still lying.
+  The asset's panel counts them: rounds landed, and the running barrage
+  against the plan's own shells-per-barrage. The join goes through the
+  frame's roster, because the two fields are not the same kind of
+  string - a round carries the firer's name, a call carries an EOS id -
+  and a caller who is off the roster joins no rounds at all rather than
+  joining them by something looser.
 - The viewer draws the commander's war. Everything the recorder had
   learned to write about the seat, the requests, the called assets and
   the drones reached the file and stopped there: a UAV's coverage
