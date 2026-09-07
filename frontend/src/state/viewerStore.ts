@@ -44,19 +44,22 @@ const SNAP_BUFFER_CAP = 48;  // memory ceiling (~10 s @ 4 Hz = 40 frames, + marg
 export type LayerKey =
   | "players" | "vehicles" | "deployables" | "markers"
   | "projectiles" | "spawners" | "rallies"
+  | "commandAssets" | "drones"
   | "slNumbers" | "squadNumbers";
 
 // Generic click-selection for every map entity that gets the shared InfoPanel
 // (everything EXCEPT player/vehicle, which keep their dedicated panels + follow).
 export type InfoKind =
   | "marker" | "deployable" | "spawner"
-  | "rally" | "capzone" | "projectile";
+  | "rally" | "capzone" | "projectile"
+  | "commandAction" | "drone";
 export interface SelectedInfo { kind: InfoKind; id: string; }
 
 // Entity-family layers (icons on the map).
 export const LAYER_ORDER: LayerKey[] = [
   "players", "vehicles", "deployables", "markers",
   "projectiles", "spawners", "rallies",
+  "commandAssets", "drones",
 ];
 
 // Number-label options — shown as their own group in the settings menu.
@@ -70,6 +73,8 @@ export const LAYER_LABELS: Record<LayerKey, string> = {
   projectiles: "Projectiles",
   spawners: "Spawn Points",
   rallies: "Rallies",
+  commandAssets: "Command assets",
+  drones: "Drones",
   slNumbers: "Squad leader numbers",
   squadNumbers: "All player & vehicle numbers",
 };
@@ -77,6 +82,7 @@ export const LAYER_LABELS: Record<LayerKey, string> = {
 const DEFAULT_LAYERS: Record<LayerKey, boolean> = {
   players: true, vehicles: true, deployables: true, markers: true,
   projectiles: true, spawners: false, rallies: true,
+  commandAssets: true, drones: true,
   slNumbers: true, squadNumbers: false,
 };
 
@@ -214,6 +220,12 @@ interface Store {
   // Ticket-timeline overlay (replay-only) — the match-long ticket-loss analysis.
   timelineVisible: boolean;
 
+  // Which team's commander panel is open (its seat, the vote, the cooldowns
+  // and its squads' requests), or null for none. A team id rather than a
+  // boolean because the two teams' commanders are two different stories and
+  // the panel shows one at a time.
+  commanderPanelTeam: number | null;
+
   // Map layer visibility — which entity families the canvas draws.
   layers: Record<LayerKey, boolean>;
 
@@ -243,6 +255,7 @@ interface Store {
   toggleScoreboardSquad(team: 1 | 2, sqId: number): void;
   toggleTimeline(): void;
   setTimelineVisible(v: boolean): void;
+  setCommanderPanelTeam(team: number | null): void;
   toggleLayer(key: LayerKey): void;
   resetView(): void;
 }
@@ -287,6 +300,7 @@ export const useViewerStore = create<Store>((set) => ({
   killFeedVisible: true,
   scoreboardVisible: false,
   timelineVisible: false,
+  commanderPanelTeam: null,
   scoreboardClosedSquads: { 1: [], 2: [] },
   layers: loadLayers(),
 
@@ -454,6 +468,13 @@ export const useViewerStore = create<Store>((set) => ({
   },
   setTimelineVisible(v) {
     set({ timelineVisible: v });
+  },
+  setCommanderPanelTeam(team) {
+    // Clicking the same team's line again closes the panel — the seat line
+    // is the toggle, so there is nowhere else to click to put it away.
+    set((s) => ({
+      commanderPanelTeam: s.commanderPanelTeam === team ? null : team,
+    }));
   },
   toggleScoreboardSquad(team, sqId) {
     set((s) => {

@@ -129,3 +129,29 @@ export function ftLabel(ft: number | null | undefined): string {
 export function fmtInt(v: number | null | undefined): string {
   return v == null ? "—" : Math.round(v).toString();
 }
+
+// The name behind an eosId, from the frame's own roster. Squad's own ids are
+// meaningless to a reader, and there is nowhere else to look them up: a
+// player who has left the server is gone from the roster and stays unnamed
+// rather than being guessed at.
+export function playerLabel(
+  eosId: string | null | undefined,
+  players: Player[] | null | undefined,
+): string | null {
+  if (!eosId) return null;
+  const p = (players ?? []).find((x) => x.eosId === eosId);
+  if (!p) return null;
+  return (p.clanTag ? `[${p.clanTag}] ` : "") + (p.name ?? eosId);
+}
+
+// mm:ss for a duration in seconds, sign carried. Used wherever a "ready in"
+// or a "time left" is shown; null in → null out, so a caller with nothing to
+// count down shows nothing instead of a zero.
+export function fmtDuration(sec: number | null | undefined): string | null {
+  if (sec == null || !Number.isFinite(sec)) return null;
+  const neg = sec < 0;
+  const v = Math.floor(Math.abs(sec));
+  const m = Math.floor(v / 60);
+  const s = v % 60;
+  return `${neg ? "-" : ""}${m}:${s.toString().padStart(2, "0")}`;
+}

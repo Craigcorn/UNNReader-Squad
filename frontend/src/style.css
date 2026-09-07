@@ -2771,3 +2771,109 @@ html, body, #root {
   padding: 5px 9px; font-size: 12px; color: var(--ink);
   box-shadow: var(--shadow-sm); white-space: nowrap;
 }
+
+/* ----- the commander: the seat line in the team bar, and its panel ----- */
+
+/* The team bar itself is pointer-transparent so the map keeps the drag; the
+   one thing in it that is clickable has to say so for itself. */
+#team-bar .tb-commander {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 1px 0; margin: 0;
+  font: inherit; font-size: 10.5px; color: var(--ink-mute);
+  cursor: pointer; max-width: 100%;
+}
+#team-bar .tb-right .tb-commander { flex-direction: row-reverse; }
+#team-bar .tb-commander:hover { color: var(--ink); }
+#team-bar .tb-cmd-star { color: var(--tc); font-size: 11px; line-height: 1; }
+#team-bar .tb-cmd-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 130px;
+}
+#team-bar .tb-cmd-vote,
+#team-bar .tb-cmd-off {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 1px 5px; border-radius: var(--radius-chip);
+  background: var(--surface-3); border: 1px solid var(--glass-brd);
+  color: var(--ink);
+}
+#team-bar .tb-cmd-vote { color: var(--accent); }
+
+#commander-panel { right: 12px; left: auto; width: 340px; }
+#commander-panel .info-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+}
+#commander-panel .info-row:last-child { border-bottom: none; }
+#commander-panel .info-k {
+  width: 68px; flex: none;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-mute);
+}
+#commander-panel .info-v {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--ink);
+}
+#commander-panel .info-mute { color: var(--ink-mute); font-style: italic; }
+#commander-panel .info-mono { font-variant-numeric: tabular-nums; opacity: 0.85; }
+#commander-panel .cmd-h {
+  margin: 12px 0 4px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-mute);
+}
+#commander-panel ul { list-style: none; margin: 0; padding: 0; }
+#commander-panel .cmd-nominees li {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 4px 0; font-size: 12px; border-bottom: 1px solid var(--border);
+}
+#commander-panel .cmd-votes { font-weight: 700; font-variant-numeric: tabular-nums; }
+#commander-panel .cmd-action {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name when" "note note";
+  gap: 2px 8px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+#commander-panel .cmd-a-name {
+  grid-area: name; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#commander-panel .cmd-a-when {
+  grid-area: when; font-variant-numeric: tabular-nums; font-weight: 600;
+}
+#commander-panel .cmd-a-note {
+  grid-area: note; display: flex; gap: 6px; flex-wrap: wrap; font-size: 10px;
+}
+#commander-panel .cmd-a-note:empty { display: none; }
+#commander-panel .cmd-ready { color: var(--good); }
+#commander-panel .cmd-cooling { color: var(--ink-mute); }
+#commander-panel .cmd-gate,
+#commander-panel .cmd-cut {
+  padding: 1px 5px; border-radius: var(--radius-chip);
+  background: var(--surface-3); border: 1px solid var(--glass-brd);
+  font-weight: 700; letter-spacing: 0.03em;
+}
+#commander-panel .cmd-cut { color: var(--bad); }
+#commander-panel .cmd-req {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+#commander-panel .cmd-req .info-mute { font-size: 10.5px; }
+#commander-panel .cmd-req-sq { font-weight: 600; min-width: 62px; }
+#commander-panel .cmd-req-state {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px; border-radius: var(--radius-chip);
+  background: var(--surface-3); border: 1px solid var(--glass-brd);
+}
+/* Pending, approved and deleted read differently at a glance: a request
+   still waiting, one the commander took, and one its own squad leader took
+   back — which is a reading of WHEN the marker went, not a recorded fact. */
+#commander-panel .cmd-req-pending .cmd-req-state { color: var(--ink-mute); }
+#commander-panel .cmd-req-approved .cmd-req-state { color: var(--good); }
+#commander-panel .cmd-req-deleted .cmd-req-state {
+  color: var(--bad); text-decoration: line-through;
+}
+#commander-panel .cmd-req-consumed .cmd-req-state { color: var(--accent); }
+#commander-panel .cmd-req-expired .cmd-req-state,
+#commander-panel .cmd-req-gone .cmd-req-state { opacity: 0.6; }

@@ -2,14 +2,19 @@
 // and emits pixels. No React, no store access. The map texture and
 // icon helpers do their own caching; everything else is per-frame.
 
-import type { CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState } from "../state/types";
+import type {
+  CapGeometry, Deployable, Marker, Player, Snapshot, Vehicle, ViewState,
+} from "../state/types";
+import { isShotDown } from "../state/commander/assets";
+import { dedupeMarkers, requestsOnMap, REQUEST_CIRCLE_CM } from "../state/commander/markers";
+import { actionDisplayName } from "../state/commander/readyIn";
 import {
   drawIcon, drawIconCentered, deployableIconUrl, icon, iconBbox, mapTexture,
   markerIconUrl, roleIconUrl, tintedIcon, colorizedIcon,
   vehicleIconUrl,
   vehicleTurretIconUrl, factionFlagUrl,
 } from "./icons";
-import { arrowEnd, markerShape } from "./markerGeometry";
+import { arrowEnd, commandFootprint, markerShape } from "./markerGeometry";
 import { drawProjectilesAndImpacts } from "./projectiles";
 import { coord, viewWindow, worldToScreen } from "./worldToScreen";
 import { visibleCaps } from "./capVisibility";
@@ -1232,9 +1237,9 @@ function drawMarkerLabelFor(ctx: CanvasRenderingContext2D, m: Marker,
 }
 
 
-function drawMarkers(ctx: CanvasRenderingContext2D, snap: Snapshot,
+function drawMarkers(ctx: CanvasRenderingContext2D, markers: Marker[],
                      view: ViewState, cs: CanvasSize) {
-  for (const m of snap.markers ?? []) {
+  for (const m of markers) {
     if (!m.position) continue;
     const [x, y] = worldToScreen(view, cs, m.position.x, m.position.y);
     const size = 22 * cs.dpr;
@@ -1685,11 +1690,11 @@ function drawProjectiles(ctx: CanvasRenderingContext2D, snap: Snapshot,
 // If the placer can't be resolved (offline, on a different map, etc.)
 // we silently skip — no guess line.
 function drawActionMarkerLines(ctx: CanvasRenderingContext2D,
-                                snap: Snapshot,
+                                snap: Snapshot, markers: Marker[],
                                 view: ViewState, cs: CanvasSize) {
   const players = snap.players ?? [];
   if (!players.length) return;
-  for (const m of snap.markers ?? []) {
+  for (const m of markers) {
     if (!m.position || !m.type) continue;
     if (!/^BP_MapMarker_Action_/i.test(m.type)) continue;
     if (m.team == null || m.squad == null) continue;
@@ -1734,6 +1739,313 @@ function drawActionMarkerLines(ctx: CanvasRenderingContext2D,
   }
 }
 
+// ---- the commander's layer -------------------------------------------------
+//
+// Three things the recorder now writes and the map never drew: the footprint
+// a called asset covers, the request a squad leader asked with, and the
+// asset itself — the aircraft on its run, the guns at their origin, the UAV
+// on station. All three are shapes at TRUE MAP SCALE, in world centimetres,
+// because their whole value is how much ground they cover.
+
+/** A dashed ring. Used for a request's 50 m circle and for the outer band of
+ *  a barrage, both of which are "roughly here" rather than a hard edge. */
+function worldRing(ctx: CanvasRenderingContext2D, view: ViewState,
+                   cs: CanvasSize, wx: number, wy: number, radiusCm: number,
+                   col: string, dpr: number, dash: number[] | null) {
+  const [cx, cy] = worldToScreen(view, cs, wx, wy);
+  const [ex] = worldToScreen(view, cs, wx + radiusCm, wy);
+  const r = Math.abs(ex - cx);
+  if (!(r > 1)) return;                       // zoomed out past legibility
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (dash) ctx.setLineDash(dash.map((d) => d * dpr));
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.4 * dpr;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** The four asset shapes of spec §9, each from the marker's own `distance`,
+ *  `addDistance` and `yaw`, drawn on the ground at true scale. */
+function drawCommandFootprints(ctx: CanvasRenderingContext2D,
+                               markers: Marker[], view: ViewState,
+                               cs: CanvasSize) {
+  const dpr = cs.dpr;
+  for (const m of markers) {
+    const fp = commandFootprint(m);
+    if (!fp) continue;
+    const col = teamColor(m.team);
+    if (fp.kind === "circle") {
+      const [cx, cy] = worldToScreen(view, cs, fp.x, fp.y);
+      const [ex] = worldToScreen(view, cs, fp.x + fp.radius, fp.y);
+      const r = Math.abs(ex - cx);
+      if (r > 1) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.13;
+        ctx.fill();
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.6 * dpr;
+        ctx.stroke();
+        ctx.restore();
+      }
+      // The secondary figure: the ring the rounds can stray into.
+      if (fp.band > 0) {
+        worldRing(ctx, view, cs, fp.x, fp.y, fp.radius + fp.band, col, dpr,
+                  [5, 4]);
+      }
+      continue;
+    }
+    if (fp.kind === "aimPoints") {
+      // Two points and the line the run takes between them — the strike
+      // itself is the projectiles, which the projectile layer already draws.
+      const pts = fp.points.map(
+        (p) => worldToScreen(view, cs, p.x, p.y) as [number, number]);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0]![0], pts[0]![1]);
+      ctx.lineTo(pts[1]![0], pts[1]![1]);
+      ctx.setLineDash([6 * dpr, 5 * dpr]);
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.75;
+      ctx.lineWidth = 1.4 * dpr;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      for (const [px, py] of pts) {
+        ctx.beginPath();
+        ctx.arc(px, py, 4 * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.lineWidth = 1.2 * dpr;
+        ctx.strokeStyle = "rgba(0,0,0,0.75)";
+        ctx.stroke();
+      }
+      ctx.restore();
+      continue;
+    }
+    // A run or a path: the same line, the path drawn inside its scatter band.
+    const [ax, ay] = worldToScreen(view, cs, fp.x, fp.y);
+    const [bx, by] = worldToScreen(view, cs, fp.endX, fp.endY);
+    ctx.save();
+    if (fp.kind === "path" && fp.scatter > 0) {
+      // The band is the scatter either side of the run, so it is a thick
+      // translucent stroke of that width — in world units, projected.
+      const [sx] = worldToScreen(view, cs, fp.x + fp.scatter, fp.y);
+      const halfPx = Math.abs(sx - ax);
+      if (halfPx > 1) {
+        ctx.beginPath();
+        ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+        ctx.lineCap = "round";
+        ctx.lineWidth = halfPx * 2;
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.12;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.beginPath();
+    ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.lineWidth = 3.2 * dpr;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.8 * dpr;
+    ctx.stroke();
+    // A tick at the far end so the direction of the run reads.
+    ctx.beginPath();
+    ctx.arc(bx, by, 3.4 * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** A squad leader's tactical request: the 50 m circle the game draws around
+ *  an APPROVED one, and a dashed ring around one still waiting.
+ *
+ *  The 50 m is a documented game constant (measured 49.95 m and 50.20 m on
+ *  two maps) and is absent from server memory, so it comes from here and the
+ *  recorder will never carry it. A pending request gets the same circle in
+ *  outline only: it is where the commander would place, not where anything
+ *  has been placed. */
+function drawRequests(ctx: CanvasRenderingContext2D, markers: Marker[],
+                      view: ViewState, cs: CanvasSize) {
+  for (const r of requestsOnMap(markers)) {
+    const col = teamColor(r.team);
+    const approved = r.phase === "approved";
+    const [cx, cy] = worldToScreen(view, cs, r.position.x, r.position.y);
+    const [ex] = worldToScreen(view, cs, r.position.x + REQUEST_CIRCLE_CM,
+                               r.position.y);
+    const rad = Math.abs(ex - cx);
+    if (rad > 1) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      if (approved) {
+        ctx.fillStyle = col;
+        ctx.globalAlpha = 0.1;
+        ctx.fill();
+        ctx.globalAlpha = 0.95;
+      } else {
+        ctx.setLineDash([6 * cs.dpr, 5 * cs.dpr]);
+        ctx.globalAlpha = 0.7;
+      }
+      ctx.strokeStyle = col;
+      ctx.lineWidth = (approved ? 1.8 : 1.2) * cs.dpr;
+      ctx.stroke();
+      ctx.restore();
+    }
+    // While the sweep has yet to take the pending twin, both markers are
+    // really there — say so with a small inner tick rather than a second
+    // circle, which would read as a second request.
+    if (approved && r.pendingId) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 7 * cs.dpr, 0, Math.PI * 2);
+      ctx.setLineDash([3 * cs.dpr, 3 * cs.dpr]);
+      ctx.strokeStyle = col;
+      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = 1.2 * cs.dpr;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+/** A label with a dark outline, the way every other map label is drawn. */
+function mapLabel(ctx: CanvasRenderingContext2D, text: string,
+                  x: number, y: number, cs: CanvasSize) {
+  const fontPx = Math.max(10, Math.round(10.5 * cs.dpr));
+  ctx.save();
+  ctx.font = `600 ${fontPx}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.lineWidth = Math.max(2, fontPx * 0.25);
+  ctx.strokeStyle = "rgba(0,0,0,0.9)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** The commander's assets themselves, as icons: an aircraft on its run,
+ *  the guns at their origin, the UAV on station.
+ *
+ *  The drone's CALL actor draws nothing — its root position reads (0, 0, z)
+ *  and means nothing, and its life outruns the pawn's, so the drone the
+ *  viewer draws is the pawn on the `drones` layer. The test is the position
+ *  itself, not the class name: nothing here is matched by name. */
+function drawCommandActors(ctx: CanvasRenderingContext2D, snap: Snapshot,
+                           view: ViewState, cs: CanvasSize) {
+  const dpr = cs.dpr;
+  for (const a of snap.commandActions ?? []) {
+    if (!a.position) continue;
+    if (a.position.x === 0 && a.position.y === 0) continue;
+    const [x, y] = worldToScreen(view, cs, a.position.x, a.position.y);
+    const col = teamColor(a.team ?? null);
+    const cut = isShotDown(a);
+    const r = 8 * dpr;
+    ctx.save();
+    // A chevron pointing the way the actor faces — an aircraft's run, the
+    // creep's bearing — inside a disc, so it reads at map scale.
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = cut ? "rgba(26,32,42,0.85)" : col;
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 4 * dpr;
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.strokeStyle = cut ? col : "rgba(0,0,0,0.75)";
+    ctx.stroke();
+    if (a.yaw != null && Number.isFinite(a.yaw)) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate((a.yaw * Math.PI) / 180);
+      ctx.beginPath();
+      ctx.moveTo(r * 0.62, 0);
+      ctx.lineTo(-r * 0.36, -r * 0.44);
+      ctx.lineTo(-r * 0.36, r * 0.44);
+      ctx.closePath();
+      ctx.fillStyle = cut ? col : "rgba(255,255,255,0.92)";
+      ctx.fill();
+      ctx.restore();
+    }
+    // Shot down: struck through. Who did it is not recorded, so nothing here
+    // says who — only that the call was cut short.
+    if (cut) {
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.8, y - r * 0.8);
+      ctx.lineTo(x + r * 0.8, y + r * 0.8);
+      ctx.moveTo(x + r * 0.8, y - r * 0.8);
+      ctx.lineTo(x - r * 0.8, y + r * 0.8);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2 * dpr;
+      ctx.stroke();
+    }
+    ctx.restore();
+    // The config's own display text where the commander block carries it —
+    // never a label invented from the class name.
+    const label = actionDisplayName(a.action, snap.teams, a.team ?? null);
+    if (label) mapLabel(ctx, label, x, y + r + 2 * dpr, cs);
+  }
+}
+
+/** Every drone pawn up this frame — the commander's called one and the recon
+ *  kit's alike. Stop drawing at `dead`: the pawn is still in the list while
+ *  it falls, but it is no longer a drone anyone is flying. */
+function drawDrones(ctx: CanvasRenderingContext2D, snap: Snapshot,
+                    view: ViewState, cs: CanvasSize) {
+  const dpr = cs.dpr;
+  for (const d of snap.drones ?? []) {
+    if (!d.position) continue;
+    const [x, y] = worldToScreen(view, cs, d.position.x, d.position.y);
+    // The pawn carries no team; it flies for whoever deployed it.
+    const owner = d.ownerEosId
+      ? (snap.players ?? []).find((p) => p.eosId === d.ownerEosId) : null;
+    const col = teamColor(owner?.teamId ?? null);
+    const r = 5.5 * dpr;
+    ctx.save();
+    if (d.dead) {
+      // A wreck, drawn once and faintly: it is where the drone died, which
+      // is worth seeing, but it is not a drone in the air.
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+      ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.8 * dpr;
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+    // Four rotors around a body — a quadcopter at a glance.
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = col;
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 3 * dpr;
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      ctx.beginPath();
+      ctx.arc(x + dx * r, y + dy * r, r * 0.42, 0, Math.PI * 2);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.2 * dpr;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 // Which entity families to draw. Absent/true = draw. Structural layers
 // (map texture, grid, lanes, capture zones, FOB radii) are always drawn;
 // only the toggleable entity families are gated.
@@ -1745,6 +2057,8 @@ export interface LayerVisibility {
   projectiles?: boolean;
   spawners?: boolean;
   rallies?: boolean;
+  commandAssets?: boolean;
+  drones?: boolean;
   slNumbers?: boolean;
   squadNumbers?: boolean;
 }
@@ -1760,21 +2074,36 @@ export function renderScene(ctx: CanvasRenderingContext2D, snap: Snapshot,
   const showSLNumbers = layers?.slNumbers !== false;
   const showAllNumbers = layers?.squadNumbers === true;
   ctx.clearRect(0, 0, cs.width, cs.height);
+  // One placement, one shape. A squad leader's marker is two markers to the
+  // game — the squad-data one their own squad sees and the team actor one
+  // every other squad leader sees — and the recorder records both, because
+  // they are two real objects. Merging them is the viewer's rule (spec §9),
+  // and it happens once here so the drawn list and the hit-tested one cannot
+  // disagree.
+  const markers = dedupeMarkers(snap.markers);
   const hadTex = drawMapTexture(ctx, snap, view, cs);
   // Background overlays first — FOB radii are giant translucent discs
   // that should sit between the map texture and the entity badges.
   if (on("deployables")) drawFobRadii(ctx, snap, view, cs);
   if (!hadTex) drawGrid(ctx, view, cs);
   drawLane(ctx, snap, view, cs);
+  // The commander's ground: footprints and request circles are areas, so
+  // they belong under every icon that stands on them.
+  if (on("commandAssets")) {
+    drawCommandFootprints(ctx, markers, view, cs);
+    drawRequests(ctx, markers, view, cs);
+  }
   // Action-marker command lines as a low-level overlay — drawn before
   // any entity icon so vehicles / deployables / markers / players all
   // sit on top of the line, never under it.
-  if (on("markers")) drawActionMarkerLines(ctx, snap, view, cs);
+  if (on("markers")) drawActionMarkerLines(ctx, snap, markers, view, cs);
   if (on("spawners")) drawSpawners(ctx, snap, view, cs);
   if (on("deployables")) drawDeployables(ctx, snap, view, cs);
   drawCaps(ctx, snap, view, cs);
   if (on("vehicles")) drawVehicles(ctx, snap, view, cs, showAllNumbers);
-  if (on("markers")) drawMarkers(ctx, snap, view, cs);
+  if (on("markers")) drawMarkers(ctx, markers, view, cs);
+  if (on("commandAssets")) drawCommandActors(ctx, snap, view, cs);
+  if (on("drones")) drawDrones(ctx, snap, view, cs);
   if (on("rallies")) drawRallyPoints(ctx, snap, view, cs);
   if (on("players")) drawPlayers(ctx, snap, view, cs, showSLNumbers, showAllNumbers, follow ?? null);
   if (on("projectiles")) drawProjectiles(ctx, snap, view, cs);

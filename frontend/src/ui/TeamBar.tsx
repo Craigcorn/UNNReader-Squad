@@ -19,7 +19,46 @@ function shortFaction(id: string | null | undefined): string {
   return id.split("_")[0] || id;
 }
 
-function TeamCol({ team, align }: { team: TeamState | undefined; align: "left" | "right" }) {
+// The commander seat, one line under a team's tickets. The seat itself is a
+// per-frame field, so nothing falls between frames: a claim, a step-down and
+// a team switch (which behaves as a step-down) all show as the name changing
+// or clearing. `null` there is an EMPTY seat, read successfully; the field
+// missing means the recorder could not read it, and the line then says
+// nothing at all rather than "no commander".
+function CommanderLine({ team, onOpen }: {
+  team: TeamState | undefined; onOpen: () => void;
+}) {
+  const c = team?.commander;
+  if (!c && team?.commanderName === undefined) return null;
+  const vote = c?.vote;
+  const voting = vote?.inProgress === true;
+  const name = team?.commanderName;
+  const seat = name ? name
+    : name === null ? "no commander"
+    : "—";
+  return (
+    <button className="tb-commander" onClick={onOpen}
+            title="commander, vote and cooldowns">
+      <span className="tb-cmd-star">★</span>
+      <span className="tb-cmd-name">{seat}</span>
+      {voting && (
+        <span className="tb-cmd-vote">
+          vote {vote?.timer != null ? `${vote.timer}s` : ""}
+        </span>
+      )}
+      {!voting && c?.actionsEnabled === false && name && (
+        // The commander's presence in a command zone, both ways — walked out
+        // and back in, 2026-09-07. Not a guess: it is the team's own flag.
+        <span className="tb-cmd-off" title="out of a command zone">no zone</span>
+      )}
+    </button>
+  );
+}
+
+function TeamCol({ team, align, onOpenCommander }: {
+  team: TeamState | undefined; align: "left" | "right";
+  onOpenCommander: () => void;
+}) {
   const id = team?.id ?? (align === "left" ? 1 : 2);
   const tickets = team?.tickets;
   const kd = `${team?.kills ?? 0} / ${team?.deaths ?? 0}`;
@@ -34,12 +73,14 @@ function TeamCol({ team, align }: { team: TeamState | undefined; align: "left" |
         <span className="tb-players">{team?.playerCount ?? "—"}👤</span>
         <span className="tb-kd">{kd}</span>
       </div>
+      <CommanderLine team={team} onOpen={onOpenCommander} />
     </div>
   );
 }
 
 export function TeamBar() {
   const curSnap = useViewerStore((s) => s.curSnap);
+  const setCommanderTeam = useViewerStore((s) => s.setCommanderPanelTeam);
   const gs = curSnap?.gameState ?? null;
   const teams = curSnap?.teams ?? [];
   const t1 = teams.find((t) => t.id === 1) ?? teams[0];
@@ -57,7 +98,8 @@ export function TeamBar() {
 
   return (
     <div id="team-bar">
-      <TeamCol team={t1} align="left" />
+      <TeamCol team={t1} align="left"
+               onOpenCommander={() => setCommanderTeam(t1?.id ?? 1)} />
       <div className="tb-centre">
         <div className="tb-map">{mapLine}</div>
         <div className="tb-clock">{fmtClock(gs?.elapsedSec)}
@@ -68,7 +110,8 @@ export function TeamBar() {
           <div className="tb-tb-fill tb-tb-2" style={{ width: `${100 - pct1}%` }} />
         </div>
       </div>
-      <TeamCol team={t2} align="right" />
+      <TeamCol team={t2} align="right"
+               onOpenCommander={() => setCommanderTeam(t2?.id ?? 2)} />
     </div>
   );
 }

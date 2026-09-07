@@ -8,10 +8,17 @@ import { teamColor } from "../canvas/draw";
 import { vehicleDisplayName } from "../data/vehicleDisplayNames";
 import { useViewerStore } from "../state/viewerStore";
 import type {
-  CaptureZone, Deployable, Marker, Projectile, RallyPoint, Vec3,
-  VehicleSpawner,
+  CaptureZone, CommandAction, Deployable, Drone, Marker, Projectile,
+  RallyPoint, Snapshot, Vec3, VehicleSpawner,
 } from "../state/types";
-import { fmtInt, ftLabel, findPlacer, markerLabel } from "./entityInfo";
+import {
+  artilleryPhase, artilleryTimeline, isArtillery, isShotDown,
+} from "../state/commander/assets";
+import { droneBudgetSec, droneTeam } from "../state/commander/drones";
+import { actionDisplayName, findActionEntry } from "../state/commander/readyIn";
+import {
+  fmtDuration, fmtInt, ftLabel, findPlacer, markerLabel, playerLabel,
+} from "./entityInfo";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -217,6 +224,126 @@ function ProjectileBody({ e }: { e: Projectile }) {
   );
 }
 
+/** A called asset: what it is, who called it, and where it is in its plan.
+ *
+ *  Everything shown is a read off this frame or an arithmetic over it. Who
+ *  shot an asset down is NOT shown, because it is not recorded: no
+ *  last-damager field exists on any command actor, the server log carries no
+ *  line for it, and nothing nearby is read as one (decision D18). */
+function CommandActionBody({ e, snap }: { e: CommandAction; snap: Snapshot | null }) {
+  const entry = findActionEntry(e.action, snap?.teams, e.team ?? null);
+  const now = snap?.gameState?.worldTimeSec ?? null;
+  const caller = playerLabel(e.callerEosId, snap?.players);
+  const t = isArtillery(e) ? artilleryTimeline(e, entry) : null;
+  const phase = t ? artilleryPhase(t, now) : null;
+  return (
+    <>
+      <Row label="TEAM">{e.team ?? "—"}</Row>
+      <Row label="CALLED BY">
+        {caller ? <b>{caller}</b>
+          : e.callerEosId === null
+            ? <span className="info-mute">nobody — no caller on the actor</span>
+            : <span className="info-mute">off the roster</span>}
+      </Row>
+      {isShotDown(e) && (
+        <Row label="STATE">
+          <span className="info-danger">shot down — the call was cut short</span>
+        </Row>
+      )}
+      {e.shotsMade != null && (
+        <Row label="SHOTS">{fmtInt(e.shotsMade)}
+          {e.maxShots != null ? ` / ${fmtInt(e.maxShots)}` : ""}</Row>
+      )}
+      {t && <>
+        {phase && <Row label="PHASE">{phase}</Row>}
+        {t.gunsOpenGameTime != null && now != null && (
+          <Row label="GUNS OPEN">
+            <span className="info-mono">
+              {fmtDuration(t.gunsOpenGameTime - now) ?? "—"}
+            </span>
+          </Row>
+        )}
+        {t.hasWarningPhase === true && (
+          <Row label="WARNING">{fmtInt(t.warningShellsFired)} / {fmtInt(t.warningShellsTotal)} shells</Row>
+        )}
+        {t.barrageCount != null && (
+          <Row label="BARRAGE">{fmtInt(t.currentBarrage)} / {fmtInt(t.barrageCount)}
+            {e.shellsPerBarrage != null ? ` · ${fmtInt(e.shellsPerBarrage)} shells each` : ""}</Row>
+        )}
+        {e.projectile && (
+          <Row label="ROUND"><span className="info-mono">{e.projectile}</span></Row>
+        )}
+      </>}
+      {e.action !== undefined && (
+        <Row label="ACTION">
+          <span className="info-mono">{e.action ?? "—"}</span>
+        </Row>
+      )}
+      <Row label="CLASS"><span className="info-mono">{e.class ?? "—"}</span></Row>
+      <Row label="ID">{e.id}</Row>
+      {posRow(e.position)}
+    </>
+  );
+}
+
+/** A drone pawn: who is flying it, who deployed it, and what became of it.
+ *
+ *  Its team is the owner's — the pawn carries none — and its killer, where
+ *  it has one, is the hitter at the moment of the death rather than the last
+ *  one to hit the falling wreck. Both are read at the frame's own resolution
+ *  here; the whole-recording answer is on the drone track. */
+function DroneBody({ e, snap }: { e: Drone; snap: Snapshot | null }) {
+  const pilot = playerLabel(e.pilotEosId, snap?.players);
+  const owner = playerLabel(e.ownerEosId, snap?.players);
+  const hitter = playerLabel(e.lastHitByEosId, snap?.players);
+  const budget = droneBudgetSec(e, snap?.teams);
+  return (
+    <>
+      <Row label="TEAM">{droneTeam(e, snap) ?? "—"}
+        <span className="info-mute"> · from the owner</span></Row>
+      {e.dead && (
+        <Row label="STATE"><span className="info-danger">destroyed</span></Row>
+      )}
+      {(e.health != null || e.maxHealth != null) && (
+        <Bar label="HP" cur={e.health} max={e.maxHealth} />
+      )}
+      <Row label="PILOT">
+        {pilot ? <b>{pilot}</b>
+          : e.pilotEosId === null
+            ? <span className="info-mute">nobody flying it</span>
+            : <span className="info-mute">off the roster</span>}
+      </Row>
+      <Row label="OWNER">
+        {owner ? <b>{owner}</b> : <span className="info-mute">—</span>}
+      </Row>
+      {e.lastHitByEosId !== undefined && (
+        <Row label="LAST HIT BY">
+          {hitter ? <b>{hitter}</b>
+            : e.lastHitByEosId === null
+              ? <span className="info-mute">nothing has hit it</span>
+              : <span className="info-mute">off the roster</span>}
+        </Row>
+      )}
+      {budget != null && (
+        <Row label="BUDGET"><span className="info-mono">
+          {fmtDuration(budget)}</span>
+          <span className="info-mute">
+            {e.batteryLifetimeMax != null ? " · battery" : " · the call's window"}
+          </span>
+        </Row>
+      )}
+      {e.commandAction !== undefined && e.commandAction !== null && (
+        <Row label="CALLED BY">
+          <span className="info-mono">{e.commandAction}</span>
+        </Row>
+      )}
+      <Row label="CLASS"><span className="info-mono">{e.class ?? "—"}</span></Row>
+      <Row label="ID">{e.id}</Row>
+      {posRow(e.position)}
+    </>
+  );
+}
+
 // ---- panel shell -----------------------------------------------------------
 
 export function InfoPanel() {
@@ -267,6 +394,27 @@ export function InfoPanel() {
     case "projectile": {
       const e = find<Projectile>(snap?.projectiles);
       if (e) { title = e.classShort ?? "Projectile"; team = e.team; bodyEl = <ProjectileBody e={e} />; }
+      break;
+    }
+    case "commandAction": {
+      const e = find<CommandAction>(snap?.commandActions);
+      if (e) {
+        // The config's own display text where the commander block carries
+        // it; the class name otherwise, never a label made up from it.
+        title = actionDisplayName(e.action, snap?.teams, e.team ?? null)
+          ?? e.class ?? "Command asset";
+        team = e.team ?? null;
+        bodyEl = <CommandActionBody e={e} snap={snap} />;
+      }
+      break;
+    }
+    case "drone": {
+      const e = find<Drone>(snap?.drones);
+      if (e) {
+        title = e.class ?? "Drone";
+        team = droneTeam(e, snap);
+        bodyEl = <DroneBody e={e} snap={snap} />;
+      }
       break;
     }
   }

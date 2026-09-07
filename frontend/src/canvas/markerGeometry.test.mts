@@ -3,7 +3,7 @@
 // glyph, so an order dragged across half the map was drawn as one soldier
 // standing where the drag began — indistinguishable from a spotted enemy.
 // Framework-free, same as the tests beside it.
-import { arrowEnd, markerShape } from "./markerGeometry.ts";
+import { arrowEnd, commandFootprint, markerShape } from "./markerGeometry.ts";
 
 let passed = 0, failed = 0;
 function ok(cond: any, msg: string) {
@@ -76,6 +76,85 @@ ok(arrowEnd(mk({ type: "director", arrowLength: 1000,
 ok(arrowEnd(mk({ type: "director", arrowLength: 1000, arrowHeading: 45,
                  position: null })) === null,
    "an arrow with no start point has no end point");
+
+// --- command-asset footprints ------------------------------------------------
+// The figures are the spec's own (§5): a UAV's chosen 16608 coverage radius,
+// the static barrage's 15000 with a 7500 outer band, the mortar's fixed 7500
+// with 4500, a strike run's chosen 6000, the creep's 45000 path with 7500 of
+// drop scatter, an aim line's 4475.
+{
+  const uav = commandFootprint(mk({
+    type: "BP_MapMarker_CommandRadius_Friendly_C",
+    distance: 16608, addDistance: 0, yaw: 45,
+    action: "CommandAction_UAV_MQ9_USMC_C" }))!;
+  ok(uav.kind === "circle", "a coverage marker is a circle");
+  if (uav.kind === "circle") {
+    near(uav.radius, 16608, "of the radius the commander chose");
+    near(uav.band, 0, "with no outer band when addDistance is zero");
+  }
+
+  const barrage = commandFootprint(mk({
+    type: "BP_MapMarker_CommandRadius_C", distance: 15000,
+    addDistance: 7500, yaw: 0 }))!;
+  ok(barrage.kind === "circle", "a static barrage is a circle too");
+  if (barrage.kind === "circle") near(barrage.band, 7500, "with an outer band");
+
+  const mortar = commandFootprint(mk({
+    type: "BP_MapMarker_CommandRadius_C", distance: 7500,
+    addDistance: 4500, yaw: 0 }))!;
+  if (mortar.kind === "circle") {
+    near(mortar.radius, 7500, "the mortar's radius is fixed");
+    near(mortar.band, 4500, "and its band with it");
+  }
+
+  const run = commandFootprint(mk({
+    type: "BP_MapMarker_CommandLine_C", distance: 6000, addDistance: 0,
+    yaw: 0 }))!;
+  ok(run.kind === "run", "a strike marker is a run");
+  if (run.kind === "run") {
+    near(run.endX, 6000, "along its yaw");
+    near(run.endY, 0, "and nowhere else");
+  }
+
+  const creep = commandFootprint(mk({
+    type: "BP_MapMarker_CommandPath_C", distance: 45000, addDistance: 7500,
+    yaw: 90 }))!;
+  ok(creep.kind === "path", "a creeping barrage is a path");
+  if (creep.kind === "path") {
+    near(creep.endY, 45000, "45000 long, the same figure its actor carries");
+    near(creep.scatter, 7500, "with the drop scatter either side");
+  }
+
+  const aim = commandFootprint(mk({
+    type: "BP_MapMarker_CommandLineRadius_C", distance: 4475, addDistance: 0,
+    yaw: 180, position: { x: 1000, y: 2000, z: 0 } }))!;
+  ok(aim.kind === "aimPoints", "a precision strike is two aim points");
+  if (aim.kind === "aimPoints") {
+    ok(aim.points.length === 2, "exactly two");
+    near(aim.points[0]!.x, 1000, "the first at the marker");
+    near(aim.points[1]!.x, 1000 - 4475, "the second `distance` along the yaw");
+  }
+}
+
+// --- what draws nothing ------------------------------------------------------
+{
+  ok(commandFootprint(mk({ type: "BP_MapMarker_POI" })) === null,
+     "a POI is no one's footprint");
+  ok(commandFootprint(mk({ type: "BP_MapMarker_Command_SLRequest_C",
+                           distance: 0, addDistance: 0, action: null })) === null,
+     "a request has no shape of its own: its `distance` reads 0");
+  ok(commandFootprint(mk({ type: "BP_MapMarker_CommandLine_C",
+                           distance: 6000 })) === null,
+     "a run with no bearing is refused, not drawn along zero");
+  ok(commandFootprint(mk({ type: "BP_MapMarker_CommandLine_C",
+                           distance: 6000, yaw: NaN })) === null,
+     "and a NaN bearing with it");
+  ok(commandFootprint(mk({ type: "BP_MapMarker_CommandRadius_C" })) === null,
+     "a recording made before the geometry was read draws no circle");
+  ok(commandFootprint(mk({ type: "BP_MapMarker_CommandRadius_C",
+                           distance: 15000, position: null })) === null,
+     "and a footprint with nowhere to sit is not drawn at the origin");
+}
 
 console.log(`markerGeometry: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

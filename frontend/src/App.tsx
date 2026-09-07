@@ -9,6 +9,7 @@ import { PlayerSearch } from "./ui/PlayerSearch";
 import { Tooltip } from "./ui/Tooltip";
 import { PlayerPanel, playerKey } from "./ui/PlayerPanel";
 import { InfoPanel } from "./ui/InfoPanel";
+import { CommanderPanel } from "./ui/CommanderPanel";
 import { Home } from "./ui/Home";
 
 // The vehicle panel drags in the 433 KB vehicle-loadout catalog, which nothing
@@ -128,6 +129,7 @@ export default function App() {
         setSelectedInfo(null);
         setScoreboardVisible(false);
         setTimelineVisible(false);
+        useViewerStore.getState().setCommanderPanelTeam(null);
       } else if (e.key === "Tab") {
         e.preventDefault();
         toggleScoreboard();
@@ -182,6 +184,7 @@ export default function App() {
             <Suspense fallback={null}><VehiclePanel /></Suspense>}
           <PlayerPanel />
           <InfoPanel />
+          <CommanderPanel />
           <KillFeed />
           <TimelineBar />
         </div>

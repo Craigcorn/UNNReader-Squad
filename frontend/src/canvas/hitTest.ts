@@ -1,13 +1,16 @@
 // Cursor → entity hit testing, in world coordinates so it scales with zoom.
 
-import type { CaptureZone, Deployable, Marker, Player, Projectile,
-  RallyPoint, Snapshot, Vec3, Vehicle, VehicleSpawner } from "../state/types";
+import type { CaptureZone, CommandAction, Deployable, Drone, Marker, Player,
+  Projectile, RallyPoint, Snapshot, Vec3, Vehicle,
+  VehicleSpawner } from "../state/types";
+import { dedupeMarkers } from "../state/commander/markers";
 import { visibleCaps } from "./capVisibility";
 import { isAdminCam } from "./draw";
 
 export type HitType =
   | "player" | "vehicle" | "deployable" | "spawner"
-  | "marker" | "projectile" | "capzone" | "rally";
+  | "marker" | "projectile" | "capzone" | "rally"
+  | "commandAction" | "drone";
 
 export type HitEntity =
   | { type: "player"; e: Player }
@@ -17,7 +20,9 @@ export type HitEntity =
   | { type: "marker"; e: Marker }
   | { type: "projectile"; e: Projectile }
   | { type: "capzone"; e: CaptureZone }
-  | { type: "rally"; e: RallyPoint };
+  | { type: "rally"; e: RallyPoint }
+  | { type: "commandAction"; e: CommandAction }
+  | { type: "drone"; e: Drone };
 
 export interface Hit { d2: number; hit: HitEntity; }
 
@@ -45,7 +50,16 @@ export function hitTest(snap: Snapshot | null, wx: number, wy: number,
     consider({ type: "player", e: p }, p.soldier.position, r2);
   }
   for (const pr of snap.projectiles ?? []) consider({ type: "projectile", e: pr }, pr.position, r2);
-  for (const m of snap.markers ?? [])       consider({ type: "marker", e: m }, m.position, r2);
+  // The de-duped list, not the raw one: a marker the map merged away is not
+  // drawn, and an invisible hover target is worse than a visible one.
+  for (const m of dedupeMarkers(snap.markers)) consider({ type: "marker", e: m }, m.position, r2);
+  for (const a of snap.commandActions ?? []) {
+    // The drone's call actor is not on the map — its position reads (0, 0, z)
+    // and means nothing — so it must not be clickable either.
+    if (a.position && (a.position.x !== 0 || a.position.y !== 0))
+      consider({ type: "commandAction", e: a }, a.position, r2);
+  }
+  for (const d of snap.drones ?? []) consider({ type: "drone", e: d }, d.position, r2);
   // Emplacement guns are not drawn (the deployable badge is the ONE map
   // element for an emplacement), so they must not capture hovers either.
   // Instead an armed deployable's hit IS its gun: tooltip and click then
