@@ -324,6 +324,27 @@ export interface Marker {
   iconClass?: string | null;
   squadStateAddr?: string | null;
   visible?: boolean | null;
+  // ---- Command / Director geometry (docs/schema.md "Marker geometry",
+  // spec §5). Read by NAME off the marker's own class, so which of these
+  // four a marker carries is decided by that class and nothing else: the
+  // Command family carries all four, the Director family `distance` and
+  // `yaw`, every other actor marker none. Absent on every recording made
+  // before 2026-09-07 and on every marker whose class lacks the name —
+  // draw nothing for those, never a default.
+  //
+  // `distance` is the marker's own length figure in raw game units (cm):
+  // a coverage or barrage circle's radius, a strike run's length, a creeping
+  // barrage's path length, an aim line's separation. It reads 0 on a request
+  // marker, which has no shape of its own. `addDistance` is the secondary
+  // figure — the drop scatter or the outer band. `yaw` is degrees, world,
+  // and rides wherever `distance` does. `action` is the CommandAction_*
+  // config the footprint belongs to (a join to
+  // teams[].commander.cooldowns.actions[].action) and is explicitly `null`
+  // on a request marker, which belongs to no config.
+  distance?: number;
+  addDistance?: number;
+  yaw?: number;
+  action?: string | null;
 }
 
 export interface Projectile {
@@ -349,6 +370,185 @@ export interface Projectile {
   firer?: string | null;
 }
 
+// ----- the commander block (docs/schema.md "Commander block", spec §3/§4) ---
+//
+// Absence has two meanings here and they are kept apart deliberately: `null`
+// is the game's own empty, read successfully (no commander in the seat, no
+// element at that index yet); a MISSING key is "the recorder could not read
+// it" (the property is not in the class, a pointer led nowhere, the read
+// failed). So a consumer that sees `null` knows "none" and one that sees
+// nothing knows "unknown" — and nothing here is ever defaulted or carried
+// over from the previous frame. Every "ready in", every "vote resolved" is
+// the viewer's to derive from this per-frame state; see state/commander/.
+
+/** One nominee and the live tally. Entries persist after a vote resolves —
+ *  that is the game's own state, recorded as read. */
+export interface CommanderNominee {
+  eosId?: string | null;
+  name?: string | null;
+  votes?: number;
+}
+
+export interface CommanderVote {
+  inProgress?: boolean;
+  /** Seconds left in the vote window; reads 0 when no vote is open. */
+  timer?: number;
+  /** End time on the same game clock as gameState.worldTimeSec. */
+  endsGameTime?: number;
+  /** `[]` while the array is empty (read, and none). */
+  nominees?: CommanderNominee[];
+  cooldownActive?: boolean;
+  cooldownTimer?: number;
+  cooldownEndsGameTime?: number;
+}
+
+/** The per-category gate. `id` is the array index — the index the last-use
+ *  stamps are keyed by and the value an action's `categoryId` carries — and
+ *  is the one key in the whole block the recorder produces rather than reads.
+ *  `lastUseGameTime` is `null` until something in that category was called. */
+export interface CommanderCategoryCooldown {
+  id: number;
+  name?: string;
+  intervalSec?: number;
+  lastUseGameTime?: number | null;
+}
+
+/** One action the team can call. The four live values come from the entry;
+ *  the five config values are the action class's own defaults and ride every
+ *  frame, so a seek is self-describing. An entry whose action class reads
+ *  null carries `action` `null` and no config values. */
+export interface CommanderActionCooldown {
+  action?: string | null;
+  displayName?: string;
+  createdGameTime?: number;
+  /** Written by the game at a commander change and at a step-down and left
+   *  alone otherwise — the raw read, never a countdown. */
+  remainingAtChange?: number;
+  destroyedDuringActive?: boolean;
+  categoryId?: number;
+  enrouteSec?: number;
+  activeSec?: number;
+  cooldownSec?: number;
+}
+
+export interface TeamCommander {
+  /** The commander system exists on this layer — NOT "claimed": it reads
+   *  true on both teams while one of them has no commander. */
+  enabled?: boolean;
+  /** Live state: whether the team may issue commands this frame. */
+  actionsEnabled?: boolean;
+  vote?: CommanderVote;
+  cooldowns?: {
+    categories?: CommanderCategoryCooldown[];
+    actions?: CommanderActionCooldown[];
+  };
+}
+
+/** The server's own commander settings, off one live SQCommanderManager.
+ *  `commanderRules.enabled` is the SERVER setting; `commander.enabled` is a
+ *  team's state — two flags with the same word, deliberately distinct. */
+export interface CommanderRules {
+  enabled?: boolean;
+  votingTimeSec?: number;
+  voteCooldownSec?: number;
+  newCommanderExtensionSec?: number;
+  minSquadSize?: number;
+  minSquads?: number;
+}
+
+// ----- `commandActions` (docs/schema.md, spec §6) ---------------------------
+//
+// One entry per live command actor — the strike aircraft flying its run, the
+// artillery fire plan and its progress, the UAV on station, the drone's call
+// actor. The list is present ONLY while such an actor exists, so an absent
+// key means "no command asset in the air this frame", which is what every
+// recording made before 2026-09-07 says by carrying no key at all.
+//
+// The common half rides every entry; the family half rides wherever the
+// actor's own class declares the name, so a UAV carries the common half
+// alone. No class name is ever matched against.
+export interface CommandAction {
+  /** The actor's address as a lowercase hex string — new on every call. */
+  id: string;
+  /** The actor's class name verbatim, e.g. BP_CommandActor_Artillery_Creep_C. */
+  class: string | null;
+  team?: number;
+  /** The CommandAction_* config it belongs to — a join to
+   *  teams[].commander.cooldowns.actions[].action. `null` on a null pointer,
+   *  which is what the level's template actors read at a layer load. */
+  action?: string | null;
+  /** The commander who called it — the attribution pointer the game itself
+   *  uses for the asset's kills. */
+  callerEosId?: string | null;
+  position?: Vec3;
+  yaw?: number;
+  /** The call was cut short: true while a shot-down actor lingers. A natural
+   *  end removes the actor without any frame reading it. */
+  actionDestroyed?: boolean;
+  /** The actor's own length figure, raw game units. */
+  distance?: number;
+  // --- strike aircraft
+  shotsMade?: number;
+  maxShots?: number;
+  splineDistance?: number;
+  // --- artillery creep / static barrage / mortar barrage (the fire plan)
+  originLocation?: Vec3;
+  targetLocation?: Vec3;
+  maxDropRadius?: number;
+  preWarningShells?: number;
+  preWarningDelaySec?: number;
+  shellsPerBarrage?: number;
+  barrageCount?: number;
+  currentPrewarningShells?: number;
+  currentBarrage?: number;
+  projectile?: string | null;
+  // --- the commander drone's call actor
+  /** The commander who called the drone. On the PAWN the same-named field
+   *  holds the deployer instead (see Drone.ownerEosId). */
+  ownerEosId?: string | null;
+}
+
+// ----- `drones` (docs/schema.md, spec §7) -----------------------------------
+//
+// One entry per live drone pawn — the commander's called drone
+// (BP_FlyingDrone_C) and the recon kit's (BP_FlyingDrone_Recoverable_C,
+// which adds a battery). Present only while such a pawn exists; a drone had
+// never reached a file before 2026-09-07, being a Character rather than a
+// vehicle and so belonging to neither of the lists that already carried one.
+export interface Drone {
+  /** The pawn's address as a lowercase hex string. New on EVERY deploy:
+   *  picking a drone up destroys the pawn, so "the same drone across a
+   *  pickup" is a consumer's join on owner and time, never an identity the
+   *  recorder can see. */
+  id: string;
+  class: string | null;
+  position?: Vec3;
+  yaw?: number;
+  /** True from the moment the battery expires or the pawn is destroyed. */
+  dead?: boolean;
+  /** Off the pawn's HealthComponent — a separate object with its own class.
+   *  Both absent when that pointer reads null: there is nothing to read them
+   *  off, which is "could not read", not a zero. */
+  health?: number;
+  maxHealth?: number;
+  /** Whoever is flying it this frame; `null` while nobody is. */
+  pilotEosId?: string | null;
+  /** The deployer. Persists through de-possession and death, and a drone
+   *  cannot change hands, so it never moves. */
+  ownerEosId?: string | null;
+  /** The CommandAction_* config that called it; `null` on a recon drone. */
+  commandAction?: string | null;
+  /** The flight budget in seconds from spawn. Only the recon subclass
+   *  declares it — a commander drone's budget is its calling action's
+   *  `activeSec`, and the key is simply absent here. */
+  batteryLifetimeMax?: number;
+  /** Who last hit it — `null` until something has, the killer at the kill,
+   *  and it moves again as later hits land on the falling pawn. At one frame
+   *  a second that is the killer at lower resolution; the 4 Hz line carries
+   *  the same value quarter-second by quarter-second. */
+  lastHitByEosId?: string | null;
+}
+
 export interface TeamState {
   _addr?: string;
   id: number | null;
@@ -359,12 +559,19 @@ export interface TeamState {
   deaths: number | null;
   woundeds: number | null;
   factionId: string | null;
-  // The team's commander, identity read from their own PlayerState.
-  // All three absent when the team has no commander, and on recordings
-  // made before the agent read the field.
+  // The team's commander, identity read from their own PlayerState through
+  // SQCommanderState.CurrentCommander. `null` when that pointer reads null —
+  // an unclaimed seat — and absent when the read could not be made, or on a
+  // recording made before the agent read the field. (Both shipped empty from
+  // 2026-08-30 until the read was repaired: it treated the commander-state
+  // actor as a player state.)
   commanderStateAddr?: string | null;
   commanderName?: string | null;
   commanderEosId?: string | null;
+  // The seat's own state, the vote and the cooldowns. Present on every full
+  // frame whose team record reaches a commander state; absent on every
+  // recording made before 2026-09-07.
+  commander?: TeamCommander;
   playerCount: number | null;
   squadCount: number | null;
   vehicleSlotCount: number | null;
@@ -512,6 +719,10 @@ export interface GameState {
   layer?: LayerBounds | null;
   mapConfig?: unknown;
   lane?: LaneGraph | null;
+  // The server's own commander settings, six scalars every frame. The whole
+  // block is absent when no manager is live, when none of the six could be
+  // read, and on every recording made before 2026-09-07.
+  commanderRules?: CommanderRules;
 }
 
 export interface Snapshot {
@@ -544,6 +755,11 @@ export interface Snapshot {
   // Only on ticks whose log lines carried a revive — most frames have none,
   // and an empty array on every frame would cost bytes for nothing.
   reviveEvents?: ReviveEvent[];
+  // Both present only while such an entity exists, so an absent key means
+  // "none this frame" — which is also what every recording made before
+  // 2026-09-07 says by carrying no key at all.
+  commandActions?: CommandAction[];
+  drones?: Drone[];
 }
 
 // ----- two-tier recording: compact 4 Hz position frames --------------------
@@ -577,6 +793,28 @@ export interface PositionProjectile {
   z?: number | null;
 }
 
+// A drone moves at about 10 m/s and its death is the one thing about it that
+// happens between full frames, so it is sampled at 4 Hz beside the players
+// and vehicles. `id` is the same id as the full-frame entry, so the two join
+// without a lookup. There is no `h` — a drone's health changes only at death,
+// and `dead` says that — and no `team`, which the pawn does not carry either.
+export interface PositionDrone {
+  id: string;
+  x: number;
+  y: number;
+  z?: number | null;
+  yaw?: number | null;
+  // The ONE place in the recording where an absent key does not mean
+  // "unknown": both are written only once they are set, so absence here
+  // means "not set", and the full frame a second away carries the two-way
+  // reading. Deliberate, to keep the sample near 115 bytes per drone.
+  // The killer of a drone is the `lastHitBy` of the first sample carrying
+  // `dead`, exact to a quarter second: a second shooter has been seen moving
+  // the pointer 1.1 s after a kill, inside the full frame's one-second gap.
+  dead?: boolean;
+  lastHitBy?: string;
+}
+
 export interface PositionFrame {
   t: "pos";
   tick?: number;
@@ -587,6 +825,9 @@ export interface PositionFrame {
   // Recordings made before projectiles joined the 4 Hz sampler have no
   // such key — their missiles move at full-frame cadence only.
   projectiles?: PositionProjectile[];
+  // Written only while there is a drone to write, absent otherwise — which
+  // is every line recorded before 2026-09-07.
+  drones?: PositionDrone[];
 }
 
 // View transform: same model the old viewer used.

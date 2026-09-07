@@ -3,6 +3,7 @@
 import {
   buildProjectileTimelines,
   interpolateProjectilesBetweenFulls,
+  mergeDroneDeaths,
   ReplayReconstructor,
   reconstructFromPosition,
   isPositionFrame,
@@ -280,6 +281,105 @@ eq(isPositionFrame(full(1)), false, "full frame not a pos frame");
      "launcher + first sample + the far sample; the 1 m step is spaced out");
   eq(tow[2]!.t, Date.parse("2026-01-01T00:00:03+00:00"),
      "points carry the capture time of the frame that produced them");
+}
+
+// --- drones spliced by id, and the death carry ------------------------------
+//
+// A drone flies at ~10 m/s and dies between full frames, so the 4 Hz line
+// carries both. `dead` and `lastHitBy` are the one place in the recording
+// where an absent key means "not set" rather than "unknown" — so they hold
+// for the rest of the interval and are dropped by the next full frame.
+{
+  const drone = (o: any = {}) => ({
+    id: "0xd1", class: "BP_FlyingDrone_Recoverable_C",
+    position: { x: 100, y: 200, z: 4000 }, yaw: 10,
+    dead: false, health: 15, maxHealth: 15,
+    pilotEosId: "eos-pilot", ownerEosId: "eos-owner",
+    commandAction: null, batteryLifetimeMax: 100, lastHitByEosId: null,
+    ...o,
+  });
+  const dFull = (tick: number, drones: any[]): any => ({
+    ...full(tick), drones,
+  });
+  const dPos = (tick: number, drones: any[] | null): any => {
+    const f = pos(tick, [], []);
+    if (drones) f.drones = drones;
+    return f;
+  };
+
+  // Position + yaw splice, everything else carried from the full frame.
+  {
+    const r = reconstructFromPosition(
+      dFull(1, [drone()]),
+      dPos(2, [{ id: "0xd1", x: 500, y: 600, z: 3900, yaw: 95 }]));
+    const d = r.drones![0]!;
+    eq(d.position!.x, 500, "drone x comes off the 4 Hz line");
+    eq(d.position!.z, 3900, "and its z");
+    eq(d.yaw, 95, "and its yaw");
+    eq(d.pilotEosId, "eos-pilot", "the pilot rides through from the full frame");
+    eq(d.batteryLifetimeMax, 100, "so does the battery");
+    eq(d.dead, false, "a sample with no `dead` does not invent one");
+  }
+
+  // A drone absent from the sample keeps the full frame's entry by identity.
+  {
+    const base = dFull(1, [drone()]);
+    const r = reconstructFromPosition(base, dPos(2, [
+      { id: "0xOTHER", x: 1, y: 2 }]));
+    eq(r.drones![0], base.drones![0], "an unsampled drone is not re-created");
+  }
+
+  // A recording with no `drones` key anywhere shares the base list by ref.
+  {
+    const base = dFull(1, [drone()]);
+    const r = reconstructFromPosition(base, pos(2, []));
+    eq(r.drones, base.drones, "no drone key on the line: the list is shared");
+  }
+
+  // The death, and the killer at quarter-second resolution.
+  {
+    const rec = new ReplayReconstructor();
+    rec.push(dFull(1, [drone()]));
+    const a = rec.push(dPos(2, [{ id: "0xd1", x: 1, y: 1 }]))!;
+    eq(a.drones![0]!.dead, false, "alive before the hit");
+    const b = rec.push(dPos(3, [
+      { id: "0xd1", x: 2, y: 2, dead: true, lastHitBy: "eos-killer" }]))!;
+    eq(b.drones![0]!.dead, true, "the sample that says dead says dead");
+    eq(b.drones![0]!.lastHitByEosId, "eos-killer", "and names the killer");
+    // The pawn drops out of the next sample (a dead one's final tick reads
+    // (0,0,0) and the sampler's junk gate takes it). It must stay dead.
+    const c = rec.push(dPos(4, []))!;
+    eq(c.drones![0]!.dead, true, "an unsampled dead drone stays dead");
+    eq(c.drones![0]!.lastHitByEosId, "eos-killer", "and keeps its hitter");
+    // A later hit on the falling pawn moves the pointer — recorded as read.
+    const d = rec.push(dPos(5, [
+      { id: "0xd1", x: 3, y: 3, lastHitBy: "eos-second" }]))!;
+    eq(d.drones![0]!.lastHitByEosId, "eos-second",
+       "a later hit moves the pointer; the sample is recorded as read");
+    eq(d.drones![0]!.dead, true, "and the death still holds");
+    // A full frame is a two-way reading and settles the interval: a fresh
+    // pawn at the same address reads alive, and the carry must not raise it
+    // from the dead.
+    rec.push(dFull(6, [drone({ dead: false, lastHitByEosId: null })]));
+    const e = rec.push(dPos(7, [{ id: "0xd1", x: 4, y: 4 }]))!;
+    eq(e.drones![0]!.dead, false, "the carry never crosses a full frame");
+    eq(e.drones![0]!.lastHitByEosId, null, "nor does the hitter");
+  }
+
+  // mergeDroneDeaths itself: only what a line SETS lands in the carry.
+  {
+    const carry = new Map();
+    mergeDroneDeaths(carry, dPos(2, [{ id: "0xd1", x: 0, y: 0 }]));
+    eq(carry.size, 0, "a line that sets neither key writes nothing");
+    mergeDroneDeaths(carry, dPos(3, [
+      { id: "0xd1", x: 0, y: 0, lastHitBy: "eos-a" }]));
+    eq(carry.get("0xd1")!.lastHitBy, "eos-a", "a hit with no death is kept");
+    eq(carry.get("0xd1")!.dead, undefined, "and invents no death");
+    mergeDroneDeaths(carry, dPos(4, [
+      { id: "0xd1", x: 0, y: 0, dead: true, lastHitBy: "eos-b" }]));
+    eq(carry.get("0xd1")!.dead, true, "the death lands");
+    eq(carry.get("0xd1")!.lastHitBy, "eos-b", "and the newer hitter with it");
+  }
 }
 
 console.log(`\nreplay reconstruct tests: ${passed} passed, ${failed} failed`);

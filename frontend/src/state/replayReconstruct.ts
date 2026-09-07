@@ -20,6 +20,7 @@ import {
   TRAIL_SPACING_SQ,
 } from "./guided";
 import type {
+  PositionDrone,
   PositionFrame,
   PositionPlayer,
   PositionProjectile,
@@ -40,10 +41,38 @@ function playerKey(p: { eosId: string | null; name: string | null }): string | n
   return p.eosId ?? p.name;
 }
 
+// What a drone's 4 Hz samples have said about its death SINCE the last full
+// frame. `dead` and `lastHitBy` are the one place in the recording where an
+// absent key means "not set" rather than "unknown", so once a sample says a
+// pawn died the samples after it keep that reading — but only until the next
+// full frame, which carries the two-way reading and settles the matter. (The
+// pawn can drop out of a sample entirely: a dead one's final tick reads
+// exactly (0,0,0) and the sampler's junk gate drops it, and that must not
+// resurrect it for the rest of the interval.)
+export type DroneDeaths = Map<string, { dead?: boolean; lastHitBy?: string }>;
+
+/** Fold one position line's death reads into the interval's carry. Mutates
+ *  `carry` — it is the reconstructor's own per-interval scratch. */
+export function mergeDroneDeaths(carry: DroneDeaths, pos: PositionFrame): void {
+  for (const d of pos.drones ?? []) {
+    if (d.dead == null && d.lastHitBy == null) continue;
+    const prev = carry.get(d.id);
+    const next = prev ? { ...prev } : {};
+    if (d.dead != null) next.dead = d.dead;
+    if (d.lastHitBy != null) next.lastHitBy = d.lastHitBy;
+    carry.set(d.id, next);
+  }
+}
+
 // Build one full Snapshot from a position frame + the last full frame.
+//
+// `deaths` is what the position lines SINCE the base full frame have said
+// about each drone's death (see mergeDroneDeaths). Omit it and each line
+// stands alone — which is what a caller splicing a single line wants.
 export function reconstructFromPosition(
   base: Snapshot,
   pos: PositionFrame,
+  deaths?: DroneDeaths,
 ): Snapshot {
   const pByKey = new Map<string, PositionPlayer>();
   for (const p of pos.players) pByKey.set(p.id, p);
@@ -80,6 +109,43 @@ export function reconstructFromPosition(
     };
   });
 
+  // Drones are spliced by id the way vehicles are, and for the same reason:
+  // the pawn flies at ~10 m/s, so a full-frame-only drone would crawl a
+  // second at a time. The rest of the full-frame entry — class, pilot, owner,
+  // the calling action, the battery — rides through untouched, because the
+  // 4 Hz sample carries none of it.
+  //
+  // `dead` and `lastHitBy` come off the sample where the sample has them: the
+  // death is the one thing about a drone that happens between full frames,
+  // and the killer is the `lastHitBy` of the FIRST sample carrying `dead`
+  // (a second shooter has been seen moving the pointer 1.1 s after a kill,
+  // inside the full frame's one-second gap). They apply until the next full
+  // frame and never across one — a full frame is a two-way reading and wins.
+  let drones = base.drones;
+  if (pos.drones && base.drones?.length) {
+    const dById = new Map<string, PositionDrone>();
+    for (const d of pos.drones) dById.set(d.id, d);
+    drones = base.drones.map((d) => {
+      const u = dById.get(d.id);
+      const carried = deaths?.get(d.id);
+      if (!u && !carried) return d;
+      const next = { ...d };
+      if (u) {
+        next.position = { x: u.x, y: u.y, z: u.z ?? d.position?.z ?? null };
+        if (u.yaw != null) next.yaw = u.yaw;
+      }
+      // This sample's own reading wins where it has one — later hits really
+      // do move the pointer on a falling pawn, and each quarter-second is
+      // recorded as it read. The carry only fills the gaps, because absence
+      // on this line means "not set since the last full frame", not "no".
+      const dead = u?.dead ?? carried?.dead;
+      const hit = u?.lastHitBy ?? carried?.lastHitBy;
+      if (dead != null) next.dead = dead;
+      if (hit != null) next.lastHitByEosId = hit;
+      return next;
+    });
+  }
+
   // Projectiles joined the sampler later, so the key is optional: an old
   // recording without it shares the base array by reference exactly as
   // before, and its missiles move at full-frame cadence only.
@@ -113,6 +179,7 @@ export function reconstructFromPosition(
     players,
     vehicles,
     projectiles,
+    drones,
     // Kills are per-tick deltas already delivered on the full frame that
     // precedes these position frames; re-emitting them here would double-count
     // in the kill feed. Empty is correct — no new kills in a position frame.
@@ -126,13 +193,19 @@ export function reconstructFromPosition(
 // when the line was dropped) so callers can count progress.
 export class ReplayReconstructor {
   private lastFull: Snapshot | null = null;
+  // What the position lines since `lastFull` have said about each drone's
+  // death. Cleared by every full frame: that frame's own two-way reading is
+  // the truth from then on, even when it disagrees.
+  private droneDeaths: DroneDeaths = new Map();
 
   push(line: RecordingLine): Snapshot | null {
     if (isPositionFrame(line)) {
       if (!this.lastFull) return null;
-      return reconstructFromPosition(this.lastFull, line);
+      mergeDroneDeaths(this.droneDeaths, line);
+      return reconstructFromPosition(this.lastFull, line, this.droneDeaths);
     }
     this.lastFull = line;
+    if (this.droneDeaths.size) this.droneDeaths = new Map();
     return line;
   }
 }
