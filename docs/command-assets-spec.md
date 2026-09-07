@@ -239,7 +239,7 @@ archived in Misc `command-probe-2026-09-05/`).
 | `class` | class name | string | which drone |
 | `position`, `yaw` | root transform | position, degrees | where it is |
 | `dead` | `Dead` | bool | true from the moment the battery expires or it is destroyed |
-| `health`, `maxHealth` | `HealthComponent` → `Health` (float), `Max Health` (double) | number | 15 / 15 on the recon drone; one rifle burst takes it to 0 (09-05) |
+| `health`, `maxHealth` | `HealthComponent` → `Health` (float), `Max Health` (double) | number | 15 / 15 on the recon drone; one rifle burst takes it to 0 (09-05). Both omitted when the component pointer reads null or reaches no component: there is nothing to read them off, which is §2's "could not read", not a zero |
 | `pilotEosId` | `PlayerState` → player state | string | who is flying it this frame; `null` while nobody is — landed and exited, or deployed and not yet possessed (48 s of a fresh deploy read no pilot, flight 4, 09-05) |
 | `ownerEosId` | `SQ PC` → its player state | string | the deployer; persists through de-possession and death (09-05, 2026-09-07). A drone cannot change hands (T10, 2026-09-07), so it never moves |
 | `commandAction` | `Command Action` (class) | string | the calling action on a commander drone; `null` on a recon drone, where the pointer reads null (every recon row, 09-05) |
@@ -255,8 +255,9 @@ nor the linger) and none is recorded. Team is not a field of the pawn;
 the viewer derives it from `ownerEosId` (§9).
 
 **Position line** (`{"t": "pos"}`, 4 Hz): a `drones` array joins
-`players` and `vehicles`, entries `{id, x, y, z, yaw}` with the same `id`
-as the full-frame entry, plus `dead` (true) once the pawn is dead and
+`players` and `vehicles` — present only when at least one drone passes
+the gates, as the full frame's list is — entries `{id, x, y, z, yaw}`
+with the same `id` as the full-frame entry, plus `dead` (true) once the pawn is dead and
 `lastHitBy` (the hitter's EOS id) once something has hit it, each of the
 two present only when set (decision D19, 2026-09-07), under the sampler's
 existing freshness gates (class pointer intact, position finite and in
