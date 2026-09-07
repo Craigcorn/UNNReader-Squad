@@ -61,12 +61,17 @@ and the evidence matters to a code decision.
   existing walk already skips them by name (`snapshot.py:4218` and
   siblings). The level's template actors that exist for one second at a
   layer load are recorded as read (spec §6).
-- Three names are taken from reflection on the box at implementation and
-  recorded the same day in three places — the doctor row, spec §8 and
-  §13, and the tracker row of W18: the `CommandAction_*` configs' common
-  base class, the struct type behind `NomineeStatus`, and a Blueprint
-  parent common to the command actors if one exists. No name is
-  guessed; if reflection shows none, the spec's per-class rows stand.
+- Two of the three names the spec had left to implementation were read
+  from the box on 2026-09-07 and are in the spec: the FastArray struct
+  types `SQCommanderActionDataArray` and `CommanderNomineeArray`, and
+  the command actors' base classes — the native `SQCommandActor` with
+  the four common fields, `BP_CommandActor_C` with the destroyed flag
+  and the delay, `BP_CommandActor_ArtilleryBase_C` with the ten
+  artillery fields. One remains: the `CommandAction_*` configs' common
+  base, whose CDOs load only at a claim; until the acceptance session
+  names it, the doctor rows are the concrete configs, as spec §8 says,
+  and the name is recorded in the doctor row, spec §8 and §13 and the
+  W18 row the day it is read. No name is guessed.
 - Every hardcoded offset the reader could read through must appear in
   `health.hardcoded_offset_tables()`; this work introduces none, and
   `tests/test_fleet.py::test_every_readable_hardcoded_offset_is_watched`
@@ -194,6 +199,17 @@ marker shape from `canvas/markerGeometry.ts` (`markerShape` 12, the
 the info panel in `ui/InfoPanel.tsx` and `ui/entityInfo.ts`. Tests are
 plain node scripts (`*.test.mts`, `scripts/run-tests.mjs`).
 
+**Reference reads already written**: the probes in `scripts/probes/`
+read every field this work records, by name, against the live server —
+`command_assets.py` resolves the FastArray strides and reads the config
+default objects (`_elem_size`, `AUX_FIELDS`, `read_cdo`);
+`marker_action.py` reads the marker fields on the Command master's
+layout; `drone_track.py` reads the drone pawn, its health component and
+the drone call actor by name and resolves pointers to players
+(`read_field`, `health_component`). Port their resolution rather than
+reinventing it, and remember they are probes: they hold no caches and
+tolerate what the reader must not.
+
 **Tests** (`tests/`): `conftest.FakeProcessMemory` (16–63) is a segment
 address space whose `try_read` returns `None` off-map, the way the real
 class does; `tests/test_possample.py` shows the position-line pattern
@@ -243,8 +259,8 @@ Reads, all in `snapshot.py` beside `read_team_state`:
    `SQCommandActionData`, `CommanderVoteNominee`, `CommanderCategory`;
    strides from `read_farrayproperty_inner` + `read_ustruct_header`
    for struct arrays and from the element property's type for the float
-   array `LastCategoryGameTime` (spec §1). Record the `NomineeStatus`
-   struct type's name when reflection shows it.
+   array `LastCategoryGameTime` (spec §1). The struct types are
+   `SQCommanderActionDataArray` and `CommanderNomineeArray` (spec §8).
 2. The identity fix (W10): `commanderName` / `commanderEosId` come from
    `SQTeamState.CommanderState` → `SQCommanderState.CurrentCommander` →
    the player state, explicit `null` when `CurrentCommander` reads
@@ -312,10 +328,12 @@ Exit: as Phase 1, W18 row `implemented (A–C)`.
 
 ### Phase 3 — Surface D, the command actors
 
-1. The seven-step actor family: class membership by a Blueprint parent
-   common to the family if reflection shows one, else the
-   `BP_CommandActor_` prefix on the class name (the classification is
-   cached per class address either way); `KIND_COMMAND_ACTOR`;
+1. The seven-step actor family: class membership by a subclass test on
+   the native `SQCommandActor`, cached per class address (the drones'
+   `SQFlyingDrone` pattern); the common fields read on that class's
+   layout, `actionDestroyed` on `BP_CommandActor_C`'s, the artillery
+   fields on `BP_CommandActor_ArtilleryBase_C`'s, the strike and drone
+   fields on the concrete classes (spec §8); `KIND_COMMAND_ACTOR`;
    `read_command_actor` producing the common fields of §6 — `id`,
    `class`, `team`, `action`, `callerEosId` (weak pointer →
    `_resolve_weak_obj` → controller → player state), `position` and
@@ -326,9 +344,9 @@ Exit: as Phase 1, W18 row `implemented (A–C)`.
    or `dead` on the strike and UAV families (D18).
 2. The `(0, 0, 0)` exclusion from §2 applied to the list; the drone call
    actor's `(0, 0, z)` is not excluded (the viewer ignores it, §9).
-3. Doctor: one optional row per archived actor class per §8, or the
-   parent's row if reflection shows one. Schema: the `commandActions`
-   row and section.
+3. Doctor: the rows of spec §8 — `SQCommandActor` required, the two
+   Blueprint bases and the concrete strike and drone classes optional.
+   Schema: the `commandActions` row and section.
 
 Tests: a fixture with one actor of each family and a class-default
 object of one of them (which must not appear); assert each record's
@@ -370,9 +388,10 @@ because `possample.py` changed.
 
 ### Phase 5 — doctor, schema and spec closure
 
-1. `sqreader doctor` on the box (operator step) with the new rows: the
-   three reflection-taken names filled in, every required row present,
-   every optional row skipped with its reason or present.
+1. `sqreader doctor` on the box (operator step) with the new rows:
+   every required row present, every optional row skipped with its
+   reason or present; the configs' base class named at the first claim
+   and its row, spec §8 and §13 updated then.
 2. Spec §8 and §13 updated with the discovered names; the tracker's W18
    row records them with the date.
 3. A `docs/schema.md` pass: every new key in the register with its

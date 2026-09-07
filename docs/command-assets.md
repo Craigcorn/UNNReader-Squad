@@ -980,6 +980,17 @@ Times below are the server's game clock unless marked.
   entry at tick 14729 (worldTime 5270.0) with both EOS ids and a `ts` equal
   to the log line; `turrets[].weapons` with groups and magazines, a Frag
   magazine at 0 after firing, and the `seat: "driver"` record on a BMP-1.
+- **Reflected live after the session (Sanxian Seed v1, idle).**
+  `CommandIntervals` is a `SQCommanderActionDataArray` and `NomineeStatus`
+  a `CommanderNomineeArray` (both 280 bytes, `Items` inside). Every
+  command actor derives from the native `SQCommandActor`, which declares
+  `Distance`, `Team`, `DamageInstigatorController` and `Action`, through
+  `BP_CommandActor_C`, which declares `Action Destroyed` and `Destroy
+  Delay after Action Destroyed`; the artillery family adds
+  `BP_CommandActor_ArtilleryBase_C`, which declares all ten fire-plan
+  fields. Both Blueprint bases were loaded on the idle layer. No
+  `CommandAction_*` class was loaded, so the configs' base stays
+  unnamed until a claim.
 - **Harness notes.** The marker probe skips class defaults (three showed
   as markers on an empty server at the smoke test). The server log does
   not carry chat, so step marks typed in-game landed nowhere; step times

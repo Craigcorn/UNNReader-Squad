@@ -166,9 +166,11 @@ test T15's finding, applied in §9.
 
 One entry per live actor of the command-actor family, every full frame,
 present only while such an actor exists (a handful per match, 30 s to
-10 min each). Membership is the Blueprint parent common to the family if
-reflection shows one at implementation (§8), else the `BP_CommandActor_`
-name prefix; class default objects are never entries, and the level's
+10 min each). Membership is a subclass test on the native `SQCommandActor`, which
+every command actor derives from through the Blueprint `BP_CommandActor_C`
+(chain reflected live 2026-09-07: `BP_CommandActor_ArtilleryBase_C` →
+`BP_CommandActor_C` → `SQCommandActor` → `Actor`), the way the drones
+test `SQFlyingDrone`; class default objects are never entries, and the level's
 template actors that exist for one second at a layer load with null
 pointers (2026-09-07) are recorded as read, `action` and `callerEosId`
 `null`. Evidence: journal §"Per-call actors" (2026-08-30 to 09-03), the
@@ -190,6 +192,11 @@ Common fields, every actor:
 | `actionDestroyed` | `Action Destroyed` | bool | the call was cut short: true while the actor lingers after a shoot-down (a UAV at +67 s of a 330 s window, an aircraft at +33 s, 2026-09-07); on a natural end no one-second sample read it true before the actor vanished (two cases), and the drone's call actor never sets it (§9, "Shoot-downs") |
 | `distance` | `Distance` | number, raw | the actor's own length figure (the creep read exactly 45000, its marker's path length) |
 
+The four common names `Distance`, `Team`, `DamageInstigatorController`
+and `Action` are declared on the native `SQCommandActor`, `Action
+Destroyed` and the destroy delay on `BP_CommandActor_C` (reflected live
+2026-09-07), and the doctor checks them there (§8).
+
 Family fields, emitted where the class has them. Every name below is
 attempted on every command actor; the family column says which classes
 carried which on the days they were read. Blueprint variable names
@@ -198,7 +205,7 @@ contain spaces and are used verbatim.
 | Family | Wire fields (type) | Memory source |
 |---|---|---|
 | Strike aircraft (`*_Strafe_*`: gun, rockets and bomb): a shootable pawn flying its run | `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts; the F/A-18 gun, A-10 and SU-25 rocket classes archived 2026-09-07 carry the same names). `Health` and `Dead_0` are not recorded — decision D18: an aircraft killed before it fired left both untouched, and its `HealthComponent_C` too |
-| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, raw — the creep's is centimetre-scale, the mortar's read 1.0), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values read on 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did. The static barrage actor `BP_CommandActor_Artillery_Radius_C` (archived 2026-09-07) carries the same names. The mortar's values, read 2026-09-07: `Pre Warning Shells` 0, `Pre Warning Delay` 0, `Shells Per Barrage` 10, `Barrage Count` 8, `Max Drop Radius` 1.0, `Current Barrage` advancing every 8–9 s from +30 s |
+| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, raw — the creep's is centimetre-scale, the mortar's read 1.0), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values read on 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did. The static barrage actor `BP_CommandActor_Artillery_Radius_C` (archived 2026-09-07) carries the same names; all ten are declared on the family's parent `BP_CommandActor_ArtilleryBase_C` (reflected live 2026-09-07), where the doctor checks them. The mortar's values, read 2026-09-07: `Pre Warning Shells` 0, `Pre Warning Delay` 0, `Shells Per Barrage` 10, `Barrage Count` 8, `Max Drop Radius` 1.0, `Current Barrage` advancing every 8–9 s from +30 s |
 | UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | none beyond the common fields | `Health` and `Dead_0` are not recorded — decision D18, reversing D17: a UAV shot down on 2026-09-07 left both untouched (1000, false) through the kill and a 16 s linger; the shoot-down is the common `actionDestroyed` (§9). The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
 | Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health` (read 100 throughout a call, 2026-09-07), `SQ PC` → player state — the commander who called it (2026-09-07, T14); on the pawn the same-named field holds the deployer (§7). This actor's root position reads (0, 0, z) and means nothing; it never flips `Action Destroyed` and outlives its window (still present 18 min past it, 2026-09-07) — the drone's own life is the pawn's (§7) |
 
@@ -285,10 +292,10 @@ and their absence on an idle server is not drift.
 | `SQCommanderManager` | Class | no | `bCommanderActive`, `VotingTimeSeconds`, `VoteCooldownTimeSeconds`, `ActionCooldownExtensionOnNewCommander`, `MinimumSquadSizeForVoting`, `MinimumSquadsRequiredForVoting` |
 | `SQCommandActionData` | ScriptStruct | no | `CommandActionData`, `GameTimeAtCreation`, `CooldownTimeRemaining`, `IsDestroyedDuringActive` |
 | `SQCommandActionDataFASItem` | ScriptStruct | no | `Content` |
-| the FastArray struct types of `CommandIntervals` (`SQCommanderActionDataArray`, journal 09-04) and `NomineeStatus` — the latter's name taken from reflection at implementation | ScriptStruct | no | `Items` (the element array; the inner struct's reflected size is the stride) |
+| `SQCommanderActionDataArray` (the type of `CommandIntervals`) and `CommanderNomineeArray` (of `NomineeStatus`), both reflected live 2026-09-07 | ScriptStruct | no | `Items` (the element array; the inner struct's reflected size is the stride) |
 | `CommanderVoteNominee` | ScriptStruct | no | `NomineeState`, `VoteCount` |
 | `CommanderCategory` | ScriptStruct | no | `Name`, `CooldownDuration` |
-| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves, so none was loaded on the 09-05 layer) | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`, `DisplayName` |
+| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves; none was loaded on the 09-05 layer nor on the idle 2026-09-07 one); until it is named, the rows are the concrete configs `CommandAction_Drone_C` and `CommandAction_Mortar_Barrage_INS_C`, optional content classes that load at a claim | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`, `DisplayName` |
 | `SQFlyingDrone` | Class | no | `PlayerState`, `LastHitBy` (inherited from `Pawn`; resolved on an idle server by the 09-04 self-test, Misc `command-probe-2026-09-05/drone_track.pre-0905-selftest.jsonl`) |
 | `Controller` | Class | no | `PlayerState` — the hop from a drone's `LastHitBy` to the shooter's player state (§7). The reader's existing controller read is a reflection-first, doctor-checked offset on `SQPlayerController` (reader code, `sqreader/health.py`), the same field by inheritance; this row names the base class the pawn's pointer is typed as |
 | `BP_FlyingDrone_C` | Class | yes — content, loads with a layer that has it | `SQ PC`, `HealthComponent`, `Dead`, `Command Action` |
@@ -296,7 +303,11 @@ and their absence on an idle server is not drift.
 | `HealthComponent_C` | Class | yes — content | `Health`, `Max Health` |
 | `BP_MapMarker_CommandMaster_C` | Class | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance`, `Action` |
 | `BP_MapMarker_DirectorMaster_C` | Class | yes — content | `Distance` |
-| `BP_CommandActor_Artillery_Creep_C`, `BP_CommandActor_UAV_MQ9_C`, `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_Drone_C`, `BP_CommandActor_SU25_Bomb_Strafe_C`, `BP_CommandActor_Mortar_Radius_C` (archived 09-02), `BP_CommandActor_Artillery_Radius_C`, `BP_CommandActor_FA18_Strafe_C`, `BP_CommandActor_A10_Strafe_2_C`, `BP_CommandActor_SU25_Rockets_Strafe_C`, `BP_CommandActor_FA18_Rockets_Strafe_C` (archived 2026-09-07) | Class | yes — content, exist only during a call | the common and family properties of §6 each class carries; a Blueprint parent common to the family, if reflection shows one at implementation, replaces the per-class rows |
+| `SQCommandActor` | Class | no | `Distance`, `Team`, `DamageInstigatorController`, `Action` — the common fields, declared on the native base (reflected live 2026-09-07); membership is a subclass test on this class |
+| `BP_CommandActor_C` | Class | yes — content, loaded on an idle server (Sanxian Seed v1, 2026-09-07) | `Action Destroyed`, `Destroy Delay after Action Destroyed` |
+| `BP_CommandActor_ArtilleryBase_C` | Class | yes — content, loaded on an idle server (2026-09-07) | the ten artillery fields of §6: `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` |
+| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_SU25_Bomb_Strafe_C` (09-02), `BP_CommandActor_FA18_Strafe_C`, `BP_CommandActor_A10_Strafe_2_C`, `BP_CommandActor_SU25_Rockets_Strafe_C`, `BP_CommandActor_FA18_Rockets_Strafe_C` (2026-09-07) | Class | yes — content, exist only during a call | the strike family's `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location`; a strike parent, if reflection shows one at a call, replaces these rows |
+| `BP_CommandActor_Drone_C` (archived 09-02) | Class | yes — content, exists only during a call | `Health`, `SQ PC` |
 
 ## 9. Viewer rules (interpretation; nothing here is recorded)
 
@@ -643,13 +654,13 @@ it could not trace. The questions stand for the next review.
 4. Does every memory name here resolve by reflection? Test T11
    (`scripts/probes/spec_names_check.py`) answers this mechanically — live
    for loaded classes, from the archived layouts for per-call classes — and
-   on 2026-09-05 resolved all 157 names (§13). The names this document takes
-   from reflection at implementation, and says so where it uses them:
-   the `CommandAction_*` common base, whose CDOs load only when a claim
+   on 2026-09-05 resolved all 157 names (§13). The one name this document takes
+   from reflection at implementation, and says so where it uses it: the
+   `CommandAction_*` common base, whose CDOs load only when a claim
    resolves (its five properties, `DisplayName` included, resolved on
-   the three CDOs archived 09-02 and the eleven archived 2026-09-07),
-   and the two FastArray struct types whose `Items` arrays §3 reads
-   (§8), which the check covers from its next live run.
+   the three CDOs archived 09-02 and the eleven archived 2026-09-07);
+   the two FastArray struct types and the command actors' base classes
+   were reflected live on 2026-09-07 (§8, §13).
 5. Is anything here computed, inferred or defaulted on the recorder
    side beyond the three things §1 names?
 6. Does this document carry any state word — open, pending, outstanding,
@@ -728,3 +739,7 @@ they were promoted).
 | `CommandAction_A10CASStrafe_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
 | `CommandAction_Artillery_Creep_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
 | `CommandAction_Artillery_Barrage_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `SQCommandActor` | live, 2026-09-07 (Sanxian Seed v1, idle) | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class |
+| `BP_CommandActor_C` | live, 2026-09-07 | `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double |
+| `BP_CommandActor_ArtilleryBase_C` | live, 2026-09-07 | `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Pre Warning Delay` Double; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Prewarning Shells` Int; `Current Barrage` Int; `Projectile` Class |
+| `SQCommanderActionDataArray`, `CommanderNomineeArray` | live, 2026-09-07 | `Items` Array |
