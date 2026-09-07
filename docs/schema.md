@@ -397,6 +397,11 @@ alone. No class name is ever matched against — every name is looked for on the
 actor's own reflected layout — so a class that gains or loses one is followed
 without a code change.
 
+`originLocation` appears on two families and means each family's own
+origin — the aircraft's start of its run, the guns' position — as the
+spec's family table gives them; the key is shared because the meaning
+is, not because the classes are related.
+
 Three things the list deliberately never holds. A health figure on any command
 actor: none is recorded whichever class declares one, the drone's health being
 its pawn's on the `drones` list (decision D18). Who shot an actor down: no

@@ -127,7 +127,7 @@ EXPECTED += [
     ("BP_CommandActor_FA18_Rockets_Strafe_C", "BlueprintGeneratedClass",
      ACTOR_COMMON + STRIKE, "§6 strike"),
     ("BP_CommandActor_Drone_C", "BlueprintGeneratedClass",
-     ACTOR_COMMON + ["Health", "SQ PC"], "§6 drone call actor"),
+     ACTOR_COMMON + ["SQ PC"], "§6 drone call actor"),
     ("CommandAction_Drone_C", "BlueprintGeneratedClass", CONFIG, "§3 action config"),
     ("CommandAction_Mortar_Barrage_INS_C", "BlueprintGeneratedClass", CONFIG,
      "§3 action config"),

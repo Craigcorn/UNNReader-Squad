@@ -340,8 +340,8 @@ Exit: as Phase 1, W18 row `implemented (A–C)`.
    `yaw`, `actionDestroyed`, `distance` — and the family fields by name
    where the class carries them (strike: `shotsMade`, `maxShots`,
    `splineDistance`, `originLocation`; artillery: the ten fire-plan
-   fields; the drone call actor: `health`, `ownerEosId`). No `health`
-   or `dead` on the strike and UAV families (D18).
+   fields; the drone call actor: `ownerEosId`). No `health` on any command
+   actor and no `dead` on any (D18, extended to the whole family).
 2. The `(0, 0, 0)` exclusion from §2 applied to the list; the drone call
    actor's `(0, 0, z)` is not excluded (the viewer ignores it, §9).
 3. Doctor: the rows of spec §8 — `SQCommandActor` required, the two
