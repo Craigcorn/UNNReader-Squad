@@ -621,6 +621,10 @@ def test_every_configs_default_object_is_found_in_one_walk():
                                 caches)
     assert fx.arr.walks == 1, "two action classes must not cost two walks"
     assert set(caches.command_action_configs) == set(fx.config_classes.values())
+    # The action class's own name goes in the shared class-name cache, like
+    # every other per-tick class read — it never changes.
+    assert caches.class_name == {addr: name
+                                 for name, addr in fx.config_classes.items()}
 
 
 def test_the_cached_config_survives_until_the_generation_moves():

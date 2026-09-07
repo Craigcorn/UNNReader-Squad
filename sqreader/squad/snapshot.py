@@ -2617,7 +2617,14 @@ def _read_commander_actions(pm: ProcessMemory, alloc: FNameEntryAllocator,
         if class_addr == 0:
             entry["action"] = None
         elif class_addr:
-            nm = _uobject_name(pm, class_addr, alloc)
+            # The same class-name cache every other per-tick class read uses:
+            # an action class's name never changes, and there are a dozen of
+            # them per match.
+            nm = caches.class_name.get(class_addr) if caches is not None else None
+            if nm is None:
+                nm = _uobject_name(pm, class_addr, alloc)
+                if caches is not None and nm and nm != "None":
+                    caches.class_name[class_addr] = nm
             if nm is not None:
                 entry["action"] = nm
         config = configs.get(class_addr) if class_addr else None
