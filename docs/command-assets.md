@@ -839,3 +839,145 @@ and "ready in" matching what the commander's UI showed at A5 and A10.
   from the property type and a struct array's from the struct's reflected
   size — the smoke test resolved 24 / 40 / 32 / 4 for categories,
   intervals, nominees and last-use stamps.
+
+## 2026-09-07 — commander-capable session (five players, Al Basrah AAS v1, USMC then MEI)
+
+Probes: `command_assets.py` (canonical, first session), `marker_action.py`,
+`drone_track.py`, plus a scratch watcher on the command actors' health
+components. Two matches (the layer rolled at 02:03 server time; every probe
+restarted). Archive: Misc `command-probe-2026-09-07/` (probe rows, 48
+layouts, the server log, the launcher and scratch scripts, the runbook).
+Times below are the server's game clock unless marked.
+
+- **Request markers live on a ~61 s server sweep, and a delete reaches
+  the server.** Sixteen request markers over two matches, including a
+  two-step control (one placed and left alone; one placed and deleted at
+  once). Every removal fell on a grid of ~61.1 s. A pending marker
+  (`Command_SLRequest`) runs a 61 s fuse and is removed at the next sweep
+  (lifetimes 61, 74, 62, 88, 91 s); once approved, its pending twin is
+  removed at the first sweep after the approval (the pair coexisted 33,
+  43, 7, 26, 6, 25 and 60 s) and the approved marker (`Command_Request`)
+  runs ~60 s then goes at the next sweep (94, 104, 68, 119, 67, 60 s), or
+  at the first sweep after a call consumes it (26, 25 s). A pending marker
+  the squad leader deletes goes at the first sweep after the delete (22,
+  55, 57 s — well inside its fuse; the control: placed and deleted at once,
+  gone at 57 s). This supersedes two 08-31 statements: approval does not
+  destroy the pending marker (the sweep does, up to a minute later), and a
+  delete does destroy the server actor (the 08-31 "lived 57.6 s" was the
+  sweep, misread as the fuse). An approved marker cannot be deleted
+  (player-confirmed). At a layer load the level's template markers and
+  actors appear for one second with null pointers (4 markers, 8 actors).
+- **The marker's `Action` pointer (T12).** Null on every request marker
+  — twelve across placement, approval, expiry and deletion, both classes.
+  On every footprint it names the calling config: the UAV coverage marker
+  `CommandAction_UAV_MQ9_USMC_C` (twice), the static barrage
+  `CommandAction_Artillery_Barrage_USMC_C`, the strike line
+  `CommandAction_FA18CASStrafe_Rockets_USMC_C` (twice), the mortar
+  `CommandAction_Mortar_Barrage_INS_C`. The drone's marker class per its
+  config is `BP_MapMarker_RotateIcon_C`, outside the Command family: no
+  pointer, and the marker probe never listed it.
+- **Footprint figures are the commander's choices where the UI offers
+  one.** `Distance` on the UAV coverage marker is the chosen observation
+  radius (16608 and 19958; 10000 on 08-30); on the static barrage the
+  chosen radius (15000, with `AddDistance` 7500); on the strike line the
+  chosen run length (6000, then 3306); the mortar's 7500 / 4500 are fixed.
+- **Action configs (T13).** At the USMC claim eight CDOs loaded, read by
+  name: `CommandAction_UAV_MQ9_USMC_C` "MQ-9 UAV Recon" (category 0,
+  30 / 300 / 600 s); `CommandAction_FA18CASStrafe_Rockets_USMC_C` and its
+  parent `_Rockets_C` "F/A-18 Hornet Rocket Strike" (1, 15 / 32 / 900);
+  `CommandAction_FA18CASStrafe_C` "F/A-18 Hornet Airstrike";
+  `CommandAction_A10CASStrafe_C` "A-10 Warthog Airstrike";
+  `CommandAction_Artillery_Creep_USMC_C` "155mm Artillery Creeping
+  Barrage" and `_Barrage_USMC_C` "155mm Artillery Static Barrage" (1,
+  60 / 60 / 1800); the abstract `CommandAction_UAV_C` with empty strings
+  and no actor. At the MEI claim: `CommandAction_Drone_C` "Handheld Drone"
+  (0, 10 / 600 / 600, marker `BP_MapMarker_RotateIcon_C`, actor
+  `BP_CommandActor_Drone_C`) and `CommandAction_Mortar_Barrage_INS_C` /
+  `_IMF_C` "Heavy Mortar Barrage" (1, 30 / 60 / 1200). Each has a
+  one-sentence `Description`. A team's `CommandIntervals` holds a subset:
+  USMC four (barrage, creep, rockets USMC, UAV MQ9 USMC), MEI two (drone,
+  mortar INS). Every config's `MapMarkerClass` and `CommandActor` matched
+  the classes that spawned.
+- **Claims.** Entries created at the claim, back-dated by enroute plus
+  active, as on 09-02: USMC claim 2239 → artillery 2119, strike 2192; MEI
+  claim 7912 → drone 7302, mortar 7822.
+- **The vote timestamps are end times.** `CommanderVoteTimestamp` is
+  written when a vote opens, with the vote's end (open + 60: 4465 → 4524,
+  4885 → 4945, 7855 → 7912); `VoteCooldownTimestamp` at resolution with
+  the cooldown's end (resolution + 300), and `bVoteCooldownActive` is true
+  exactly until then. `bCommandActionAttempted` stayed 0 through a refused
+  attempt. Nominee tallies read 1–1 then 2–0 across the replacement vote.
+- **Category gate (T9 e), direct.** The static barrage stamped category 1
+  at 4081.4; the rocket strike attempted at once was refused with 15:00.
+- **Command zones (T9 d).** `bActionsEnabled` rose at the commander's
+  first zone entry, fell when he walked out, rose when he walked back in —
+  the flag is zone presence, both ways.
+- **Commander change (T9 b).** At the change (4524), every entry was
+  rewritten: a still-cooling entry keeps its ready time plus the 300 s
+  extension (`GameTimeAtCreation` + 300: barrage 4081.4 → 4381.4, UAV
+  3718.4 → 4018.4) and `CooldownTimeRemaining` takes the time it had left
+  (1477.4, 124.4); an entry whose own cooldown had run out is re-stamped
+  to become ready 300 s after the change (creep 2119 → 2904, strike 2192 →
+  3877, both ready at 4824). The category stamps did not move, so the UI's
+  visible timer, the later of the two, stayed the category's.
+- **Step-down (T9 c).** At 4683: seat null, `bActionsEnabled` false,
+  every entry's `CooldownTimeRemaining` := ready − now (1618.3, 140.9,
+  140.9, 265.3), creation stamps untouched. The last vote's cooldown kept
+  running and refused a fresh claim until it expired.
+- **Re-claim after a step-down.** A one-nominee vote (60 s) resolved at
+  4945; each entry became ready at claim + min(remaining + 300, its own
+  `CooldownDuration`): creep and strike +440.9 (5386), UAV +565.3
+  (5510.4), barrage the full 1800 (6745); creation stamps re-stamped to
+  match; the remaining values left as the step-down wrote them.
+- **Shoot-downs (T9 a).** UAV #2, fired on by several players (M2, 30 mm,
+  120 mm): the actor's `Health` stayed 1000 and `Dead_0` false through the
+  kill and a 16 s linger; `Action Destroyed` went true at +67 s of a 330 s
+  window; the UAV entry read `IsDestroyedDuringActive` 1 with
+  `GameTimeAtCreation` unchanged, and the UI's ready-in matched creation
+  + enroute + active + cooldown (8.6 min at the read), not destruction +
+  cooldown — the 09-02 drone rule did not apply. Strike #2, killed before
+  it fired: `Health` / `Dead_0` unchanged, its `HealthComponent_C`
+  `Health` / `Max Health` 1000 / 1000 unchanged, `Action Destroyed` at
+  +33 s, `CurrentShotsMade` 0 (13 on the first, unmolested run). On the
+  two natural ends (UAV #1 at 375 s, strike #1 at 108 s) no 1 Hz sample
+  ever read `Action Destroyed` true before the actor vanished. The server
+  log carried no damage or death line for either actor. Craig, 2026-09-07:
+  the shooter is unmeasurable and dropped; the shoot-down itself is the
+  early `Action Destroyed` plus the entry flag (D18).
+- **Mortar (T9 g).** `Pre Warning Shells` 0, `Pre Warning Delay` 0,
+  `Shells Per Barrage` 10, `Barrage Count` 8, `Max Drop Radius` 1.0;
+  `Current Prewarning Shells` → 1 and `Current Barrage` → 1 together at
+  +30 s (the enroute), then barrages every 8–9 s (38, 47, 55, 64, 72, 81,
+  90 s); the actor went at +115 s. No warning phase, unlike the creep.
+- **Commander drone (T14).** The call actor spawned at the call (`SQ PC`
+  = the commander, `Health` 100, `Action` set, position (0, 0, 580) — no
+  meaning); the pawn 8 s later, already owned (`SQ PC`) with no pilot,
+  possessed 3 s after. Exit: `PlayerState` and `Controller` null, owner
+  kept, the pawn hovering; re-entry restored them. Shot while piloted:
+  `HealthComponent_C.Health` 15 → 0 and `Dead` true in the same 100 ms
+  sample as `LastHitBy` = the killer; the pilot pointers cleared 1.1 s
+  later; `LastHitBy` then alternated between two shooters as hits landed
+  on the falling pawn; the pawn vanished 91 s after the kill. The drone
+  entry read destroyed 1 with its creation stamp unchanged. The call actor
+  never flipped `Action Destroyed` and was still alive at the stop, 28 min
+  after the call and 18 past its window. A `BP_Deployable_DroneSpawner_C`
+  (`Health` 0 / 100, `BuildState` 2, instigator = the commander, `Drone
+  Class` `BP_FlyingDrone_C`, `Action` `CommandAction_Drone_C`) and a
+  `BP_Deployable_DroneItem_C` spawn with the call; the spawner went 60 s
+  later. The server log records the pawn's possessions (`OnPossess`), no
+  damage.
+- **Hand-off (T10).** There is none: a drone is tied to the player who
+  deployed it and cannot be swapped between players (Craig).
+- **Revive (T4) and turret rows (T5)** in recording
+  `2026-09-07_000633_AlBasrahAASv1_AAS_v1_e5936095`: one `reviveEvents`
+  entry at tick 14729 (worldTime 5270.0) with both EOS ids and a `ts` equal
+  to the log line; `turrets[].weapons` with groups and magazines, a Frag
+  magazine at 0 after firing, and the `seat: "driver"` record on a BMP-1.
+- **Harness notes.** The marker probe skips class defaults (three showed
+  as markers on an empty server at the smoke test). The server log does
+  not carry chat, so step marks typed in-game landed nowhere; step times
+  came from the operator's reads. An inline ssh command that contains a
+  probe's path kills its own shell under `pkill -f` — the bracket trick
+  is not enough; run the stop as a script file, or hide the path in a
+  variable. Restart every probe after a layer roll. The command-assets
+  probe wrote 1.09 GB of raw rows in 3 h 40 min.
