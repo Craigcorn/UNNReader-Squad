@@ -7,6 +7,15 @@ follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- The viewer's commander scenarios were staged on an invented layer the
+  viewer had no texture or bounds for, so they drew on a bare grid and a
+  reviewer could not judge a footprint's scale. They now carry the real
+  Al Basrah layer block a recording writes, placed on the north-west side
+  of its airfield, so the map draws under them at true scale.
+- A precision bomb's aim points were drawn without the dashed circle pair
+  the spec's viewer rule calls for. The pair is drawn now from two named
+  viewer constants, the config's 45 m and 100 m, which the register still
+  lists as never measured.
 - The second Squad update since the reader learned to heal itself, and
   the first it healed itself through: the 2026-09-04 build moved the
   struct layout back toward its pre-v10.5.3 shape, and the boot log
