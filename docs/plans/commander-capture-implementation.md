@@ -27,14 +27,8 @@ exceptions are listed in spec §1. Every read gains a doctor row (§8).
 Every viewer rule (§9) is derived from per-frame state and can be fixed
 for every recording at once.
 
-Not in scope: the stats engine (it reads none of these fields), the
-platform's packer (see D21 below), the measurement of the bomb-circle
-radii (tracker T9 f: the viewer draws the config's 45 m and 100 m as the
-spec's documented constants, and the edge-stand that confirms them needs
-a bomb-capable faction), the shoot-down attribution of UAVs and aircraft
-(D18: unmeasurable), and
-any UNN-specific behaviour (this repo is public and stays
-upstream-compatible).
+What is not recorded, and why, is the spec's §10; what lies outside this
+implementation is the last section but one of this plan.
 
 ## How to work
 
@@ -550,13 +544,15 @@ W20, W72 and this plan's W17 are in their final states.
 
 ## Out of scope
 
-- Index-tracking the new lists in the packed stream (D21; tracker D7).
-- Any stats or ELO derivation from the new fields (tracker W33).
-- Measuring the bomb-circle radii (T9 f; the circles themselves are
-  drawn from the spec's constants) and the shooter of a UAV or aircraft
-  (D18).
-- The platform side (SquidHub ingestion of the new keys).
-- Re-enabling 4 Hz projectile sampling (C1).
+Two things adjacent enough to be mistaken for part of this work:
+
+- Index-tracking the new lists in the packed replay stream. Decision
+  D21: they travel whole, and the stream's encoder and decoder are
+  reworked once after the replay-file rework (tracker D7).
+- Measuring the bomb-circle radii (tracker T9 f). The viewer draws the
+  circles from the spec's constants; the edge-stand that confirms those
+  constants needs a faction with a bomb strike, and if it ever moves
+  the numbers the change is two constants in the viewer.
 
 ## Risks and how the plan meets them
 
