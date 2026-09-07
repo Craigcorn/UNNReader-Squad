@@ -5318,6 +5318,7 @@ _CAT_SPAWNER = 5
 _CAT_RALLY = 6
 _CAT_COMMAND_ACTOR = 7
 _CAT_DRONE = 8
+_CAT_COMMANDER_MGR = 9
 
 
 def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
@@ -5469,6 +5470,15 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 pm, class_addr, sq_flying_drone_class,
                 is_flying_drone_cache, _subgen):
             return _CAT_DRONE
+        # The commander manager, the native class that holds the server's
+        # vote rules. Classified here, once per distinct class, like every
+        # other kind: as a per-object test after this switch it cost the
+        # walk ~13 ms a tick on an idle server (2026-09-07), one cached
+        # subclass lookup for each of ~227k objects.
+        if sq_commander_manager_class and _is_subclass_of(
+                pm, class_addr, sq_commander_manager_class,
+                is_commander_manager_cache, _subgen):
+            return _CAT_COMMANDER_MGR
         return _CAT_NONE
 
     class_category = caches.class_category
@@ -5620,6 +5630,14 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             if not nm.startswith("Default__"):
                 return (_wd.KIND_DRONE, obj_addr, class_addr)
             return None
+        if cat == _CAT_COMMANDER_MGR:
+            # Several live instances exist at once — four in one match on
+            # 2026-09-07, two in the next — all reading the same six values,
+            # so the first non-CDO one is the one read (spec §4).
+            nm = _uobject_name(pm, obj_addr, alloc) or ""
+            if not nm.startswith("Default__"):
+                return (_wd.KIND_COMMANDER_MGR, obj_addr, 0)
+            return None
 
         # Map-marker manager component — singleton attached to the
         # active game state; its MarkerArray.Items holds every player-
@@ -5703,18 +5721,6 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             nm = _uobject_name(pm, obj_addr, alloc) or ""
             if not nm.startswith("Default__") and "_GEN_VARIABLE" not in nm:
                 return (_wd.KIND_LANE_VIS, obj_addr, 0)
-            return None
-
-        # The commander manager holds the server's vote rules. Several live
-        # instances exist at once — four in one match on 2026-09-07, two in
-        # the next, the worlds the server holds — and all read the same six
-        # values, so the first non-CDO one is the one read (spec §4).
-        if (sq_commander_manager_class
-                and _is_subclass_of(pm, class_addr, sq_commander_manager_class,
-                                    is_commander_manager_cache, _subgen)):
-            nm = _uobject_name(pm, obj_addr, alloc) or ""
-            if not nm.startswith("Default__"):
-                return (_wd.KIND_COMMANDER_MGR, obj_addr, 0)
             return None
 
         # Class-count diagnostics
