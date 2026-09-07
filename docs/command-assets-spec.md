@@ -331,7 +331,10 @@ test is cited by tracker id; the fields do not change when it runs.
   consumes it. A pending marker gone before its 61 s fuse could have run (removals
   at 22, 55 and 57 s on 2026-09-07; no untouched marker ever went before
   61 s) with no approved twin at its spot was deleted by its squad
-  leader, and the viewer may say so (decision D20).
+  leader, and the viewer may say so (decision D20). An approved marker
+  gone before its fuse could have run was consumed by a call, the one
+  early removal the server performs on one — an approved request cannot
+  be deleted (player-confirmed 2026-09-07).
 - **Asset shapes.** From `type`, `distance`, `addDistance`, `yaw`:
   `CommandRadius` and `CommandRadius_Friendly` a circle of radius
   `distance`, plus an outer band of `addDistance` where it is non-zero
@@ -346,7 +349,9 @@ test is cited by tracker id; the fields do not change when it runs.
   measured — tracker W20's item B2). Every observed bomb fell inside the
   first pair (five calls, 09-02/03).
 - **Director markers.** When a frame carries a squad-data marker and an
-  actor marker of the same family, owner and position, draw one shape.
+  actor marker of the same family, owner and position, draw one shape;
+  "same position" is the viewer's own tolerance, 3 m, since the game
+  supplies no identity joining the two.
 - **Commander seat and votes.** Derive "vote opened / resolved / won",
   "commander changed / stepped down" by comparing frames of §3; a vote
   spans `votingTimeSec` and the seat is a per-frame field, so nothing
