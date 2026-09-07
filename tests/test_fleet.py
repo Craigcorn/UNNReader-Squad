@@ -741,6 +741,30 @@ def test_the_command_actors_are_covered_at_the_class_that_declares_each_name():
     assert rows["BP_CommandActor_Drone_C"] == (True, {"SQ PC"})
 
 
+def test_the_drones_are_covered_at_the_class_that_declares_each_name():
+    """`drones` reads every name off the pawn's own class, and each name is
+    DECLARED somewhere up the chain — the pilot and the last hitter on `Pawn`,
+    which the native base carries by inheritance and this row watches there;
+    the owner, the health component, the death flag and the calling action on
+    the commander drone's Blueprint, which the recon subclass inherits; the
+    battery on that subclass alone (spec §8). The health component and the
+    controller hop are separate objects with separate classes, so each needs
+    its own row."""
+    rows = {c: (opt, set(names)) for c, _k, opt, names in
+            health.required_reflection_names()}
+    optional, names = rows["SQFlyingDrone"]
+    assert names == {"PlayerState", "LastHitBy"}
+    assert optional is False          # native: absence is a rename, not a layer
+    optional, names = rows["Controller"]
+    assert names == {"PlayerState"}
+    assert optional is False
+    optional, names = rows["BP_FlyingDrone_C"]
+    assert names == {"SQ PC", "HealthComponent", "Dead", "Command Action"}
+    assert optional is True           # content: loads with a layer that has one
+    assert rows["BP_FlyingDrone_Recoverable_C"] == (True, {"BatteryLifetimeMax"})
+    assert rows["HealthComponent_C"] == (True, {"Health", "Max Health"})
+
+
 # ---- build detection + restart counter -----------------------------------
 
 def test_build_sha256_off_proc_is_none():

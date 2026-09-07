@@ -77,6 +77,27 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- Drones now reach a recording at all. Both of them - the one a commander
+  calls and the one a recon kit carries - are Characters rather than
+  vehicles, so they belonged to neither of the lists that already reached
+  the file, and a match with a drone up recorded a map with nothing on
+  it. A new `drones` list carries one entry per live pawn on every full
+  frame it exists: which drone it is and where it is facing, whether it
+  is dead, its health and maximum off the component the game keeps them
+  on, who is flying it this frame and who deployed it, the call that
+  produced it on a commander drone, the flight budget on a recon one,
+  and who last hit it. Membership is the game's own class hierarchy -
+  anything deriving from `SQFlyingDrone`, including a variant Squad has
+  not shipped yet - and every field is looked for on the pawn's own
+  reflected layout, so a class that gains or loses one is followed
+  without a code change. Nobody flying reads as an explicit "none"
+  rather than a missing field, and so does nothing having hit it yet; a
+  pointer that reaches no player is absent instead, because "unknown"
+  and "none" are different answers. The key is absent on every frame
+  with no drone up, which is what every older recording already says by
+  carrying no key at all, and a dead pawn's final tick - zeroed to the
+  map origin before the pawn is freed - is dropped as junk the way an
+  origin-parked vehicle is.
 - The commander's assets now reach a recording as themselves, not just as
   the marker that named them. A strike run, a creeping barrage, a UAV on
   station and the drone's call actor each spawn an actor that lives for

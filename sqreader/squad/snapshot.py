@@ -1095,6 +1095,11 @@ SubclassCacheValue = tuple[int, bool] | bool
 # type has one — see `_command_actor_props`.
 CommandActorProps = tuple[dict[str, tuple[int, str]], dict[str, tuple[int, int]]]
 
+# The same pair, one family along: which of the §7 names a drone class declares
+# and where, plus the FBoolProperty (effective offset, mask) for `Dead`. Two
+# dicts for the same reason — see `_drone_props`.
+DroneProps = tuple[dict[str, tuple[int, str]], dict[str, tuple[int, int]]]
+
 
 @dataclass
 class SnapshotCaches:
@@ -1149,6 +1154,10 @@ class SnapshotCaches:
     # class_addr -> is-subclass-of-SQCommandActor? (the per-call assets)
     is_command_actor: dict[int, SubclassCacheValue] = field(
         default_factory=dict)
+    # class_addr -> is-subclass-of-SQFlyingDrone? (the commander's drone and
+    # the recon kit's — both derive from it, and any future variant does too)
+    is_flying_drone: dict[int, SubclassCacheValue] = field(
+        default_factory=dict)
     # CommandAction_* class addr -> (gen, its default object's config values,
     # or None when they could not be read). The lookup behind it walks the
     # object array for `Default__<class>`, so it is paid once per action class
@@ -1173,6 +1182,17 @@ class SnapshotCaches:
     # empty answer — a class that declares none of them — is worth caching just
     # as much. Gen-aware, and pruned by the rolling reset with the rest.
     command_actor_props: dict[int, tuple[int, "CommandActorProps"]] = field(
+        default_factory=dict)
+    # Drone class addr -> (gen, the §7 names that class declares). Two classes
+    # today — the commander's and the recon kit's — so the walk is paid twice
+    # per generation instead of once per pawn per tick.
+    drone_props: dict[int, tuple[int, "DroneProps"]] = field(
+        default_factory=dict)
+    # HealthComponent class addr -> (gen, {name: (offset, reflected type)}) for
+    # `Health` and `Max Health`. The component is a separate object with its
+    # own class, so its layout is reflected once per component class and every
+    # drone carrying one reads through the same answer.
+    health_component_props: dict[int, tuple[int, dict[str, tuple[int, str]]]] = field(
         default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
@@ -1288,13 +1308,14 @@ class SnapshotCaches:
             "is_subgs", "is_vehicle", "is_marker", "is_deployable",
             "is_vehicle_spawner", "is_rally", "is_squad_data_marker",
             "is_tracked_projectile", "is_lane_initializer",
-            "is_raas_visualizer", "is_command_actor",
+            "is_raas_visualizer", "is_command_actor", "is_flying_drone",
             # Same (gen, value) shape, same reason: a map transition brings a
             # new set of marker classes and the old ones' layouts would
             # otherwise sit here for the rest of the process's life. The
             # command-actor layouts churn harder still — those classes exist
             # only while a call is in the air.
-            "marker_geometry", "command_actor_props",
+            "marker_geometry", "command_actor_props", "drone_props",
+            "health_component_props",
         ):
             sub_cache = getattr(self, cache_attr)
             stale_keys = [k for k, v in sub_cache.items()
@@ -1803,6 +1824,23 @@ class SnapshotPaths:
     # carries is read off the actor's own class layout. 0 when the class is
     # not loaded, and then the list is never built.
     sq_command_actor_class: int = 0
+    # SQFlyingDrone — the native base both drone pawns derive from
+    # (BP_FlyingDrone_C for the commander's, BP_FlyingDrone_Recoverable_C for
+    # the recon kit's, spec §7). Like SQCommandActor it is the MEMBERSHIP test
+    # for `drones` and nothing else: what an entry carries is read off the
+    # pawn's own class layout. 0 when the class is not loaded, and then the
+    # list is never built.
+    sq_flying_drone_class: int = 0
+    # The two reads the 4 Hz position line makes on a drone beyond its
+    # position, resolved once HERE so the sample itself reflects nothing
+    # (spec §7): `Dead`'s FBoolProperty (effective offset, mask), taken off
+    # BP_FlyingDrone_C which declares it for both drone classes, and
+    # `LastHitBy`'s offset, taken off SQFlyingDrone which carries it by
+    # inheritance from Pawn. None when the class is absent or the name is
+    # gone — the sample then omits the key, which is what "not set" already
+    # looks like there.
+    drone_dead_mask: tuple[int, int] | None = None
+    drone_last_hit_by_off: int | None = None
     # Their reflected offsets, strides and bool masks. None when neither class
     # resolved — then no commander block and no rules are emitted at all.
     commander: CommanderPaths | None = None
@@ -1886,6 +1924,14 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         # Optional here for the same reason: a build without it must blank
         # `commandActions`, never fail the snapshot. The doctor requires it.
         "SQCommandActor": "Class",
+        # SQFlyingDrone — the native base of the drone pawns, and the class
+        # `LastHitBy` is read off for the 4 Hz sample. Optional here for the
+        # same reason again; the doctor requires it.
+        "SQFlyingDrone": "Class",
+        # BP_FlyingDrone_C declares `Dead` for both drone classes, so the
+        # sample's bool mask is resolved off it — content, genuinely absent on
+        # a layer that carries no drone.
+        "BP_FlyingDrone_C": "BlueprintGeneratedClass",
         # Carried by autoresolve_offsets, not read directly here: their
         # field offsets are hardcoded constants and these are the classes
         # whose reflection data corrects them. (SQProjectile, which upstream
@@ -1988,6 +2034,21 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
     sq_commander_manager_class_addr = _addr("SQCommanderManager")
     commander_paths = resolve_commander_paths(
         pm, alloc, sq_commander_state_class_addr, sq_commander_manager_class_addr)
+    # The drone pawns (spec §7). Their per-entry fields are read off each
+    # pawn's OWN class layout at read time, like the command actors'; the two
+    # values resolved here are the ones the 4 Hz sample needs, so that the
+    # sample never reflects. `Dead` is declared on the Blueprint both drone
+    # classes derive from; `LastHitBy` reaches the native base by inheritance
+    # from Pawn, and the merged layout finds it there.
+    sq_flying_drone_class_addr = _addr("SQFlyingDrone")
+    bp_flying_drone_class_addr = _addr("BP_FlyingDrone_C")
+    fdrone_layout = (get_class_layout(pm, sq_flying_drone_class_addr, alloc)
+                     if sq_flying_drone_class_addr else {})
+    drone_last_hit_by_off = (fdrone_layout["LastHitBy"].offset
+                             if "LastHitBy" in fdrone_layout else None)
+    drone_dead_mask = (bool_property_mask(pm, bp_flying_drone_class_addr,
+                                          "Dead", alloc)
+                       if bp_flying_drone_class_addr else None)
     # SQPawnInventoryComponent - CurrentWeapon and the Inventory group array.
     # The group struct (FSQWeaponGroupData) is reached through the array's
     # inner property, so its field offsets AND its size come from the live
@@ -2122,6 +2183,9 @@ def resolve_paths(pm: ProcessMemory, arr: GUObjectArray,
         sq_commander_manager_class=sq_commander_manager_class_addr,
         commander=commander_paths,
         sq_command_actor_class=_addr("SQCommandActor"),
+        sq_flying_drone_class=sq_flying_drone_class_addr,
+        drone_dead_mask=drone_dead_mask,
+        drone_last_hit_by_off=drone_last_hit_by_off,
         soldier_take_hit_off=(sd_layout["LastTakeHitInfo"].offset
                               if "LastTakeHitInfo" in sd_layout
                               else SQ_SOLDIER_TAKE_HIT_INFO_OFFSET),
@@ -4389,6 +4453,227 @@ def build_command_actions(pm: ProcessMemory, alloc: FNameEntryAllocator,
     return out
 
 
+# ----- the drone pawns (docs/command-assets-spec.md §7) ---------------------
+#
+# One entry per live pawn deriving from the native SQFlyingDrone: the
+# commander's called drone (BP_FlyingDrone_C) and the recon kit's
+# (BP_FlyingDrone_Recoverable_C, which adds a battery). Membership is a
+# subclass test on that base, the way the command actors test theirs, and it is
+# the ONLY thing a class name decides — every field is looked for on the pawn's
+# own class layout, so a variant that gains or loses one is followed without a
+# code change.
+#
+# Both pawns are Characters, not SQVehicles, which is why no recording has ever
+# carried one: a soldier reaches the file through their player and a vehicle
+# through the vehicle list, and a drone is neither.
+
+#: Wire key -> reflection name for every value read AS the type reflection
+#: reports it (spec §2, "Numbers"). Recon-only in practice — the commander
+#: drone's class declares no battery, and its budget is the calling action's
+#: active window on the commander block — but nothing here tests for that: the
+#: name is looked for on every drone and the key is absent where it is not.
+DRONE_NUMBERS = (("batteryLifetimeMax", "BatteryLifetimeMax"),)
+#: Class pointers, recorded as the pointed class's name; `null` when the
+#: pointer reads null, which is the game's own empty (spec §2) and what every
+#: recon row read (09-05).
+DRONE_CLASS_PTRS = (("commandAction", "Command Action"),)
+#: The one bool, read through its FBoolProperty mask.
+DRONE_BOOLS = (("dead", "Dead"),)
+#: Every name the layout walk looks for, in one tuple. `PlayerState` points
+#: straight at a player state; `SQ PC` and `LastHitBy` are controllers, one hop
+#: short of one; `HealthComponent` is the separate object the two health
+#: figures are read off.
+DRONE_NAMES = (
+    "PlayerState", "SQ PC", "LastHitBy", "HealthComponent",
+    *(n for _k, n in DRONE_NUMBERS),
+    *(n for _k, n in DRONE_CLASS_PTRS),
+    *(n for _k, n in DRONE_BOOLS),
+)
+#: Wire key -> reflection name on the health component's own class. Read as
+#: reflection reports them: `Health` is a Float and `Max Health` a Double
+#: (09-05), and neither width is assumed here any more than anywhere else.
+HEALTH_COMPONENT_NUMBERS = (("health", "Health"), ("maxHealth", "Max Health"))
+
+
+def _drone_props(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                 caches: "SnapshotCaches | None",
+                 cls_addr: int) -> DroneProps:
+    """Which of the §7 names this drone class declares, and where.
+
+    ({name: (offset, reflected type)}, {name: (byte offset, mask)}) — the empty
+    pair for a class that declares none. Cached per class address, absence
+    included (`SnapshotCaches.drone_props`), for the same bargain
+    `_command_actor_props` strikes: the layout belongs to the class, so this is
+    one reflection walk per drone class instead of one per pawn per tick, and
+    the rolling reset is the retry for a walk that failed."""
+    if not cls_addr:
+        return {}, {}
+    gen = caches.subclass_gen if caches is not None else 0
+    if caches is not None:
+        hit = caches.drone_props.get(cls_addr)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+    layout = get_class_layout(pm, cls_addr, alloc)
+    props = {n: (layout[n].offset, layout[n].type_name)
+             for n in DRONE_NAMES if n in layout}
+    masks: dict[str, tuple[int, int]] = {}
+    for _key, name in DRONE_BOOLS:
+        if name not in props:
+            continue
+        mask = bool_property_mask(pm, cls_addr, name, alloc)
+        if mask is not None:
+            masks[name] = mask
+    value: DroneProps = (props, masks)
+    if caches is not None:
+        caches.drone_props[cls_addr] = (gen, value)
+    return value
+
+
+def _health_component_values(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                             caches: "SnapshotCaches | None",
+                             comp_addr: int) -> dict[str, Any]:
+    """`health` and `maxHealth` off a pawn's HealthComponent (spec §7).
+
+    The component is its own object with its own class, so the two names are
+    looked for on THAT class's layout — reflected once per component class and
+    cached (`SnapshotCaches.health_component_props`) — and read as the types
+    reflection reports. A pointer that reaches something which is not a health
+    component declares neither name and yields nothing: the keys are absent,
+    which is the reader saying it could not read them (spec §2)."""
+    out: dict[str, Any] = {}
+    cp = pm.try_read(comp_addr + UOBJ_CLASS_PRIVATE, 8)
+    if cp is None or len(cp) < 8:
+        return out
+    cls_addr = struct.unpack("<Q", cp)[0]
+    if not cls_addr:
+        return out
+    gen = caches.subclass_gen if caches is not None else 0
+    props: dict[str, tuple[int, str]] | None = None
+    if caches is not None:
+        hit = caches.health_component_props.get(cls_addr)
+        if hit is not None and hit[0] == gen:
+            props = hit[1]
+    if props is None:
+        layout = get_class_layout(pm, cls_addr, alloc)
+        props = {n: (layout[n].offset, layout[n].type_name)
+                 for _k, n in HEALTH_COMPONENT_NUMBERS if n in layout}
+        if caches is not None:
+            caches.health_component_props[cls_addr] = (gen, props)
+    for key, name in HEALTH_COMPONENT_NUMBERS:
+        prop = props.get(name)
+        if prop is None:
+            continue
+        v = _read_by_reflected_type(pm, comp_addr + prop[0], prop[1])
+        if v is not None:
+            out[key] = v
+    return out
+
+
+def read_drone(pm: ProcessMemory, alloc: FNameEntryAllocator,
+               paths: SnapshotPaths, d_addr: int, class_name: str | None,
+               cls_addr: int = 0,
+               caches: "SnapshotCaches | None" = None) -> dict[str, Any]:
+    """One `drones` entry — the pawn as it stands this frame (spec §7).
+
+    Nothing is defaulted and nothing is carried from the previous frame: a name
+    the class does not carry omits its key, a pointer that reads null gives
+    `null` — the game's own empty, which is a landed-and-exited drone, a recon
+    drone with no calling action, a pawn nothing has hit yet — and a pointer
+    that reaches something other than a player state omits its key too."""
+    out: dict[str, Any] = {
+        "id": f"{d_addr:#x}",
+        "class": class_name,
+    }
+    props, masks = _drone_props(pm, alloc, caches, cls_addr)
+
+    def _identity(key: str, name: str, *, via_controller: bool) -> None:
+        """A pointer chain that ends at a player's EOS id. `PlayerState` is
+        the player state itself; `SQ PC` and `LastHitBy` are controllers, so
+        they take the reader's existing controller hop first."""
+        prop = props.get(name)
+        if prop is None:
+            return
+        ptr = _safe(lambda: pm.read_u64(d_addr + prop[0]))
+        if ptr == 0:
+            out[key] = None
+            return
+        if not ptr:
+            return
+        eos = (_controller_eos_id(pm, paths, ptr, caches) if via_controller
+               else _player_identity(pm, paths, ptr, caches)[1])
+        if eos is not None:
+            out[key] = eos
+
+    # Where it is. A dead drone is not a wreck on the ground — an airborne one
+    # falls through the world — so the position is written as read (09-05).
+    pose = read_root_pos_yaw(pm, d_addr, paths)
+    for key in ("position", "yaw"):
+        if key in pose:
+            out[key] = pose[key]
+    for key, name in DRONE_BOOLS:
+        v = _read_masked_bool(pm, d_addr, masks.get(name))
+        if v is not None:
+            out[key] = v
+    # The health figures live on a component, not on the pawn.
+    comp = props.get("HealthComponent")
+    if comp is not None:
+        comp_ptr = _safe(lambda: pm.read_u64(d_addr + comp[0]))
+        if comp_ptr:
+            out.update(_health_component_values(pm, alloc, caches, comp_ptr))
+    _identity("pilotEosId", "PlayerState", via_controller=False)
+    _identity("ownerEosId", "SQ PC", via_controller=True)
+    for key, name in DRONE_CLASS_PTRS:
+        prop = props.get(name)
+        if prop is None:
+            continue
+        ptr = _safe(lambda: pm.read_u64(d_addr + prop[0]))
+        if ptr == 0:
+            out[key] = None
+        elif ptr:
+            nm = _class_name_cached(pm, alloc, caches, ptr)
+            if nm is not None:
+                out[key] = nm
+    for key, name in DRONE_NUMBERS:
+        prop = props.get(name)
+        if prop is None:
+            continue
+        v = _read_by_reflected_type(pm, d_addr + prop[0], prop[1])
+        if v is not None:
+            out[key] = v
+    _identity("lastHitByEosId", "LastHitBy", via_controller=True)
+    return out
+
+
+def build_drones(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                 paths: SnapshotPaths, pawns: "list[tuple[int, int]]",
+                 caches: "SnapshotCaches | None" = None
+                 ) -> list[dict[str, Any]]:
+    """The `drones` list: one entry per live drone pawn, minus the ones the
+    position exclusion drops.
+
+    Spec §2 applies the junk-actor rule here as it does to the command actors,
+    and on a drone it has a second job: a dead pawn's final tick reads exactly
+    (0, 0, 0) before the pawn is freed (09-05), so the last frame of a drone's
+    life is dropped rather than parking it at the map origin.
+
+    A class default object is never an entry. The object walk already drops
+    them by name before this is called; the rule is repeated here because it
+    belongs to the list, and one name read per drone — one or two per match at
+    a time — is not a cost worth trading it for."""
+    out: list[dict[str, Any]] = []
+    for d_addr, cls_addr in pawns:
+        if (_uobject_name(pm, d_addr, alloc) or "").startswith("Default__"):
+            continue
+        rec = read_drone(
+            pm, alloc, paths, d_addr,
+            _class_name_cached(pm, alloc, caches, cls_addr), cls_addr, caches)
+        pos = rec.get("position")
+        if pos and pos["x"] == 0.0 and pos["y"] == 0.0 and pos["z"] == 0.0:
+            continue
+        out.append(rec)
+    return out
+
+
 def read_vehicle(pm: ProcessMemory, alloc: FNameEntryAllocator,
                  paths: SnapshotPaths, vh_addr: int,
                  class_name: str | None,
@@ -5032,6 +5317,7 @@ _CAT_DEPLOYABLE = 4
 _CAT_SPAWNER = 5
 _CAT_RALLY = 6
 _CAT_COMMAND_ACTOR = 7
+_CAT_DRONE = 8
 
 
 def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
@@ -5091,6 +5377,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     is_commander_manager_cache = caches.is_commander_manager
     sq_command_actor_class = paths.sq_command_actor_class
     is_command_actor_cache = caches.is_command_actor
+    sq_flying_drone_class = paths.sq_flying_drone_class
+    is_flying_drone_cache = caches.is_flying_drone
 
     players_raw: list[int] = []
     game_state_addr: int | None = None
@@ -5110,6 +5398,7 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     vehicle_spawners_raw: list[tuple[int, int]] = []
     rally_points_raw: list[tuple[int, int]] = []
     command_actors_raw: list[tuple[int, int]] = []
+    drones_raw: list[tuple[int, int]] = []
     marker_manager_addr: int | None = None
     commander_manager_addr: int | None = None
     ammo_weps_raw: list[tuple[int, int]] = []
@@ -5173,6 +5462,13 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
                 pm, class_addr, sq_command_actor_class,
                 is_command_actor_cache, _subgen):
             return _CAT_COMMAND_ACTOR
+        # The drone pawns. Characters, not SQVehicles — nothing above can
+        # shadow them — and last for the same reason the command actors are:
+        # every category above keeps the priority it already had.
+        if sq_flying_drone_class and _is_subclass_of(
+                pm, class_addr, sq_flying_drone_class,
+                is_flying_drone_cache, _subgen):
+            return _CAT_DRONE
         return _CAT_NONE
 
     class_category = caches.class_category
@@ -5318,6 +5614,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             nm = _uobject_name(pm, obj_addr, alloc) or ""
             if not nm.startswith("Default__"):
                 return (_wd.KIND_COMMAND_ACTOR, obj_addr, class_addr)
+            return None
+        if cat == _CAT_DRONE:  # the commander's drone pawn and the recon kit's
+            nm = _uobject_name(pm, obj_addr, alloc) or ""
+            if not nm.startswith("Default__"):
+                return (_wd.KIND_DRONE, obj_addr, class_addr)
             return None
 
         # Map-marker manager component — singleton attached to the
@@ -5496,6 +5797,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
             rally_points_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_COMMAND_ACTOR:
             command_actors_raw.append((obj_addr, extra))
+        elif kind == _wd.KIND_DRONE:
+            drones_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_AMMOWEP:
             ammo_weps_raw.append((obj_addr, extra))
         elif kind == _wd.KIND_PROJECTILE:
@@ -5860,6 +6163,10 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     # every frame: a handful per match, 30 s to 10 min each.
     command_actions = build_command_actions(
         pm, alloc, arr, paths, command_actors_raw, caches)
+    # The drone pawns (spec §7), built here for the same reason: they read a
+    # world position, and the list is empty on almost every frame — one or two
+    # while a drone is in the air, none otherwise.
+    drones = build_drones(pm, alloc, paths, drones_raw, caches)
     # Guided missiles (TOW / Kornet / HJ-8) are stamped kind "guided" from
     # the class hierarchy — SQGuidedProjectile is the engine's own
     # definition of a steerable round, so a new missile classifies
@@ -6105,6 +6412,11 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     # every recording made before this one says, and why nothing versions.
     if command_actions:
         _snapshot["commandActions"] = command_actions
+    # `drones` rides on the same rule (spec §7): present only while a pawn
+    # exists, absent otherwise — which is what every recording made before this
+    # one says, drones having never reached a file at all.
+    if drones:
+        _snapshot["drones"] = drones
     if _PROFILE:
         profiling.emit()
     return _snapshot
@@ -6118,6 +6430,7 @@ __all__ = [
     "read_lane_graph",
     "read_commander_block", "read_commander_rules", "resolve_commander_paths",
     "read_command_actor", "build_command_actions",
+    "read_drone", "build_drones",
     "find_subclass_instance", "SnapshotPaths", "SnapshotCaches",
     "CommanderPaths",
     "DamageTracker", "clean_nonfinite",

@@ -450,6 +450,31 @@ def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
         # its pawn's. Optional: the class exists only during a call.
         ("BP_CommandActor_Drone_C", "BlueprintGeneratedClass", True, [
             "SQ PC"]),
+        # ---- the drone pawns (spec §7 and §8) ----
+        # `PlayerState` (the pilot) and `LastHitBy` (the shooter) are `Pawn`'s
+        # own properties and reach the drone by inheritance; the merged layout
+        # finds them on the drone class, and this row watches the native base
+        # they arrive through — which is also the membership test for the list.
+        ("SQFlyingDrone", "Class", False, ["PlayerState", "LastHitBy"]),
+        # The hop from a drone's `LastHitBy` to the shooter's player state. The
+        # reader's controller read is a reflection-first, doctor-checked offset
+        # on SQPlayerController; this row names the base class the pawn's
+        # pointer is typed as, so a rename at that level is loud too.
+        ("Controller", "Class", False, ["PlayerState"]),
+        # The four the commander drone's Blueprint declares for both classes.
+        # Optional for the observed reason: content that loads with a layer
+        # that has a drone, and its absence on a layer without one is not
+        # drift. A rename here is the whole alarm; nothing falls back.
+        ("BP_FlyingDrone_C", "BlueprintGeneratedClass", True, [
+            "SQ PC", "HealthComponent", "Dead", "Command Action"]),
+        # The one the recon kit's subclass adds — its flight budget. The
+        # commander drone's class does not declare it and never will emit it.
+        ("BP_FlyingDrone_Recoverable_C", "BlueprintGeneratedClass", True, [
+            "BatteryLifetimeMax"]),
+        # The component the drone's two health figures are read off. Its own
+        # object, its own class, its own layout — so it needs its own row.
+        ("HealthComponent_C", "BlueprintGeneratedClass", True, [
+            "Health", "Max Health"]),
     ]
 
 

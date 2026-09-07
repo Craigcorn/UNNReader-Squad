@@ -41,7 +41,7 @@ moves only with the set of index-tracked lists.
 | `damageEvents` | damage and kill events; log-derived in serve mode today (the memory detail is lost — tracker W21) | upstream | sent whole |
 | `reviveEvents` | revives from the server log; present only on ticks with revives | 2026-08-30 | sent whole |
 | `commandActions` | one entry per live command actor; present only while one exists | 2026-09-07 | sent whole |
-| `drones` | one entry per live drone pawn | planned, decision 7 (2026-09-04) | sent whole |
+| `drones` | one entry per live drone pawn; present only while one exists | 2026-09-07 | sent whole |
 
 ### Position line (`{"t": "pos", ...}`, 4 Hz, between full frames)
 
@@ -417,3 +417,85 @@ absent where the class does not declare the name (what a Squad rename looks
 like) or the read failed. An actor whose root position reads exactly
 `(0, 0, 0)` is dropped from the list entirely, the junk-actor rule vehicles
 already use; a class default object is never an entry.
+
+---
+
+## `drones`
+
+A new top-level list: one entry per live drone pawn — the commander's called
+drone (`BP_FlyingDrone_C`) and the recon kit's (`BP_FlyingDrone_Recoverable_C`,
+which adds a battery). The contract is `docs/command-assets-spec.md` §7 — this
+section is the wire shape.
+
+**The key is present only while such a pawn exists.** An absent key means "no
+drone up this frame", which is what every recording made before 2026-09-07 says
+by carrying no key at all — a drone had never reached a file, being a Character
+rather than a vehicle and so belonging to neither of the lists that already
+carried one.
+
+```json
+"drones": [
+  {
+    "id": "0x707db0c584a0",
+    "class": "BP_FlyingDrone_Recoverable_C",
+    "position": {"x": 12345.5, "y": -6789.25, "z": 4200.0}, "yaw": 45.0,
+    "dead": false,
+    "health": 15.0, "maxHealth": 15.0,
+    "pilotEosId": "eos-…",
+    "ownerEosId": "eos-…",
+    "commandAction": null,
+    "batteryLifetimeMax": 100.0,
+    "lastHitByEosId": null
+  }
+]
+```
+
+- `id` is the pawn's address as a lowercase hex string, the same form vehicles
+  and command actors use. It is new on every deploy: picking a drone up
+  destroys the pawn, and a redeploy or a re-arm is a fresh one, so "the same
+  drone across a pickup" is a consumer's join on owner and time and never an
+  identity the recorder can see.
+- `class` is the pawn's class name verbatim — which drone this is.
+- `position` and `yaw` are where it is this frame, off the same
+  `ComponentToWorld` transform everything else uses. A dead drone is not a
+  wreck on the ground: an airborne one falls through the world, and the
+  position is written as read.
+- `dead` is true from the moment the battery expires or the pawn is destroyed.
+  `health` and `maxHealth` come off the pawn's `HealthComponent`, a separate
+  object with its own class — 15 / 15 on a recon drone, and one rifle burst
+  takes it to 0.
+- `pilotEosId` is whoever is flying it this frame and `null` while nobody is —
+  deployed and not yet possessed, or landed and exited. `ownerEosId` is the
+  deployer, and it persists through de-possession and death.
+- `commandAction` is the `CommandAction_*` config that called the drone, a join
+  to the `teams[].commander.cooldowns.actions[]` entry that produced it; it is
+  `null` on a recon drone, which no commander called.
+- `batteryLifetimeMax` is the flight budget in seconds from spawn. Only the
+  recon subclass declares it; the commander drone's budget is its calling
+  action's `activeSec` on the commander block, and the key is simply absent
+  there.
+- `lastHitByEosId` is who last hit it — `null` until something has, the killer
+  at the kill, and it moves again as later hits land on the falling pawn. At
+  one frame a second that is the killer at lower resolution; the 4 Hz line
+  carries the same value quarter-second by quarter-second.
+
+There is no remaining-flight-time field, because none exists in memory: nothing
+on the pawn counts down, and remaining time is the `worldTimeSec` of the frame
+the `id` first appears plus the budget. There is no team either — the pawn does
+not carry one, and a consumer takes the team of `ownerEosId`'s player in the
+same frame.
+
+Which keys an entry carries is decided by its own class and nothing else. Every
+name is looked for on the pawn's reflected layout, so a variant that gains or
+loses one is followed without a code change, and no class name is ever matched
+against — membership is the game's own hierarchy, a `SQFlyingDrone` in the
+pawn's super chain.
+
+Absence keeps the two meanings the sections above gave it (spec §2): `null`
+where the game's own value is empty — a pointer that reads null — and the key
+absent where the class does not declare the name (what a Squad rename looks
+like), where a pointer reaches no player state, or where the read failed. A
+pawn whose root position reads exactly `(0, 0, 0)` is dropped from the list
+entirely: that is the junk-actor rule vehicles already use, and on a drone it
+does a second job, because a dead pawn's final tick zeroes to the map origin
+before the pawn is freed. A class default object is never an entry.
