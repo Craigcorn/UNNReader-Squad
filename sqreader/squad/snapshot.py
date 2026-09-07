@@ -95,6 +95,26 @@ def _uobject_class_name(pm: ProcessMemory, addr: int,
     return name
 
 
+def _class_name_cached(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                       caches: "SnapshotCaches | None",
+                       class_addr: int) -> str | None:
+    """The name of the class at `class_addr`, through the caches' class-name
+    map. A UClass's name never changes, so one read per class per generation
+    serves every pointer that lands on it — the action entries and the marker
+    `Action` pointer both do, and a class the walk has already named costs a
+    dict hit."""
+    if not class_addr:
+        return None
+    if caches is None:
+        return _uobject_name(pm, class_addr, alloc)
+    name = caches.class_name.get(class_addr)
+    if name is None:
+        name = _uobject_name(pm, class_addr, alloc)
+        if name and name != "None":
+            caches.class_name[class_addr] = name
+    return name
+
+
 def _tag_char_is_junk(o: int) -> bool:
     """A codepoint a torn/stale PlayerNamePrefix read produces but a real clan
     tag never uses: control chars, private-use, replacement char, and
@@ -2620,11 +2640,7 @@ def _read_commander_actions(pm: ProcessMemory, alloc: FNameEntryAllocator,
             # The same class-name cache every other per-tick class read uses:
             # an action class's name never changes, and there are a dozen of
             # them per match.
-            nm = caches.class_name.get(class_addr) if caches is not None else None
-            if nm is None:
-                nm = _uobject_name(pm, class_addr, alloc)
-                if caches is not None and nm and nm != "None":
-                    caches.class_name[class_addr] = nm
+            nm = _class_name_cached(pm, alloc, caches, class_addr)
             if nm is not None:
                 entry["action"] = nm
         config = configs.get(class_addr) if class_addr else None
