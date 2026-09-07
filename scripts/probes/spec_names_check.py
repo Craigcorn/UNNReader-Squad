@@ -47,6 +47,8 @@ EXPECTED: list[tuple[str, str, list[str], str]] = [
      ["CommandActionData", "GameTimeAtCreation", "CooldownTimeRemaining",
       "IsDestroyedDuringActive"], "§3 actions[]"),
     ("SQCommandActionDataFASItem", "ScriptStruct", ["Content"], "§3 actions[]"),
+    ("SQCommanderActionDataArray", "ScriptStruct", ["Items"],
+     "§3 actions[] (the FastArray whose Items the entries sit in)"),
     ("CommanderVoteNominee", "ScriptStruct", ["NomineeState", "VoteCount"],
      "§3 nominees[]"),
     ("CommanderCategory", "ScriptStruct", ["Name", "CooldownDuration"],

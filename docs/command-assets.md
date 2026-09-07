@@ -870,9 +870,11 @@ Times below are the server's game clock unless marked.
 - **The marker's `Action` pointer (T12).** Null on every request marker
   — twelve across placement, approval, expiry and deletion, both classes.
   On every footprint it names the calling config: the UAV coverage marker
-  `CommandAction_UAV_MQ9_USMC_C` (twice), the static barrage
+  (`BP_MapMarker_CommandRadius_Friendly_C`) `CommandAction_UAV_MQ9_USMC_C`
+  (twice), the static barrage (`BP_MapMarker_CommandRadius_C`)
   `CommandAction_Artillery_Barrage_USMC_C`, the strike line
-  `CommandAction_FA18CASStrafe_Rockets_USMC_C` (twice), the mortar
+  (`BP_MapMarker_CommandLine_C`) `CommandAction_FA18CASStrafe_Rockets_USMC_C`
+  (twice), the mortar (`BP_MapMarker_CommandRadius_C`)
   `CommandAction_Mortar_Barrage_INS_C`. The drone's marker class per its
   config is `BP_MapMarker_RotateIcon_C`, outside the Command family: no
   pointer, and the marker probe never listed it.
@@ -901,6 +903,9 @@ Times below are the server's game clock unless marked.
 - **Claims.** Entries created at the claim, back-dated by enroute plus
   active, as on 09-02: USMC claim 2239 → artillery 2119, strike 2192; MEI
   claim 7912 → drone 7302, mortar 7822.
+- **The manager.** Several `SQCommanderManager` instances exist at once
+  — four in the first match, two in the second — all reading
+  `bCommanderActive` 1 and 60 / 300 / 300 / 2 / 3.
 - **The vote timestamps are end times.** `CommanderVoteTimestamp` is
   written when a vote opens, with the vote's end (open + 60: 4465 → 4524,
   4885 → 4945, 7855 → 7912); `VoteCooldownTimestamp` at resolution with
@@ -928,7 +933,8 @@ Times below are the server's game clock unless marked.
   4945; each entry became ready at claim + min(remaining + 300, its own
   `CooldownDuration`): creep and strike +440.9 (5386), UAV +565.3
   (5510.4), barrage the full 1800 (6745); creation stamps re-stamped to
-  match; the remaining values left as the step-down wrote them.
+  match; the remaining values left as the step-down wrote them, and the strike
+  call at 6124.7 left them too.
 - **Shoot-downs (T9 a).** UAV #2, fired on by several players (M2, 30 mm,
   120 mm): the actor's `Health` stayed 1000 and `Dead_0` false through the
   kill and a 16 s linger; `Action Destroyed` went true at +67 s of a 330 s
@@ -955,15 +961,16 @@ Times below are the server's game clock unless marked.
   possessed 3 s after. Exit: `PlayerState` and `Controller` null, owner
   kept, the pawn hovering; re-entry restored them. Shot while piloted:
   `HealthComponent_C.Health` 15 → 0 and `Dead` true in the same 100 ms
-  sample as `LastHitBy` = the killer; the pilot pointers cleared 1.1 s
-  later; `LastHitBy` then alternated between two shooters as hits landed
-  on the falling pawn; the pawn vanished 91 s after the kill. The drone
+  sample as `LastHitBy` = the killer; 1.1 s later, in one
+  sample, the pilot pointers cleared and `LastHitBy` moved to a second
+  shooter; it then alternated between the two as hits landed on the
+  falling pawn; the pawn vanished 91 s after the kill. The drone
   entry read destroyed 1 with its creation stamp unchanged. The call actor
   never flipped `Action Destroyed` and was still alive at the stop, 28 min
   after the call and 18 past its window. A `BP_Deployable_DroneSpawner_C`
   (`Health` 0 / 100, `BuildState` 2, instigator = the commander, `Drone
   Class` `BP_FlyingDrone_C`, `Action` `CommandAction_Drone_C`) and a
-  `BP_Deployable_DroneItem_C` spawn with the call; the spawner went 60 s
+  `BP_Deployable_DroneItem_C` spawn with the call; the spawner and the item went 68 s
   later. The server log records the pawn's possessions (`OnPossess`), no
   damage.
 - **Hand-off (T10).** There is none: a drone is tied to the player who

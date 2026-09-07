@@ -57,14 +57,15 @@ possessed 3 s after that. On exit the pilot and controller pointers went
 null while the owner stayed, and the pawn hovered in place (there is no
 landing); re-entry restored them. Shot while piloted: `HealthComponent_C`
 `Health` 15 → 0 and `Dead` true in the same sample as `LastHitBy` = the
-killer; the pilot pointers cleared 1.1 s later; `LastHitBy` then alternated
-between the two shooters hitting the falling pawn; the pawn vanished 91 s
+killer; 1.1 s later, in one sample, the pilot pointers cleared and
+`LastHitBy` moved to the second shooter; it then alternated between the
+two as hits landed on the falling pawn; the pawn vanished 91 s
 after the kill. The team's drone entry read `IsDestroyedDuringActive` 1
 with its creation stamp unchanged; the call actor never flipped `Action
 Destroyed` and outlived its window. A `BP_Deployable_DroneSpawner_C` and a
 `BP_Deployable_DroneItem_C` spawn with the call (the spawner: `Health`
 0 / 100, `BuildState` 2, instigator = the commander, `Drone Class`
-`BP_FlyingDrone_C`); the spawner went after 60 s. The recon kit has no such
+`BP_FlyingDrone_C`); the spawner and the item went after 68 s. The recon kit has no such
 deployable (09-05). Full journal entry: `docs/command-assets.md`
 "2026-09-07".
 
