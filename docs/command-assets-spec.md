@@ -84,13 +84,13 @@ live in the 08-30/31 sessions).
 | `commander.actionsEnabled` | `SQCommanderState.bActionsEnabled` | bool | the team may issue commands this frame (live state; it opened around the moments assets were called and toggled as a commander moved, 09-02 raws) | every frame |
 | `commander.vote.inProgress` | `bVoteInProgress` | bool | a commander vote is open | every frame |
 | `commander.vote.timer` | `CommanderVoteTimer` | int, s | seconds left in the vote window (60 → 0, once per second, 2026-08-31); reads 0 when no vote is open | every frame |
-| `commander.vote.startedGameTime` | `CommanderVoteTimestamp` | int, game s | when the current or last vote opened | every frame |
+| `commander.vote.endsGameTime` | `CommanderVoteTimestamp` | int, game s | the current or last vote's end: written when the vote opens, as the open time plus `votingTimeSec` (three votes, 2026-09-07) | every frame |
 | `commander.vote.nominees[]` | `NomineeStatus.Items[]` (`CommanderVoteNominee`, 32-byte items): `NomineeState` → player state; `VoteCount` | `{eosId, name, votes}` | each nominee and the live tally; no per-voter ballots exist in memory (three votes read at 96-byte width, 09-02). Entries persist after resolution, so the frame after `inProgress` drops still carries the final tallies — the recorder keeps no memory across frames | whenever the array holds entries |
 | `commander.vote.cooldownActive` | `bVoteCooldownActive` | bool | the block on new votes after a claim | every frame |
 | `commander.vote.cooldownTimer` | `VoteCooldownTimer` | int, s | its countdown (counts down after every claim, 09-02; the manager's `VoteCooldownTimeSeconds` read 300, 09-04) | every frame |
-| `commander.vote.cooldownStartedGameTime` | `VoteCooldownTimestamp` | int, game s | when it started | every frame |
+| `commander.vote.cooldownEndsGameTime` | `VoteCooldownTimestamp` | int, game s | when it ends: written at the vote's resolution as the resolution time plus `voteCooldownSec`; `cooldownActive` reads true exactly until then (2026-09-07) | every frame |
 | `commander.cooldowns.categories[]` | `CommanderCategories[i]` (`CommanderCategory`, 24-byte items): `Name` (FText), `CooldownDuration` (float); `LastCategoryGameTime[i]` (float) | `{id, name, intervalSec, lastUseGameTime}` | the per-category gate: any call in the category writes the stamp (strafe, mortar and three bomb calls all wrote index 1, 09-02). `id` is the array index `i` — the index `LastCategoryGameTime` uses and the value the actions' `categoryId` carries — the one key the recorder produces. `lastUseGameTime` is `null` while `LastCategoryGameTime` has no element at `i` (the array is empty until the first call) | every frame |
-| `commander.cooldowns.actions[]` | `CommandIntervals.Items[]` (`SQCommandActionDataFASItem`, 40-byte items) `.Content` (`SQCommandActionData`): `CommandActionData` (class), `GameTimeAtCreation` (float), `CooldownTimeRemaining` (float), `IsDestroyedDuringActive` (bool); plus, from that class's defaults, `CategoryId` (byte), `EnrouteDuration`, `ActiveDuration`, `CooldownDuration` (floats) | `{action, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | one entry per action the team can call; entries appear at the first claim, back-dated by enroute plus active so each asset starts with its own cooldown to run (both claims, 09-02); a call rewrites `createdGameTime`; `remainingAtChange` is the raw read — the game writes it only at a commander change and it reads 0 otherwise; `destroyedDuringActive` read 1 on the drone that was shot down. The four config values ride every frame so a seek into a replay is self-describing | every frame once entries exist |
+| `commander.cooldowns.actions[]` | `CommandIntervals.Items[]` (`SQCommandActionDataFASItem`, 40-byte items) `.Content` (`SQCommandActionData`): `CommandActionData` (class), `GameTimeAtCreation` (float), `CooldownTimeRemaining` (float), `IsDestroyedDuringActive` (bool); plus, from that class's defaults, `CategoryId` (byte), `EnrouteDuration`, `ActiveDuration`, `CooldownDuration` (floats), `DisplayName` (FString) | `{action, displayName, createdGameTime, remainingAtChange, destroyedDuringActive, categoryId, enrouteSec, activeSec, cooldownSec}` | one entry per action the team can call; entries appear at the first claim, back-dated by enroute plus active so each asset starts with its own cooldown to run (both claims, 09-02); a call rewrites `createdGameTime`; `displayName` is the config's own display text ("MQ-9 UAV Recon", "Heavy Mortar Barrage" — eleven read 2026-09-07; decision D15); `remainingAtChange` is the raw read — the game writes it at a commander change and at a step-down and leaves it otherwise, so it reads 0 until the first of those and keeps its last value through later calls (2026-09-07); `destroyedDuringActive` read 1 on the drone shot down on 09-02 and on the UAV and the drone shot down on 2026-09-07, with `createdGameTime` unchanged. The config values ride every frame so a seek into a replay is self-describing | every frame once entries exist |
 
 ## 4. Surface B — `gameState.commanderRules`
 
@@ -126,9 +126,10 @@ carry the master's same four fields at the same offsets (08-30 layouts).
 
 | Wire field | Memory source | Type | Meaning | Emitted |
 |---|---|---|---|---|
-| `distance` | `Distance` | number, raw game units (cm) | the marker's own length figure: circle radius on `CommandRadius` (10000 = 100 m UAV coverage; 7500 = the mortar barrage's fixed footprint), run length on `CommandLine` (6000), path length on `CommandPath` (45000, equal to the creep actor's), aim separation on `CommandLineRadius` (the chosen 44.75–120 m); 0 on request markers | whenever the marker's class carries the field |
-| `addDistance` | `AddDistance` | number, raw | the secondary figure: drop scatter on `CommandPath` (7500), the outer danger band on the mortar `CommandRadius` (4500); 0 elsewhere | whenever the class carries the field |
+| `distance` | `Distance` | number, raw game units (cm) | the marker's own length figure, the commander's choice wherever the UI offers one: circle radius on `CommandRadius` (the chosen UAV coverage — 10000 on 08-30, 16608 and 19958 on 2026-09-07; the chosen static-barrage radius, 15000; the mortar's fixed 7500), run length on `CommandLine` (the chosen 6000 and 3306), path length on `CommandPath` (45000, equal to the creep actor's), aim separation on `CommandLineRadius` (the chosen 44.75–120 m); 0 on request markers | whenever the marker's class carries the field |
+| `addDistance` | `AddDistance` | number, raw | the secondary figure: drop scatter on `CommandPath` (7500), the outer band on `CommandRadius` (the mortar's 4500, the static barrage's 7500); 0 elsewhere | whenever the class carries the field |
 | `yaw` | root transform | degrees | the marker's facing — the run direction, the path bearing, the aim line (the bomb marker's facing matched the aircraft's approach to within a degree, 09-02/03) | whenever `distance` is emitted, i.e. on the classes that carry `Distance` |
+| `action` | `Action` (class) | string | the `CommandAction_*` config the marker belongs to, a join to `commander.cooldowns.actions[].action`: `null` on request markers (both classes, twelve markers across placement, approval, expiry and deletion, 2026-09-07), the calling config on every footprint (UAV coverage, static barrage, strike line, mortar radius, 2026-09-07); the drone's icon marker lies outside the Command family and carries no pointer | whenever the class carries the field |
 
 Rules: the fields are read by name on any marker class that carries
 them, never by class-name matching — today the Command family
@@ -142,14 +143,12 @@ squad-data marker and the team actor marker are two markers to the game
 player-confirmed 2026-09-04); the recorder records both and never
 merges; drawing one shape is the viewer's rule (§9).
 
-Nothing new is recorded about request markers themselves: `type`
-(the class name is the only pending/approved discriminator — the two
-classes have byte-identical layouts and the `Request` bool reads 1 on
-both), position, `team`, `squad` and `ownerPlayerStateAddr` already
-reach the file. The Command master's `Action` class pointer, a direct
-join from a marker to the action it belongs to, is recorded only after
-test T12 has observed what it holds on a request before and after
-approval and on a footprint during a call (decision D13).
+Nothing else is recorded about request markers: `type` (the class name
+is the only pending/approved discriminator — the two classes have
+byte-identical layouts and the `Request` bool reads 1 on both),
+position, `team`, `squad` and `ownerPlayerStateAddr` already reach the
+file, and `action` reads `null` on them. How request markers live and
+die on the server is test T15's finding, applied in §9.
 
 ## 6. Surface D — the `commandActions` list
 
@@ -168,8 +167,8 @@ Common fields, every actor:
 | `team` | `Team` | int | owning team |
 | `action` | `Action` (class) | string | the `CommandAction_*` config class — joins `commander.cooldowns.actions[].action` |
 | `callerEosId` | `DamageInstigatorController` (a weak object pointer, resolved through the object array as the reader's existing weak-pointer read does) → controller → player state | string | the commander who called it: the attribution pointer the game itself uses for the asset's kills (a strafe wound event named the commander as attacker, 09-02) |
-| `position`, `yaw` | root transform | position, degrees | where the actor is this frame — aircraft move along their run, artillery sits at its origin |
-| `actionDestroyed` | `Action Destroyed` | bool | the call has ended (the actor lingers for `Destroy Delay after Action Destroyed`) |
+| `position`, `yaw` | root transform | position, degrees | where the actor is this frame — aircraft move along their run, artillery sits at its origin; the drone's call actor reads (0, 0, z), which the viewer ignores (§9) |
+| `actionDestroyed` | `Action Destroyed` | bool | the call was cut short: true while the actor lingers after a shoot-down (a UAV at +67 s of a 330 s window, an aircraft at +33 s, 2026-09-07); on a natural end no one-second sample read it true before the actor vanished (two cases), and the drone's call actor never sets it (§9, "Shoot-downs") |
 | `distance` | `Distance` | number, raw | the actor's own length figure (the creep read exactly 45000, its marker's path length) |
 
 Family fields, emitted where the class has them. Every name below is
@@ -179,19 +178,19 @@ contain spaces and are used verbatim.
 
 | Family | Wire fields (type) | Memory source |
 |---|---|---|
-| Strike aircraft (`*_Strafe_*`, gun and bomb): a shootable pawn flying its run | `health` (number), `dead` (bool), `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `Health`, `Dead_0`, `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts) |
-| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, cm), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values read on 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did |
-| UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | `health` (number), `dead` (bool) | `Health`, `Dead_0` (08-30 layout; the strike family's pair, kept by decision D17). No UAV or aircraft has been shot down in a session, so `Dead_0` flipping is unobserved — tracker T9. The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
-| Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health`, `SQ PC` → player state — on the drone pawn the same-named field holds the deployer or last pilot (09-05, §7); on the actor its behaviour is unread and is observed under tracker T14, the commander-drone test |
+| Strike aircraft (`*_Strafe_*`: gun, rockets and bomb): a shootable pawn flying its run | `shotsMade` (int), `maxShots` (int), `splineDistance` (number), `originLocation` (`{x, y, z}`) | `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location` (09-02 layouts; the F/A-18 gun, A-10 and SU-25 rocket classes archived 2026-09-07 carry the same names). `Health` and `Dead_0` are not recorded — decision D18: an aircraft killed before it fired left both untouched, and its `HealthComponent_C` too |
+| Artillery creep and barrage, mortar barrage: the fire plan and its progress | `originLocation` (`{x, y, z}`), `targetLocation` (`{x, y, z}`), `maxDropRadius` (number, raw — the creep's is centimetre-scale, the mortar's read 1.0), `preWarningShells` (int), `preWarningDelaySec` (number, s), `shellsPerBarrage` (int), `barrageCount` (int), `currentPrewarningShells` (int), `currentBarrage` (int), `projectile` (class name) | `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` — `Pre Warning Delay` and `Current Prewarning Shells` added by decision D14, their values read on 2026-09-05 from the 08-30 creep call's archived per-tick raws: delay 12.0 s constant; the counter 0 → 1 at +59.7 s and 2 at +67.1 s after the actor appeared, with `Current Barrage` reaching 1 at +79.2 s, twelve seconds after the second warning shell — the spellings reflected on both `BP_CommandActor_Artillery_Creep_C` (08-30 layout) and `BP_CommandActor_Mortar_Radius_C` (09-02 layout), identical names at identical offsets. The journal's creep entry dropped the spaces when it was transcribed; the layouts never did. The static barrage actor `BP_CommandActor_Artillery_Radius_C` (archived 2026-09-07) carries the same names. The mortar's values, read 2026-09-07: `Pre Warning Shells` 0, `Pre Warning Delay` 0, `Shells Per Barrage` 10, `Barrage Count` 8, `Max Drop Radius` 1.0, `Current Barrage` advancing every 8–9 s from +30 s |
+| UAV (`BP_CommandActor_UAV_MQ9_C`): position is the point; a shootable actor | none beyond the common fields | `Health` and `Dead_0` are not recorded — decision D18, reversing D17: a UAV shot down on 2026-09-07 left both untouched (1000, false) through the kill and a 16 s linger; the shoot-down is the common `actionDestroyed` (§9). The layout also carries `HealthComponent`, `Min Flight Speed`, `Max Flight Speed`, `Actual Flight Speed` and `Height`, none of which is recorded |
+| Commander drone call actor (`BP_CommandActor_Drone_C`) | `health` (number), `ownerEosId` (string) | `Health` (read 100 throughout a call, 2026-09-07), `SQ PC` → player state — the commander who called it (2026-09-07, T14); on the pawn the same-named field holds the deployer (§7). This actor's root position reads (0, 0, z) and means nothing; it never flips `Action Destroyed` and outlives its window (still present 18 min past it, 2026-09-07) — the drone's own life is the pawn's (§7) |
 
 Not recorded: who damaged or destroyed an actor. No last-damager field
 exists in the reflected lists of the six command actors archived (creep,
 UAV and F/A-18 on 08-30; drone, F/A-18, SU-25 bomb and mortar on
-09-02), so the actor itself cannot supply it. Whether another source
-can — a server-log line at the actor's death, or an object the actor
-points at — has never been tested; that is tracker T9's item (a), and a
-read joins this record only if it finds one. The drone pawn's
-`LastHitBy` is recorded in §7.
+09-02), so the actor itself cannot supply it. Neither the server log (no
+damage or death line for a UAV or an aircraft, 2026-09-07) nor the
+actor's `HealthComponent_C` (1000 / 1000 through a kill) names one, so
+the shooter of a UAV or aircraft is unrecorded (decision D18). The drone
+pawn's `LastHitBy` is recorded in §7.
 
 The shells, rockets and bombs an asset fires are already tracked
 projectiles with `firer` = the commander (bombs 09-02/03; 155 mm shells
@@ -216,10 +215,10 @@ archived in Misc `command-probe-2026-09-05/`).
 | `dead` | `Dead` | bool | true from the moment the battery expires or it is destroyed |
 | `health`, `maxHealth` | `HealthComponent` → `Health` (float), `Max Health` (double) | number | 15 / 15 on the recon drone; one rifle burst takes it to 0 (09-05) |
 | `pilotEosId` | `PlayerState` → player state | string | who is flying it this frame; `null` while nobody is — landed and exited, or deployed and not yet possessed (48 s of a fresh deploy read no pilot, flight 4, 09-05) |
-| `ownerEosId` | `SQ PC` → its player state | string | the deployer or last pilot; observed to persist through de-possession and death (09-05). What a hand-off does to it is tracker T10 |
+| `ownerEosId` | `SQ PC` → its player state | string | the deployer; persists through de-possession and death (09-05, 2026-09-07). A drone cannot change hands (T10, 2026-09-07), so it never moves |
 | `commandAction` | `Command Action` (class) | string | the calling action on a commander drone; `null` on a recon drone, where the pointer reads null (every recon row, 09-05) |
 | `batteryLifetimeMax` | `BatteryLifetimeMax` | number, s | the flight budget from spawn (100 on the recon class; the field does not exist on the commander drone's class, whose budget is its action's `activeSec` in §3) |
-| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; `null` until something has (every live row, 09-05); resolved to the shooter at the kill |
+| `lastHitByEosId` | `LastHitBy` → controller → player state | string | who last hit it; `null` until something has (every live row, 09-05); the killer at the kill (09-05 on a landed drone; 2026-09-07 in flight, in the same 100 ms sample as `dead`). Later hits on the falling pawn move it (a second shooter 1.1 s after the kill), so the killer is the value of the first frame carrying `dead`, exact to that frame's period — tracker D19 decides whether the 4 Hz line carries both |
 
 The pawn's `PlayerState`, `Controller` and `LastHitBy` are `Pawn`'s own
 properties (`SQFlyingDrone` adds none); the reader's layout read merges
@@ -234,7 +233,9 @@ the viewer derives it from `ownerEosId` (§9).
 as the full-frame entry, under the sampler's existing freshness gates
 (class pointer intact, position finite and in bounds; a freed pawn is
 omitted). No `h` or `team`: the drone's health changes only at death,
-which the full frame carries, and team derives from the owner. Measured
+which the full frame carries, and team derives from the owner; tracker
+D19 decides whether `dead` and `lastHitBy` join the line, each emitted
+only when set. Measured
 cost ~115 B of raw JSON per drone per sample, ~28 KB on disk per
 ten-minute flight, three to four small reads per drone per sample.
 Touch points: `possample.SampledEntities` / `sample_positions`, the
@@ -261,15 +262,15 @@ and their absence on an idle server is not drift.
 | `SQCommandActionDataFASItem` | ScriptStruct | no | `Content` |
 | `CommanderVoteNominee` | ScriptStruct | no | `NomineeState`, `VoteCount` |
 | `CommanderCategory` | ScriptStruct | no | `Name`, `CooldownDuration` |
-| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves, so none was loaded on the 09-05 layer) | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration` |
+| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves, so none was loaded on the 09-05 layer) | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`, `DisplayName` |
 | `SQFlyingDrone` | Class | no | `PlayerState`, `LastHitBy` (inherited from `Pawn`; present on an idle server, 09-04 self-test) |
 | `Controller` | Class | no | `PlayerState` — the hop from a drone's `LastHitBy` to the shooter's player state (§7). The reader's existing controller read is a reflection-first, doctor-checked offset on `SQPlayerController`, the same field by inheritance; this row names the base class the pawn's pointer is typed as |
 | `BP_FlyingDrone_C` | Class | yes — content, loads with a layer that has it | `SQ PC`, `HealthComponent`, `Dead`, `Command Action` |
 | `BP_FlyingDrone_Recoverable_C` | Class | yes — content | `BatteryLifetimeMax` |
 | `HealthComponent_C` | Class | yes — content | `Health`, `Max Health` |
-| `BP_MapMarker_CommandMaster_C` | Class | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance` |
+| `BP_MapMarker_CommandMaster_C` | Class | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance`, `Action` |
 | `BP_MapMarker_DirectorMaster_C` | Class | yes — content | `Distance` |
-| `BP_CommandActor_Artillery_Creep_C`, `BP_CommandActor_UAV_MQ9_C`, `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_Drone_C`, `BP_CommandActor_SU25_Bomb_Strafe_C`, `BP_CommandActor_Mortar_Radius_C` (archived 09-02) | Class | yes — content, exist only during a call | the common and family properties of §6 each class carries; a Blueprint parent common to the family, if reflection shows one at implementation, replaces the per-class rows |
+| `BP_CommandActor_Artillery_Creep_C`, `BP_CommandActor_UAV_MQ9_C`, `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_Drone_C`, `BP_CommandActor_SU25_Bomb_Strafe_C`, `BP_CommandActor_Mortar_Radius_C` (archived 09-02), `BP_CommandActor_Artillery_Radius_C`, `BP_CommandActor_FA18_Strafe_C`, `BP_CommandActor_A10_Strafe_2_C`, `BP_CommandActor_SU25_Rockets_Strafe_C`, `BP_CommandActor_FA18_Rockets_Strafe_C` (archived 2026-09-07) | Class | yes — content, exist only during a call | the common and family properties of §6 each class carries; a Blueprint parent common to the family, if reflection shows one at implementation, replaces the per-class rows |
 
 ## 9. Viewer rules (interpretation; nothing here is recorded)
 
@@ -279,16 +280,23 @@ test is cited by tracker id; the fields do not change when it runs.
 - **Request circle.** 50 m around an approved request, a documented
   game constant (edge-stands on two maps, 49.95 m and 50.20 m,
   2026-08-31); absent from server memory.
-- **Pending versus approved.** By marker `type`: `Command_SLRequest` is
-  pending, `Command_Request` approved. Bridge the one-tick class swap
-  (same squad, same position) as one request changing state. A request
-  a squad leader deletes lives out its fuse on the server; never infer a
-  delete.
+- **Pending versus approved, and deletes.** By marker `type`:
+  `Command_SLRequest` is pending, `Command_Request` approved. The server
+  sweeps markers every ~61 s (T15, 2026-09-07): on approval the approved
+  marker appears at once and the pending twin stays until the next
+  sweep, so treat a same-squad, same-position pair as one request
+  changing state for as long as both exist (up to a minute); a pending
+  marker otherwise runs a 61 s fuse and goes at the sweep after it, an
+  approved one about 60 s, and either goes at the sweep after a call
+  consumes it. A pending marker gone within 61 s of placement with no
+  approved twin was deleted by its squad leader, and the viewer may say
+  so (decision D20).
 - **Asset shapes.** From `type`, `distance`, `addDistance`, `yaw`:
   `CommandRadius` a circle of radius `distance`; `CommandLine` a run of
   `distance` along `yaw`; `CommandPath` a path of `distance` along `yaw`
-  with a scatter band of `addDistance`; the mortar `CommandRadius` a
-  circle plus an outer band; `CommandLineRadius` two aim points, at 0
+  with a scatter band of `addDistance`; `CommandRadius` a circle plus an
+  outer band wherever `addDistance` is set (the mortar, the static
+  barrage); `CommandLineRadius` two aim points, at 0
   and `distance` along `yaw`.
 - **Precision bombs.** A dashed circle pair at each aim point; impacts
   from the projectile rest positions where `hasImpacted` set. The pair's
@@ -300,21 +308,33 @@ test is cited by tracker id; the fields do not change when it runs.
   actor marker of the same family, owner and position, draw one shape.
 - **Commander seat and votes.** Derive "vote opened / resolved / won",
   "commander changed / stepped down" by comparing frames of §3; a vote
-  spans 60 s and the seat is a per-frame field, so nothing falls between
-  frames. A step-down clears the seat with no vote cooldown; a team
-  switch behaves as a step-down (09-02).
+  spans `votingTimeSec` and the seat is a per-frame field, so nothing
+  falls between frames; `vote.endsGameTime` and
+  `vote.cooldownEndsGameTime` are end times. A step-down clears the seat
+  and adds no cooldown, but the last vote's cooldown still refuses a
+  fresh claim until it ends (2026-09-07); a team switch behaves as a
+  step-down (09-02).
 - **Ready-in arithmetic.** Per action: effective duration = `enrouteSec`
   + `activeSec` + `cooldownSec`; ready = `createdGameTime` + effective.
   Per category: ready = `lastUseGameTime` + `intervalSec`. An asset is
   callable at the later of the two, less the frame's `worldTimeSec`. When
-  `destroyedDuringActive` flips true, ready = that frame's
-  `worldTimeSec` + `cooldownSec` (the 09-02 drone; player-confirmed).
-  After a commander change the game re-stamps entries so that
-  `newCommanderExtensionSec` remain (one sample, a long-ready asset,
-  09-02); what it does to an asset still cooling is tracker T9. Three
-  sources agree on the category gate — memory arithmetic, the players'
-  rule, SquadCalc's model — and the direct call test is tracker T9's
-  optional confirmation.
+  `destroyedDuringActive` flips true the stamps do not move: a UAV and a
+  drone destroyed on 2026-09-07 kept `createdGameTime`, and the UI's
+  ready-in for the UAV matched the unchanged arithmetic, not destruction
+  + `cooldownSec`; the 09-02 reading of a restart from destruction was
+  not reproduced and is not applied. At a commander change (2026-09-07):
+  an entry still cooling has `createdGameTime` moved forward by
+  `newCommanderExtensionSec` and `remainingAtChange` written with the
+  time it had left; an entry whose own cooldown had run out is
+  re-stamped to become ready `newCommanderExtensionSec` after the
+  change; the category stamps do not move. At a step-down every entry's
+  `remainingAtChange` is written with its time left and nothing else
+  moves; at the next claim each entry becomes ready at claim +
+  min(`remainingAtChange` + `newCommanderExtensionSec`, `cooldownSec`),
+  while the match's first claim starts every entry on its full cooldown
+  (09-02, 2026-09-07). The category gate holds across all of it:
+  confirmed directly on 2026-09-07 (a strike refused with 15:00 after an
+  artillery call) and untouched by a commander change.
 - **Artillery timeline.** From the call: the guns open at
   `createdGameTime` + `enrouteSec` (the first warning shell landed at
   +59.7 s on a 60 s enroute, 08-30 creep); the main barrage opens when
@@ -322,23 +342,35 @@ test is cited by tracker id; the fields do not change when it runs.
   `preWarningDelaySec` (observed 12.1 s after the second warning shell);
   barrages then advance `currentBarrage` at the game's own interval, which
   is not recorded, roughly every six to seven seconds on the 08-30 creep.
-  Whether the mortar follows the same shape is unobserved — tracker T9's
-  item (g), the mortar actor's rows across one call.
-- **Actions enabled.** `commander.actionsEnabled` is displayed as read;
-  its reading as "the commander stands in a command zone" is an
-  inference the viewer may label as such (tracker W20's item R8).
+  The mortar has no warning phase: `preWarningShells` and
+  `preWarningDelaySec` read 0, `currentPrewarningShells` and
+  `currentBarrage` both reach 1 at `enrouteSec`, and eight barrages of
+  ten follow every eight to nine seconds (2026-09-07); its
+  `maxDropRadius` reads 1.0 and its footprint is the marker's `distance`.
+- **Shoot-downs.** A command actor whose `actionDestroyed` reads true in
+  a full frame while the actor still exists was cut short — shot down:
+  a natural end removes the actor without any frame reading the flag
+  (two natural ends and two kills, 2026-09-07), and the team entry's
+  `destroyedDuringActive` says the same. Who did it is not recorded
+  (D18). The drone's call actor never sets the flag; its shoot-down is
+  the pawn's `dead` and `lastHitByEosId` (§7).
+- **Actions enabled.** `commander.actionsEnabled` is the commander's
+  presence in a command zone, both ways (walked out and back in,
+  2026-09-07), and the viewer may say so.
 - **Drones.** Stop drawing at `dead`. Team = the team of `ownerEosId`'s
   player in the same frame. Remaining flight time = the `worldTimeSec`
   of the first frame the `id` appears + `batteryLifetimeMax` (recon) or
   the calling action's `activeSec` (commander) − now. A new `id` whose
   `ownerEosId` and team match one that just vanished is the same kit
   redeployed, if continuity is wanted; the recorder never joins them.
-  Interpolate at 4 Hz knowing cruise is ~10 m/s (2.5 m per sample).
-- **Asset display names.** SquadCalc's per-asset table maps the
-  `CommandAction_*` class names to display names and agrees with the
-  config values (cross-checked 2026-09-04). Decision D15 replaces the
-  mapping with the configs' own `DisplayName`, recorded on each action
-  entry once test T13 has read the strings.
+  Interpolate at 4 Hz knowing cruise is ~10 m/s (2.5 m per sample). The
+  killer is the `lastHitByEosId` of the first frame carrying `dead`
+  (§7). The drone's call actor draws nothing: its position is
+  meaningless and its life outruns the pawn's.
+- **Asset display names.** Each action entry carries the config's own
+  `displayName` (decision D15; eleven read 2026-09-07). SquadCalc's
+  per-asset table, which agreed with the config values (2026-09-04), is
+  no longer needed.
 
 ## 10. Deliberately not recorded
 
@@ -348,9 +380,12 @@ across 21,000 rows); any "ready in" or remaining-time number; any
 event line; any rule; the request circle radius; the bomb map circles;
 any last-damager for a command actor (none exists in memory); the recon
 launcher (no deployable exists — the launcher is the kit item in the
-soldier's inventory); the command marker's `Action` pointer until
-test T12 has observed it (D13); the action configs' `Description` (D15)
-and placement bounds (D16).
+soldier's inventory); the action configs' `Description` (D15) and
+placement bounds (D16); the UAV's and strike aircraft's `Health` and
+`Dead_0` and the strike actor's `HealthComponent` (D18 — none moved
+through a kill); the commander drone's spawner deployable and drone item
+(`BP_Deployable_DroneSpawner_C`, `BP_Deployable_DroneItem_C`: spawn
+plumbing that comes and goes with the call, 2026-09-07).
 
 Second, exhaustively, every other game-level property the classes of
 §3–§7 carry, from test T11's full layouts (2026-09-05), each with the
@@ -490,18 +525,17 @@ named.
 | ″ | `DefaultSceneRoot` (Object) | engine or visual component |
 | ″ | `Equippable Drone Item Class` (Class) | spawn plumbing |
 | ″ | `TargetInventorySlot` (Int) | spawn plumbing |
-| the action configs (three CDOs archived 09-02) | `DisplayName` (Str) | the game's own display text — `DisplayName` is recorded once test T13 has read it (D15); `Description` is not |
-| ″ | `Description` (Str) | the game's own display text — tracker D15 |
+| the action configs (three CDOs archived 09-02, eleven on 2026-09-07) | `Description` (Str) | the game's own descriptive sentence — not recorded (D15; read 2026-09-07) |
 | ″ | `Texture` (Object) | UI: icon, tint, widget, sounds |
 | ″ | `Tint` (Struct) | UI: icon, tint, widget, sounds |
-| ″ | `CommandActor` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
+| ″ | `CommandActor` (Class) | reverse join from the action to its actor class — the marker's own pointer is the recorded side (D13); every config's joins matched the classes that spawned, 2026-09-07 |
 | ″ | `ControlWidget` (Class) | UI: icon, tint, widget, sounds |
 | ″ | `IconAngleOffset` (Float) | UI: icon, tint, widget, sounds |
 | ″ | `MaxAngleFromBase` (Float) | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
 | ″ | `CreateMapMarker` (Bool) | config flag with no agreed use |
 | ″ | `bAllowedInVehicle` (Bool) | config flag with no agreed use |
 | ″ | `bIgnoreActionEnabled` (Bool) | config flag with no agreed use |
-| ″ | `MapMarkerClass` (Class) | reverse joins from the action to its actor and marker classes (see D13) |
+| ″ | `MapMarkerClass` (Class) | reverse join from the action to its marker class — the marker's own pointer is the recorded side (D13) |
 | ″ | `CommanderActionSoundsList` (Struct) | UI: icon, tint, widget, sounds |
 | ″ | `MinimumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
 | ″ | `MaximumDistance` (Float) — only `CommandAction_Mortar_Barrage_IMF_C`, `CommandAction_Mortar_Barrage_INS_C` | placement bounds — not recorded by decision D16 (2026-09-05): where an asset was placed matters, not where it could have been |
@@ -523,7 +557,9 @@ A fresh session with no memory of the work reviewed the first draft on
 2026-09-05 against the six questions below and returned 23 corrections,
 all applied; a second pass the same day found the creep and UAV actor
 layouts already archived from 08-30, which settled two of them outright.
-The questions stand for the next review.
+The 2026-09-07 play session (journal "2026-09-07") amended §3 and
+§5–§10 with observed values and rules; the questions stand for the next
+review.
 
 1. Does every row of the journal's four "Agreed capture" sections
    (decisions 2, 5, 6 and 7; decision 3 is the paragraph inside decision
@@ -578,7 +614,12 @@ the archived probe output (Misc `command-probe-2026-09-05/`,
 `spec_names_check.live.jsonl` and `.archive.jsonl`) and are values of
 their day, never read by the implementation. All 157 names resolved —
 57 on the box for 18 classes, 131 from the archives for 19, eight classes
-checked both ways, and one class (`SQTeamState`) live only. The two
+checked both ways, and one class (`SQTeamState`) live only. On 2026-09-07
+the session's 48 layouts re-resolved 115 of them for 17 classes
+(`--archive` mode), and the classes marked 2026-09-07 below were added
+from that archive with the names this document reads on them,
+`DisplayName` included; `Health` and `Dead_0` left the strike and UAV
+rows with decision D18. The two
 artillery fields decision D14 added afterwards, `Pre Warning Delay` and
 `Current Prewarning Shells`, resolved in the same run as part of the
 artillery actors' full layouts (they appeared in §10's enumeration before
@@ -611,10 +652,22 @@ they were promoted).
 | `BP_MapMarker_Command_SLRequest_C` | live, 09-05 | `Distance` Double; `AddDistance` Double; `Action` Class; `Request` Bool |
 | `BP_CommandActor_Artillery_Creep_C` | archive, 08-30 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Barrage` Int; `Projectile` Class |
 | `BP_CommandActor_Mortar_Radius_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Barrage` Int; `Projectile` Class |
-| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
-| `BP_CommandActor_SU25_Bomb_Strafe_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
-| `BP_CommandActor_UAV_MQ9_C` | archive, 08-30 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `Dead_0` Bool |
+| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_SU25_Bomb_Strafe_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_UAV_MQ9_C` | archive, 08-30 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double |
 | `BP_CommandActor_Drone_C` | archive, 09-02 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Health` Double; `SQ PC` Object |
-| `CommandAction_Drone_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
-| `CommandAction_Mortar_Barrage_INS_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
-| `CommandAction_Mortar_Barrage_IMF_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float |
+| `CommandAction_Drone_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_Mortar_Barrage_INS_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_Mortar_Barrage_IMF_C` | archive, 09-02 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `BP_CommandActor_Artillery_Radius_C` | archive, 2026-09-07 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `Origin Location` Struct; `target location` Struct; `Max Drop Radius` Double; `Pre Warning Shells` Int; `Pre Warning Delay` Double; `Shells Per Barrage` Int; `Barrage Count` Int; `Current Prewarning Shells` Int; `Current Barrage` Int; `Projectile` Class |
+| `BP_CommandActor_FA18_Strafe_C` | archive, 2026-09-07 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_A10_Strafe_2_C` | archive, 2026-09-07 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_SU25_Rockets_Strafe_C` | archive, 2026-09-07 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `BP_CommandActor_FA18_Rockets_Strafe_C` | archive, 2026-09-07 | `Distance` Float; `Team` Int; `DamageInstigatorController` WeakObject; `Action` Class; `Action Destroyed` Bool; `Destroy Delay after Action Destroyed` Double; `CurrentShotsMade` Int; `MaxShots` Int; `Spline Distance` Double; `Origin Location` Struct |
+| `CommandAction_UAV_MQ9_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_FA18CASStrafe_Rockets_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_FA18CASStrafe_Rockets_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_FA18CASStrafe_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_A10CASStrafe_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_Artillery_Creep_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |
+| `CommandAction_Artillery_Barrage_USMC_C` | archive, 2026-09-07 | `CategoryId` Byte; `EnrouteDuration` Float; `ActiveDuration` Float; `CooldownDuration` Float; `DisplayName` Str |

@@ -86,11 +86,13 @@ EXPECTED: list[tuple[str, str, list[str], str]] = [
 
 ACTOR_COMMON = ["Distance", "Team", "DamageInstigatorController", "Action",
                 "Action Destroyed", "Destroy Delay after Action Destroyed"]
-STRIKE = ["Health", "Dead_0", "CurrentShotsMade", "MaxShots", "Spline Distance",
-          "Origin Location"]
+STRIKE = ["CurrentShotsMade", "MaxShots", "Spline Distance", "Origin Location"]
 ARTILLERY = ["Origin Location", "target location", "Max Drop Radius",
-             "Pre Warning Shells", "Shells Per Barrage", "Barrage Count",
-             "Current Barrage", "Projectile"]
+             "Pre Warning Shells", "Pre Warning Delay", "Shells Per Barrage",
+             "Barrage Count", "Current Prewarning Shells", "Current Barrage",
+             "Projectile"]
+CONFIG = ["CategoryId", "EnrouteDuration", "ActiveDuration", "CooldownDuration",
+          "DisplayName"]
 EXPECTED += [
     ("BP_CommandActor_Artillery_Creep_C", "BlueprintGeneratedClass",
      ACTOR_COMMON + ARTILLERY, "§6 artillery"),
@@ -101,17 +103,34 @@ EXPECTED += [
     ("BP_CommandActor_SU25_Bomb_Strafe_C", "BlueprintGeneratedClass",
      ACTOR_COMMON + STRIKE, "§6 strike"),
     ("BP_CommandActor_UAV_MQ9_C", "BlueprintGeneratedClass",
-     ACTOR_COMMON + ["Health", "Dead_0"], "§6 UAV"),
+     ACTOR_COMMON, "§6 UAV"),
+    ("BP_CommandActor_Artillery_Radius_C", "BlueprintGeneratedClass",
+     ACTOR_COMMON + ARTILLERY, "§6 artillery"),
+    ("BP_CommandActor_FA18_Strafe_C", "BlueprintGeneratedClass",
+     ACTOR_COMMON + STRIKE, "§6 strike"),
+    ("BP_CommandActor_A10_Strafe_2_C", "BlueprintGeneratedClass",
+     ACTOR_COMMON + STRIKE, "§6 strike"),
+    ("BP_CommandActor_SU25_Rockets_Strafe_C", "BlueprintGeneratedClass",
+     ACTOR_COMMON + STRIKE, "§6 strike"),
+    ("BP_CommandActor_FA18_Rockets_Strafe_C", "BlueprintGeneratedClass",
+     ACTOR_COMMON + STRIKE, "§6 strike"),
     ("BP_CommandActor_Drone_C", "BlueprintGeneratedClass",
      ACTOR_COMMON + ["Health", "SQ PC"], "§6 drone call actor"),
-    ("CommandAction_Drone_C", "BlueprintGeneratedClass",
-     ["CategoryId", "EnrouteDuration", "ActiveDuration", "CooldownDuration"],
+    ("CommandAction_Drone_C", "BlueprintGeneratedClass", CONFIG, "§3 action config"),
+    ("CommandAction_Mortar_Barrage_INS_C", "BlueprintGeneratedClass", CONFIG,
      "§3 action config"),
-    ("CommandAction_Mortar_Barrage_INS_C", "BlueprintGeneratedClass",
-     ["CategoryId", "EnrouteDuration", "ActiveDuration", "CooldownDuration"],
+    ("CommandAction_Mortar_Barrage_IMF_C", "BlueprintGeneratedClass", CONFIG,
      "§3 action config"),
-    ("CommandAction_Mortar_Barrage_IMF_C", "BlueprintGeneratedClass",
-     ["CategoryId", "EnrouteDuration", "ActiveDuration", "CooldownDuration"],
+    ("CommandAction_UAV_MQ9_USMC_C", "BlueprintGeneratedClass", CONFIG, "§3 action config"),
+    ("CommandAction_FA18CASStrafe_Rockets_USMC_C", "BlueprintGeneratedClass", CONFIG,
+     "§3 action config"),
+    ("CommandAction_FA18CASStrafe_Rockets_C", "BlueprintGeneratedClass", CONFIG,
+     "§3 action config"),
+    ("CommandAction_FA18CASStrafe_C", "BlueprintGeneratedClass", CONFIG, "§3 action config"),
+    ("CommandAction_A10CASStrafe_C", "BlueprintGeneratedClass", CONFIG, "§3 action config"),
+    ("CommandAction_Artillery_Creep_USMC_C", "BlueprintGeneratedClass", CONFIG,
+     "§3 action config"),
+    ("CommandAction_Artillery_Barrage_USMC_C", "BlueprintGeneratedClass", CONFIG,
      "§3 action config"),
 ]
 
