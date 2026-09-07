@@ -108,7 +108,8 @@ follows [Semantic Versioning](https://semver.org/).
   the airframe on the player's word, not on anything in memory, and if
   the camera's own rotation is ever recorded it replaces this. The UAV
   gets none of it - its yaw is an orbit heading and its camera gimbals
-  independently, unrecorded.
+  independently, unrecorded. Both drone scenarios fly a turn now, so a
+  reviewer can watch the cone swing rather than take it on trust.
 - A commander's call now shows what it actually put on the ground. The
   shells, rockets and bombs an asset fires have been tracked
   projectiles all along, but nothing joined them to the call that sent
@@ -124,7 +125,11 @@ follows [Semantic Versioning](https://semver.org/).
   frame's roster, because the two fields are not the same kind of
   string - a round carries the firer's name, a call carries an EOS id -
   and a caller who is off the roster joins no rounds at all rather than
-  joining them by something looser.
+  joining them by something looser. Five of the review scenarios now put
+  rounds on the ground to show it - 32 shells into the static barrage's
+  circle, 42 walking up the creep's path, all 80 of the mortar's eight
+  barrages, eight rockets down the strike's run and a bomb on each aim
+  point - so the rule can be argued about without waiting for a match.
 - The viewer draws the commander's war. Everything the recorder had
   learned to write about the seat, the requests, the called assets and
   the drones reached the file and stopped there: a UAV's coverage

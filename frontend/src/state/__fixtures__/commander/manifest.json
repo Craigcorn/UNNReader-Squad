@@ -30,35 +30,35 @@
  {
   "name": "footprint-static-barrage",
   "title": "Static barrage",
-  "shows": "A CommandRadius marker at 15000 with a 7500 outer band — the circle filled, the band dashed outside it — and the guns sitting at their origin through the fire plan.",
-  "rule": "§9 Asset shapes (CommandRadius with addDistance); §5 distance/addDistance",
+  "shows": "A CommandRadius marker at 15000 with a 7500 outer band — the circle filled, the band dashed outside it — the guns sitting at their origin through the fire plan, and the shells landing inside it: two warning rounds, then ten a barrage, each in the air for three frames and then at rest with hasImpacted true.",
+  "rule": "§9 Asset shapes (CommandRadius with addDistance); §5 distance/addDistance; §9 Asset impacts",
   "lineCount": 181
  },
  {
   "name": "footprint-creep-path",
   "title": "Creeping barrage",
-  "shows": "A CommandPath marker 45000 long with 7500 of drop scatter, drawn as a band along its bearing, and the creep actor stepping through its plan: the first warning shell at +59.7 s of a 60 s enroute, the second at +67.1 s, the first barrage at +79.2 s — twelve seconds after it, the delay the config carries.",
-  "rule": "§9 Asset shapes (CommandPath); §9 Artillery timeline; §6 the creep's plan",
+  "shows": "A CommandPath marker 45000 long with 7500 of drop scatter, drawn as a band along its bearing, and the creep actor stepping through its plan: the first warning shell at +59.7 s of a 60 s enroute, the second at +67.1 s, the first barrage at +79.2 s — twelve seconds after it, the delay the config carries. The shells land with it, each barrage's ten further up the path than the last, inside the scatter band.",
+  "rule": "§9 Asset shapes (CommandPath); §9 Artillery timeline; §6 the creep's plan; §9 Asset impacts",
   "lineCount": 213
  },
  {
   "name": "footprint-strike-line",
   "title": "Strike run",
-  "shows": "A CommandLine marker 6000 long along its bearing, with the aircraft moving down the run frame by frame and its shot counter climbing.",
-  "rule": "§9 Asset shapes (CommandLine); §5 distance; §6 the strike family's fields",
+  "shows": "A CommandLine marker 6000 long along its bearing, with the aircraft moving down the run frame by frame, its shot counter climbing, and eight rockets leaving it and landing along the run. The strike family declares no `projectile`, so these join the call by firer alone — which is the whole of the join a recording supports for a strike.",
+  "rule": "§9 Asset shapes (CommandLine); §5 distance; §6 the strike family's fields; §9 Asset impacts (a call with no class to join on)",
   "lineCount": 141
  },
  {
   "name": "footprint-mortar-radius",
   "title": "Mortar barrage",
-  "shows": "The mortar's fixed 7500 circle with its 4500 outer band, and its plan running with no warning phase: the counter and the first barrage both reach 1 at the enroute, then eight barrages of ten follow every 8-9 s.",
-  "rule": "§9 Asset shapes (CommandRadius); §9 Artillery timeline (the mortar's warning-free one); §6 the mortar's values",
+  "shows": "The mortar's fixed 7500 circle with its 4500 outer band, and its plan running with no warning phase: the counter and the first barrage both reach 1 at the enroute, then eight barrages of ten follow every 8-9 s — all eighty rounds landing inside the circle, ten to a barrage, with nothing landing before the first one opens.",
+  "rule": "§9 Asset shapes (CommandRadius); §9 Artillery timeline (the mortar's warning-free one); §6 the mortar's values; §9 Asset impacts",
   "lineCount": 285
  },
  {
   "name": "footprint-aim-line",
   "title": "Precision aim line",
-  "shows": "A CommandLineRadius marker: two aim points, at 0 and 4475 along the marker's bearing, with the line between them and the bomb pair drawn at each — the config's 45 m and 100 m, both dashed. At 4475 apart the two pairs overlap, which is what this separation looks like on the ground; the radii are the viewer's own and the spec has never measured them.",
+  "shows": "A CommandLineRadius marker: two aim points, at 0 and 4475 along the marker's bearing, with the line between them and the bomb pair drawn at each — the config's 45 m and 100 m, both dashed. At 4475 apart the two pairs overlap, which is what this separation looks like on the ground; the radii are the viewer's own and the spec has never measured them. A bomb falls on each aim point and comes to rest inside the inner circle, which is where every observed bomb fell. No command actor is on the map here, so the bombs join no call and ring as any other round does — the impacts alone are the precision-bomb rule.",
   "rule": "§9 Asset shapes (CommandLineRadius); §9 Precision bombs (radii unmeasured, tracker T9 f); §5 distance",
   "lineCount": 129
  },

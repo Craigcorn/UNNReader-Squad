@@ -99,6 +99,16 @@ pawn to write. A drone flies at its cruise, 2.5 m a sample; a command actor
 has no 4 Hz line at all, so an aircraft on its run steps one full frame at a
 time, which is what a recording of one shows.
 
+Rounds are full-frame only, for the same reason: the sampler does not emit
+projectiles (shipped and reverted 2026-08-29), so a shell exists once a
+second and its flight between frames is the viewer's own interpolation —
+which is exactly what §9's *Asset impacts* says, and why an impact is exact
+to the second and to the rest point. Each round here is therefore in the air
+for three full frames, at rest on its impact point with `hasImpacted` true on
+the next, and lingering there for two more — a couple of ticks, which is what
+a dying actor really does and what the viewer's impact de-duplication was
+written against.
+
 ## What each one shows
 
 | Scenario | Runs | Shows | The rule it demonstrates |
@@ -107,24 +117,29 @@ time, which is what a recording of one shows.
 | `request-approved-with-twin` | 35 s | The commander approves. The approved marker appears at once and the pending twin stays until the sweep — both on the map for the eight frames from 1005 to 1012 — and the viewer draws ONE request with an inner tick saying the twin is still there. | §9 *Pending versus approved, and deletes* (T15, 2026-09-07) |
 | `request-deleted` | 67 s | A pending request that vanishes 55 s after it was placed, inside the 61 s fuse, with no approved twin: its squad leader took it back, and the panel says so once the playhead passes the removal. | §9 *Pending versus approved, and deletes* (decision D20) |
 | `footprint-uav-coverage` | 40 s | A `CommandRadius_Friendly` marker at the 16608 radius the commander chose, drawn at true map scale, with the MQ-9 on station inside it under its own display name. | §9 *Asset shapes*; §5 `distance` |
-| `footprint-static-barrage` | 45 s | A `CommandRadius` marker at 15000 with a 7500 outer band — circle filled, band dashed outside it — and the guns at their origin through the plan. | §9 *Asset shapes*; §5 `addDistance` |
-| `footprint-creep-path` | 53 s | A `CommandPath` 45000 long with 7500 of drop scatter, drawn as a band along its bearing, **and** the creep walking its plan: first warning shell at +59.7 s of a 60 s enroute, second at +67.1 s, first barrage at +79.2 s — twelve seconds after it. | §9 *Asset shapes*; §9 *Artillery timeline*; §6 the creep's plan |
-| `footprint-strike-line` | 35 s | A `CommandLine` 6000 long along its bearing, with the aircraft moving down the run and its shot counter climbing. | §9 *Asset shapes*; §6 the strike family |
-| `footprint-mortar-radius` | 71 s | The mortar's fixed 7500 circle with its 4500 band, **and** its warning-free plan: counter and first barrage both reach 1 at the enroute, then eight barrages of ten every 8–9 s. | §9 *Asset shapes*; §9 *Artillery timeline* (the mortar's warning-free one); §6 the mortar's values |
-| `footprint-aim-line` | 32 s | A `CommandLineRadius`: two aim points, at 0 and 4475 along the bearing, the line between them, and the bomb pair at each — the config's 45 m and 100 m, both dashed. At 4475 apart the two pairs overlap, which is what that separation looks like on the ground. | §9 *Asset shapes* (`CommandLineRadius`); §9 *Precision bombs* (radii unmeasured — tracker T9 (f), W20's B2) |
+| `footprint-static-barrage` | 45 s | A `CommandRadius` marker at 15000 with a 7500 outer band — circle filled, band dashed outside it — the guns at their origin through the plan, and **32 shells landing inside it**: two ranging rounds while the barrage counter still reads 0, then ten a barrage for three barrages. | §9 *Asset shapes*; §5 `addDistance`; §9 *Asset impacts* |
+| `footprint-creep-path` | 53 s | A `CommandPath` 45000 long with 7500 of drop scatter, drawn as a band along its bearing, **and** the creep walking its plan: first warning shell at +59.7 s of a 60 s enroute, second at +67.1 s, first barrage at +79.2 s — twelve seconds after it. **42 shells land with it** — the two warning rounds near the start, then each barrage's ten further up the path than the last, all inside the scatter band. | §9 *Asset shapes*; §9 *Artillery timeline*; §6 the creep's plan; §9 *Asset impacts* |
+| `footprint-strike-line` | 35 s | A `CommandLine` 6000 long along its bearing, with the aircraft moving down the run, its shot counter climbing, and **eight rockets leaving it and landing along the run** ahead of it. The strike family declares no `projectile`, so these join the call by firer alone — the whole join a recording supports for a strike. | §9 *Asset shapes*; §6 the strike family; §9 *Asset impacts* (a call with no class to join on) |
+| `footprint-mortar-radius` | 71 s | The mortar's fixed 7500 circle with its 4500 band, **and** its warning-free plan: counter and first barrage both reach 1 at the enroute, then eight barrages of ten every 8–9 s. **All eighty rounds land inside the circle**, ten to a barrage, and nothing lands before the first one opens. | §9 *Asset shapes*; §9 *Artillery timeline* (the mortar's warning-free one); §6 the mortar's values; §9 *Asset impacts* |
+| `footprint-aim-line` | 32 s | A `CommandLineRadius`: two aim points, at 0 and 4475 along the bearing, the line between them, and the bomb pair at each — the config's 45 m and 100 m, both dashed. At 4475 apart the two pairs overlap, which is what that separation looks like on the ground. **A bomb falls on each aim point** and rests 4 m and 12 m off them — well inside the inner circle, where every observed bomb fell; no command actor is staged here, so the bombs join no call and ring as any other round does. | §9 *Asset shapes* (`CommandLineRadius`); §9 *Precision bombs* (radii unmeasured — tracker T9 (f), W20's B2) |
 | `vote-in-progress` | 73 s | A vote open on team 1 with three nominees and live tallies, the timer counting the 60 s window down, and the entries persisting into the frames after it resolves — the game's own state, recorded as read. | §9 *Commander seat and votes*; §3 the vote block |
 | `seat-cooling-and-ready` | 35 s | The cooldown panel doing its arithmetic: the UAV ready, the strike held by the AIR category gate rather than by its own window, the artillery still on its own. | §9 *Ready-in arithmetic* (the later of entry and category; the category gate) |
 | `commander-change-restamp` | 45 s | The seat changes hands at 1200. An entry still cooling has its stamp pushed forward by the server's 300 s extension with `remainingAtChange` written; one whose cooldown had run is re-stamped to come back 300 s after the change; the category stamps do not move. | §9 *Ready-in arithmetic* (at a commander change) |
 | `commander-step-down` | 45 s | The commander stands down. The seat reads an explicit empty, every entry keeps what it had left, the last vote's cooldown still refuses a claim, and the panel shows what a fresh claim would leave on each entry — labelled as the projection it is. | §9 *Commander seat and votes* (a step-down); §9 *Ready-in arithmetic* (a re-claim) |
 | `uav-shot-down` | 45 s | The UAV is hit at +67 s of a 330 s window: `actionDestroyed` reads true while the actor lingers, the map strikes it through, the entry's `destroyedDuringActive` agrees — and the stamps do not move, so the ready-in is the unchanged arithmetic. Who shot it down is not shown. | §9 *Shoot-downs* (decision D18); §9 *Ready-in arithmetic* (destroyed mid-flight) |
-| `drone-recon-life` | 59 s | A recon drone deployed, flown at its 10 m/s cruise, landed and exited (no pilot, owner unchanged), then shot down where it sat. Its info panel shows LAST HIT BY and KILLED BY side by side, and they differ: a second shooter moves the pointer half a second after the kill, inside the same one-second gap, so the full frame after the kill names the wrong man and the first 4 Hz sample reading dead names the right one. | §9 *Drones* (stop at dead, team from owner, remaining flight time, the killer at 4 Hz — decision D19) |
-| `drone-commander-call` | 45 s | The commander's drone in the air beside the call actor that spawned it. Nothing is drawn for the call actor, whose position reads (0, 0, z) and means nothing — on this layer that is the centre of Al Basrah, 1.5 km from the pawn, so drawing it would be unmissable. The pawn's budget is the calling action's 420 s active window, because its class declares no battery. | §9 *Drones* (the call actor draws nothing; the commander drone's budget); §6 the call actor's (0, 0, z) |
+| `drone-recon-life` | 59 s | A recon drone deployed, flown at its 10 m/s cruise, **turning right fifteen seconds in** so the heading cone turns with it, landed and exited (no pilot, owner unchanged), then shot down where it sat. Its info panel shows LAST HIT BY and KILLED BY side by side, and they differ: a second shooter moves the pointer half a second after the kill, inside the same one-second gap, so the full frame after the kill names the wrong man and the first 4 Hz sample reading dead names the right one. | §9 *Drones* (stop at dead, team from owner, remaining flight time, the killer at 4 Hz — decision D19; the heading as the view direction — tracker T16) |
+| `drone-commander-call` | 45 s | The commander's drone in the air beside the call actor that spawned it, flying two legs so its **heading cone turns at the corner**. Nothing is drawn for the call actor, whose position reads (0, 0, z) and means nothing — on this layer that is the centre of Al Basrah, 1.5 km from the pawn, so drawing it would be unmissable. The pawn's budget is the calling action's 420 s active window, because its class declares no battery. | §9 *Drones* (the call actor draws nothing; the commander drone's budget; the heading as the view direction — tracker T16); §6 the call actor's (0, 0, z) |
 
-Every item of the phase's minimum set is covered. Two scenarios carry two
-items each, because the data is the same actor and marker either way:
-`footprint-creep-path` is both the creep's shape and the creep mid-barrage,
-and `footprint-mortar-radius` is both the mortar's radius and the mortar
-mid-barrage.
+Every item of the phase's minimum set is covered. Several scenarios carry
+more than one item, because the data is the same actor and marker either
+way: `footprint-creep-path` is the creep's shape, the creep mid-barrage and
+its shells landing; `footprint-mortar-radius` the same three for the mortar.
+The impacts rule is deliberately shown five times over, because the join it
+makes is a different one each time — an artillery plan that names its shell's
+class (the two barrages and the creep), a strike that names none and joins by
+firer alone (`footprint-strike-line`), and rounds with no call on the map at
+all (`footprint-aim-line`), which is what a bomb's impacts look like on their
+own.
 
 ## Where they come from
 
@@ -173,6 +188,13 @@ can hold the spec against. **Every figure the spec records is used verbatim:**
   +79.2 s; the mortar's 0 warning shells, 0 delay, 10 shells a barrage, 8
   barrages, 1.0 drop radius, and its 30 s enroute
 - §7 — the recon drone's 15 / 15 health and its 100 s battery
+- §9 — that the rounds an asset fires are tracked projectiles rather than
+  part of the actor record, so every round is shaped exactly as
+  `read_projectile` in `sqreader/squad/snapshot.py` writes one (the class key
+  is `classShort`, and `firer` is the firing player's *name*, which is why
+  the join to a call's `callerEosId` goes through the roster); and that a
+  bomb call drops two `BP_Projectile_500lb_Bomb_C`, the journal's own class
+  and count from the 09-02/03 calls
 
 Everything else is a fixture value, chosen so a rule has something to bite
 on, and none of it contradicts a recorded one. The ones worth naming:
@@ -203,11 +225,31 @@ on, and none of it contradicts a recorded one. The ones worth naming:
   the 50 m request circle is a viewer constant. An edge-stand during a bomb
   call settles them — tracker T9 (f), W20's B2 — and if it moves them, those
   two numbers are the whole of the change.
+- **The rounds themselves.** Which shells land where, and when, is a fixture
+  plan built on the recorded stamps: a barrage's ten land over the three
+  frames after its counter moves, so the actor's own `currentBarrage` in the
+  frame each round comes to rest is the barrage §9 counts it against. The
+  scatter is a golden-angle spread that fills the ground the marker says the
+  call covers, and says nothing about a real barrage's dispersion, which the
+  game does not record. Three class names are fixture values —
+  `BP_Projectile_155mm_C` (matching the class the artillery actors here
+  already name, so the join has something to join on), `BP_Projectile_Mortar_C`
+  and `BP_Projectile_Rocket_C` — as are every round's `explosiveBaseDamage`
+  and `explosiveKillZoneRadius`, which no reading quotes. The journal's own
+  155 mm shell class is `BP_Projectile_155mm_Artillery_C` and nothing has
+  ever read the artillery actor's `Projectile` *value*, so whether the two
+  strings agree in a real recording is unanswered; §9's class join assumes
+  they do, and these scenarios are written that way.
+- **A strike's shot counter and its rockets.** `shotsMade` / `maxShots` are
+  the scenario's existing fixture values and the eight rockets are another;
+  the recording joins the two no more than this does. A gun run's rounds are
+  plain bullets, which the recorder deliberately excludes from `projectiles`,
+  so a gun strafe would land no tracked rounds at all.
 - **The cast.** Six players with invented names and EOS ids.
 
 ## What a scenario cannot show
 
-Two things, both because the recording does not carry them:
+Three things, all because the recording does not carry them:
 
 - **Who shot an asset down.** No last-damager field exists on any command
   actor, the server log carries no line, and the viewer names nobody
@@ -215,3 +257,9 @@ Two things, both because the recording does not carry them:
 - **Why a request that was already on the map when the recording started went
   away.** Its age is only a lower bound, so it is never called deleted. No
   scenario demonstrates this because it is the absence of a reading.
+- **Where a drone's camera is pointed.** The two drone scenarios draw a
+  heading cone off the pawn's `yaw`, and that is the *airframe's* rotation —
+  the camera facing it is the player's word (2026-09-07), not a read. Both
+  scenarios say so in the info panel, and neither can show the difference:
+  the camera's own rotation is not in any recording. Tracker T16 is the
+  reading test, D22 the question of recording it.

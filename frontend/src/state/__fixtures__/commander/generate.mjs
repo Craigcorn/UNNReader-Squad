@@ -24,6 +24,10 @@
 //       at +79.2 s; the mortar's 0 / 0 / 10 shells / 8 barrages / 1.0 drop
 //       radius, its barrages every 8-9 s from +30 s
 //   §7  the recon drone's 15 / 15 health and 100 s battery
+//   §9  the rounds an asset fires are tracked projectiles, not part of the
+//       actor record — so every round below is shaped as `read_projectile`
+//       in `sqreader/squad/snapshot.py` writes one, and a bomb call drops
+//       two `BP_Projectile_500lb_Bomb_C`, the journal's own class and count
 //
 // Everything else is a fixture value chosen to exercise a rule, and
 // docs/viewer-scenarios.md says which is which. No fixture number
@@ -355,6 +359,99 @@ function drone(id, cls, x, y, z, over = {}) {
   };
 }
 
+// ---- the rounds an asset fires ---------------------------------------------
+//
+// A shell, rocket or bomb is a TRACKED PROJECTILE, not part of the actor
+// record (spec §6, §9 "Asset impacts") — so each one here is shaped exactly as
+// `read_projectile` in `sqreader/squad/snapshot.py` writes one, keys and order
+// alike. Two of those keys carry the whole of §9's join and are easy to get
+// wrong from the prose: the class is `classShort`, and `firer` is the firing
+// player's NAME (`PlayerNamePrivate`), while a call's `callerEosId` is an EOS
+// id — so a viewer joins the two through the frame's roster and nowhere else.
+//
+// The class names: `BP_Projectile_500lb_Bomb_C` is the journal's, read off a
+// real bomb call (09-02/03). The others are fixture values, `BP_Projectile_
+// 155mm_C` matching the class the artillery actors here already name so the
+// join has something to join on. The two explosive figures are fixture values
+// too — no reading quotes either.
+const ROUNDS = {
+  shell155: { cls: "BP_Projectile_155mm_C", dmg: 350, kill: 900 },
+  mortar:   { cls: "BP_Projectile_Mortar_C", dmg: 200, kill: 600 },
+  rocket:   { cls: "BP_Projectile_Rocket_C", dmg: 150, kill: 400 },
+  bomb:     { cls: "BP_Projectile_500lb_Bomb_C", dmg: 900, kill: 2500 },
+};
+
+function projectile(id, kind, x, y, z, over = {}) {
+  const k = ROUNDS[kind];
+  return {
+    id, classShort: k.cls,
+    hasImpacted: false, isTracer: false, isExplosive: true,
+    explosiveBaseDamage: k.dmg, explosiveKillZoneRadius: k.kill,
+    firer: NAMES[EOS.ruby], team: 1,
+    position: at(x, y, z),
+    ...over,
+  };
+}
+
+/** How far back and how high a round's last leg starts, in centimetres. */
+const APPROACH_CM = 30000;
+/** The bearing rounds come in on where nothing records one — a fixture. */
+const APPROACH_YAW = 225;
+
+/** One round's whole life, as a function of the frame's second.
+ *
+ *  `land` is the frame it first reads `hasImpacted`, at rest on its impact
+ *  point: that is the frame §9 draws the impact at, and the record then stays
+ *  there for `linger` frames the way a real one lingers. Before it the round
+ *  is in the air for `flight` FULL frames — projectiles are sampled once a
+ *  second and nothing samples them between (tracker C1 would), so the
+ *  viewer's own interpolation is what smooths the flight, and these frames
+ *  are what it has to work with.
+ *
+ *  The last leg is a straight descent from `APPROACH_CM` up and the same
+ *  distance back along `bearing`, or from an explicit `from` where the
+ *  recording has one — a strike's rockets leave the aircraft, whose position
+ *  every frame is the actor's own. */
+function round(id, kind, x, y, land, o = {}) {
+  const flight = o.flight ?? 3;
+  // "A couple of ticks with hasImpacted still true" — canvas/projectiles.ts's
+  // own description of what a dying actor does, which is what the viewer's
+  // impact dedupe was written against.
+  const linger = o.linger ?? 2;
+  const restZ = o.restZ ?? 60;
+  const reach = o.reach ?? APPROACH_CM;
+  const rad = ((o.bearing ?? APPROACH_YAW) * Math.PI) / 180;
+  const from = o.from ?? {
+    x: x - Math.cos(rad) * reach, y: y - Math.sin(rad) * reach,
+    z: restZ + reach,
+  };
+  return (t) => {
+    if (t < land - flight || t > land + linger) return null;
+    if (t >= land) return projectile(id, kind, x, y, restZ, { hasImpacted: true });
+    const f = (t - (land - flight)) / flight;
+    return projectile(id, kind,
+                      Math.round(from.x + (x - from.x) * f),
+                      Math.round(from.y + (y - from.y) * f),
+                      Math.round(from.z + (restZ - from.z) * f));
+  };
+}
+
+/** Every round of a plan that exists at `t`, in the order they were fired. */
+const roundsAt = (plan, t) => plan.map((r) => r(t)).filter(Boolean);
+
+/** A deterministic spread of impact points over a circle of radius `r`: the
+ *  golden angle, so ten shells of a barrage fill the footprint instead of
+ *  stacking on its centre. Nothing about a real barrage's dispersion — the
+ *  game records none — only a spread that fits inside the ground the marker
+ *  says the call covers. */
+const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+function spread(cx, cy, r, seq) {
+  const a = seq * GOLDEN;
+  const d = r * Math.sqrt(((seq % 10) + 0.5) / 10);
+  return { x: Math.round(cx + Math.cos(a) * d),
+           y: Math.round(cy + Math.sin(a) * d) };
+}
+
 // ---- the scenarios ---------------------------------------------------------
 const scenarios = [];
 function scenario(name, title, shows, rule, lines) {
@@ -460,9 +557,12 @@ scenario(
 scenario(
   "footprint-static-barrage", "Static barrage",
   "A CommandRadius marker at 15000 with a 7500 outer band — the circle "
-  + "filled, the band dashed outside it — and the guns sitting at their "
-  + "origin through the fire plan.",
-  "§9 Asset shapes (CommandRadius with addDistance); §5 distance/addDistance",
+  + "filled, the band dashed outside it — the guns sitting at their "
+  + "origin through the fire plan, and the shells landing inside it: two "
+  + "warning rounds, then ten a barrage, each in the air for three frames "
+  + "and then at rest with hasImpacted true.",
+  "§9 Asset shapes (CommandRadius with addDistance); §5 distance/addDistance; "
+  + "§9 Asset impacts",
   (() => {
     const claim = 990, called = 1000;
     const T = (t) => [
@@ -483,8 +583,32 @@ scenario(
     const open = called + ACTIONS.barrage.enrouteSec;    // 1045
     const warn2 = open + 8;                              // 1053
     const first = warn2 + 12;                            // 1065, the config's delay
+    // The rounds, on the fire plan's own timeline. A warning shell lands on
+    // the frame its counter moves, and a barrage's ten land over the three
+    // frames after its counter moves — so `currentBarrage` in the frame each
+    // round comes to rest IS the barrage it belongs to, which is what §9
+    // counts them against. Each is a shell of the class the actor names, so
+    // the join is by firer and class both.
+    const CX = 30000, CY = -10000, R = 15000;
+    const PLAN = [];
+    // Ranging shots: near the centre, before the barrage counter moves.
+    for (const [i, when] of [open, warn2].entries()) {
+      const p = spread(CX, CY, R * 0.35, i);
+      PLAN.push(round(`0xr-w${i + 1}`, "shell155", p.x, p.y, when));
+    }
+    // Three barrages fit inside this scenario's window: 1065, 1072, 1079.
+    let seq = 0;
+    for (let b = 1; b <= 3; b++) {
+      const opens = first + (b - 1) * 7;
+      for (let i = 0; i < 10; i++) {
+        const p = spread(CX, CY, R, seq++);
+        PLAN.push(round(`0xr-b${b}-${i}`, "shell155", p.x, p.y,
+                        opens + Math.floor(i / 4)));
+      }
+    }
     return record(1040, 1085, (t) => ({
       teams: T(t),
+      projectiles: roundsAt(PLAN, t),
       markers: [marker("0xm-bar", "BP_MapMarker_CommandRadius_C",
                        30000, -10000, {
         distance: 15000, addDistance: 7500, yaw: 0,      // spec §5
@@ -511,8 +635,10 @@ scenario(
   + "band along its bearing, and the creep actor stepping through its plan: "
   + "the first warning shell at +59.7 s of a 60 s enroute, the second at "
   + "+67.1 s, the first barrage at +79.2 s — twelve seconds after it, the "
-  + "delay the config carries.",
-  "§9 Asset shapes (CommandPath); §9 Artillery timeline; §6 the creep's plan",
+  + "delay the config carries. The shells land with it, each barrage's ten "
+  + "further up the path than the last, inside the scatter band.",
+  "§9 Asset shapes (CommandPath); §9 Artillery timeline; §6 the creep's plan; "
+  + "§9 Asset impacts",
   (() => {
     const claim = 990, called = 1000;
     const T = (t) => [
@@ -531,8 +657,30 @@ scenario(
     // twelve seconds after the second shell, the delay the config carries.
     // Barrages then advance every seven seconds, this creep's own interval.
     const warn1 = 1060, warn2 = 1068, first = 1080;
+    // The rounds. A creeping barrage walks: the marker's path runs 45000
+    // along bearing 90 (due +y) and the plan is eight barrages, so barrage b
+    // puts its ten down around (b − ½)/8 of the way up it, inside the 7500
+    // of drop scatter the marker carries. Four barrages fit in the window.
+    const PX = -20000, PY = 0, LEN = 45000, SCATTER = 7500;
+    const PLAN = [];
+    for (const [i, when] of [warn1, warn2].entries()) {
+      const p = spread(PX, PY + 2500, SCATTER * 0.4, i);
+      PLAN.push(round(`0xr-w${i + 1}`, "shell155", p.x, p.y, when));
+    }
+    let seq = 0;
+    for (let b = 1; b <= 4; b++) {
+      const opens = first + (b - 1) * 7;
+      const alongCm = ((b - 0.5) / 8) * LEN;
+      for (let i = 0; i < 10; i++) {
+        const o = spread(0, 0, SCATTER, seq++);
+        PLAN.push(round(`0xr-b${b}-${i}`, "shell155",
+                        PX + o.x, Math.round(PY + alongCm + o.y * 0.35),
+                        opens + Math.floor(i / 4)));
+      }
+    }
     return record(1052, 1105, (t) => ({
       teams: T(t),
+      projectiles: roundsAt(PLAN, t),
       markers: [marker("0xm-creep", "BP_MapMarker_CommandPath_C",
                        -20000, 0, {
         distance: 45000, addDistance: 7500, yaw: 90,      // spec §5
@@ -556,8 +704,12 @@ scenario(
 scenario(
   "footprint-strike-line", "Strike run",
   "A CommandLine marker 6000 long along its bearing, with the aircraft "
-  + "moving down the run frame by frame and its shot counter climbing.",
-  "§9 Asset shapes (CommandLine); §5 distance; §6 the strike family's fields",
+  + "moving down the run frame by frame, its shot counter climbing, and "
+  + "eight rockets leaving it and landing along the run. The strike family "
+  + "declares no `projectile`, so these join the call by firer alone — which "
+  + "is the whole of the join a recording supports for a strike.",
+  "§9 Asset shapes (CommandLine); §5 distance; §6 the strike family's fields; "
+  + "§9 Asset impacts (a call with no class to join on)",
   (() => {
     const claim = 990, called = 1000;
     const T = (t) => [
@@ -574,11 +726,27 @@ scenario(
     // which is what a recording of a strike run shows. Its shot counter
     // climbs down the run and stops at the config's maximum.
     const run = called + ACTIONS.strike.enrouteSec;      // 1045
+    const acX = (t) => Math.round(-12000 + ((t - run) / 10) * 24000);
+    // Eight rockets, two a frame, landing along the marker's own run — each
+    // leaving the AIRCRAFT, whose position two frames earlier is the actor
+    // record's own, and landing ahead of it, as a round that outruns its
+    // launcher does. Their class joins nothing: the strike family carries no
+    // `projectile` name, and inventing a list of rocket classes for the
+    // viewer to match on is exactly what the recording does not support.
+    const PLAN = [];
+    for (let i = 0; i < 8; i++) {
+      const land = 1048 + Math.floor(i / 2);
+      PLAN.push(round(`0xr-rk${i}`, "rocket",
+                      Math.round((i / 7) * 6000),
+                      40000 + (i % 2 ? 500 : -500), land, {
+        flight: 2, from: { x: acX(land - 2), y: 40000, z: 6000 } }));
+    }
     return record(run, 1080, (t) => {
       const along = (t - run) / 10;
-      const x = Math.round(-12000 + along * 24000);
+      const x = acX(t);
       return {
         teams: T(t),
+        projectiles: roundsAt(PLAN, t),
         markers: [marker("0xm-line", "BP_MapMarker_CommandLine_C",
                          0, 40000, {
           distance: 6000, addDistance: 0, yaw: 0,          // spec §5
@@ -600,9 +768,11 @@ scenario(
   "footprint-mortar-radius", "Mortar barrage",
   "The mortar's fixed 7500 circle with its 4500 outer band, and its plan "
   + "running with no warning phase: the counter and the first barrage both "
-  + "reach 1 at the enroute, then eight barrages of ten follow every 8-9 s.",
+  + "reach 1 at the enroute, then eight barrages of ten follow every 8-9 s "
+  + "— all eighty rounds landing inside the circle, ten to a barrage, with "
+  + "nothing landing before the first one opens.",
   "§9 Asset shapes (CommandRadius); §9 Artillery timeline (the mortar's "
-  + "warning-free one); §6 the mortar's values",
+  + "warning-free one); §6 the mortar's values; §9 Asset impacts",
   (() => {
     const claim = 990, called = 1000;
     const T = (t) => [
@@ -619,8 +789,23 @@ scenario(
     // 2026-09-07) — these are those eight stamps.
     const open = called + ACTIONS.mortar.enrouteSec;      // 1030
     const BARRAGES = [1030, 1039, 1047, 1056, 1064, 1073, 1081, 1090];
+    // Ten rounds a barrage, all eight barrages, inside the circle the marker
+    // says the call covers — the marker's own 7500, not `maxDropRadius`,
+    // which on this family reads 1.0 and is not a radius (§9). No warning
+    // shells: this plan records none, so nothing lands before barrage 1.
+    const CX = 40000, CY = 40000, R = 7500;
+    const PLAN = [];
+    let seq = 0;
+    for (const [b, opens] of BARRAGES.entries()) {
+      for (let i = 0; i < 10; i++) {
+        const p = spread(CX, CY, R, seq++);
+        PLAN.push(round(`0xr-b${b + 1}-${i}`, "mortar", p.x, p.y,
+                        opens + Math.floor(i / 4)));
+      }
+    }
     return record(1024, 1095, (t) => ({
       teams: T(t),
+      projectiles: roundsAt(PLAN, t),
       markers: [marker("0xm-mortar", "BP_MapMarker_CommandRadius_C",
                        40000, 40000, {
         distance: 7500, addDistance: 4500, yaw: 0,        // spec §5
@@ -646,19 +831,45 @@ scenario(
   + "marker's bearing, with the line between them and the bomb pair drawn at "
   + "each — the config's 45 m and 100 m, both dashed. At 4475 apart the two "
   + "pairs overlap, which is what this separation looks like on the ground; "
-  + "the radii are the viewer's own and the spec has never measured them.",
+  + "the radii are the viewer's own and the spec has never measured them. "
+  + "A bomb falls on each aim point and comes to rest inside the inner "
+  + "circle, which is where every observed bomb fell. No command actor is on "
+  + "the map here, so the bombs join no call and ring as any other round "
+  + "does — the impacts alone are the precision-bomb rule.",
   "§9 Asset shapes (CommandLineRadius); §9 Precision bombs (radii unmeasured, "
   + "tracker T9 f); §5 distance",
-  // Nothing in this one moves: it is a shape, held still while the seat's
-  // cooldowns count down beside it, so the marker is on the map from the
-  // first frame to the last.
-  record(1000, 1032, (t) => ({
-    teams: [seated(1, EOS.ruby, 990, t), team(2)],
-    markers: [marker("0xm-aim", "BP_MapMarker_CommandLineRadius_C",
-                     55000, 10000, {
-      distance: 4475, addDistance: 0, yaw: 135,           // spec §5
-      action: ACTIONS.strike.action })],
-  })));
+  // Nothing in this one moves but the bombs: it is a shape, held still while
+  // the seat's cooldowns count down beside it, so the marker is on the map
+  // from the first frame to the last.
+  (() => {
+    // Both aim points off the marker's OWN numbers, the way the viewer's
+    // geometry derives them — 0 and `distance` along `yaw` — so the two can
+    // never drift apart.
+    const AX = 55000, AY = 10000, AD = 4475, AYAW = 135;
+    const rad = (AYAW * Math.PI) / 180;
+    const AIM = [
+      { x: AX, y: AY },
+      { x: Math.round(AX + Math.cos(rad) * AD),
+        y: Math.round(AY + Math.sin(rad) * AD) },
+    ];
+    // Two bombs, the number one call was seen to drop (09-02/03), each
+    // landing 18 m off its aim point — inside the inner 45 m circle, where
+    // every observed bomb fell. A bomb falls from high, so its last leg is
+    // longer than a shell's.
+    const PLAN = AIM.map((p, i) => {
+      const o = spread(p.x, p.y, 1800, i * 4);
+      return round(`0xr-bomb${i + 1}`, "bomb", o.x, o.y, 1012 + i * 2,
+                   { reach: 40000 });
+    });
+    return record(1000, 1032, (t) => ({
+      teams: [seated(1, EOS.ruby, 990, t), team(2)],
+      projectiles: roundsAt(PLAN, t),
+      markers: [marker("0xm-aim", "BP_MapMarker_CommandLineRadius_C",
+                       AX, AY, {
+        distance: AD, addDistance: 0, yaw: AYAW,          // spec §5
+        action: ACTIONS.strike.action })],
+    }));
+  })());
 
 // 10. A vote in progress, with the tallies the game keeps.
 scenario(
@@ -908,20 +1119,28 @@ scenario(
     const ID = "0xdrone-1";
     const deploy = 1001, exit = 1031, freed = 1050;      // battery is 100 s
     // The pawn cruises at about 10 m/s — 2.5 m between 4 Hz samples, which is
-    // (150, 200) cm on this bearing — for 25 s, then sets down over four
-    // seconds and is left on the ground with nobody in it.
+    // (150, 200) cm on the first bearing and (200, -150) on the second — for
+    // 25 s, turning right at fifteen seconds so the heading cone the viewer
+    // draws off `yaw` turns with it. Then it sets down over four seconds and
+    // is left on the ground with nobody in it.
     const START = { x: 5000, y: -20000 };
-    const STEP = { x: 150, y: 200 };
+    const LEG1 = { x: 150, y: 200 }, LEG2 = { x: 200, y: -150 };
+    const TURN = 60;                                     // samples
     const CRUISE = 100, DESCENT = 16;                    // samples
     const CRUISE_Z = 3300, GROUND_Z = 100;
-    const HEADING = Math.round(
-      (Math.atan2(STEP.y, STEP.x) * 180) / Math.PI);
-    /** Where the pawn is `k` quarter-seconds after the deploy. */
+    const yawOf = (l) => Math.round(
+      ((Math.atan2(l.y, l.x) * 180) / Math.PI + 360) % 360);
+    /** Where the pawn is, and which way it faces, `k` quarter-seconds after
+     *  the deploy. The yaw is the airframe's — the whole of what the game
+     *  gives, and what §9 draws as the view direction. */
     const flight = (k) => {
       const c = Math.min(k, CRUISE);
+      const k1 = Math.min(c, TURN), k2 = Math.max(0, c - TURN);
       const d = Math.max(0, Math.min(k - CRUISE, DESCENT));
-      return { x: START.x + c * STEP.x, y: START.y + c * STEP.y,
-               z: CRUISE_Z - d * ((CRUISE_Z - GROUND_Z) / DESCENT) };
+      return { x: START.x + k1 * LEG1.x + k2 * LEG2.x,
+               y: START.y + k1 * LEG1.y + k2 * LEG2.y,
+               z: CRUISE_Z - d * ((CRUISE_Z - GROUND_Z) / DESCENT),
+               yaw: yawOf(k < TURN ? LEG1 : LEG2) };
     };
     // The kill, and the second shooter who moves the pointer half a second
     // after it — both inside one full frame's gap, which is the whole reason
@@ -938,14 +1157,14 @@ scenario(
           // The pilot exits after the landing; the owner never changes,
           // because a drone cannot change hands.
           pilotEosId: t < exit ? EOS.pike : null,
-          yaw: HEADING,
+          yaw: p.yaw,
           ...(dead(t) ? { dead: true, health: 0 } : {}),
           lastHitByEosId: hitBy(t) }),
       ] };
     }, (t) => {
       if (!up(t)) return {};
       const p = flight(Math.round((t - deploy) * POS_HZ));
-      const s = { id: ID, x: wx(p.x), y: wy(p.y), z: p.z, yaw: HEADING };
+      const s = { id: ID, x: wx(p.x), y: wy(p.y), z: p.z, yaw: p.yaw };
       // `dead` and `lastHitBy` are written only once they are set — the one
       // place in a recording where an absent key means "not set".
       if (dead(t)) s.dead = true;
