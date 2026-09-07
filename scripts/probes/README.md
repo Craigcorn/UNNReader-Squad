@@ -41,3 +41,13 @@ in `docs/tracker.md`). The design, decided 2026-09-04:
   probe listed three of them as placed markers (2026-09-07 smoke test).
   Read a CDO on purpose — the action configs are read that way — and skip
   them everywhere else.
+- **Stop a probe from a script file, never from an inline command.** An
+  ssh command that contains a probe's path kills its own shell under
+  `pkill -f`: the bracket trick guards the pkill's own line, not the
+  wrapper that carries the whole command. Run the stop as a script file
+  (`stop.sh` in the session folder) or hide the path in a shell variable
+  (2026-09-07, the sixth time this bit the project).
+- **Chat is not in the server log.** Step marks typed in all-chat land
+  nowhere; the log carries possessions, damage traces and revives. Time a
+  session from the operator's probe reads, and restart every probe after
+  a layer roll — class addresses churn (2026-09-07).
