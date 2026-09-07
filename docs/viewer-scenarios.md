@@ -1,7 +1,8 @@
 # Viewer scenarios
 
-Sixteen small recordings, hand-built, one per viewer rule, playable in the
-browser with no server, no live match and no `.sqrx`. They exist so the
+Sixteen small recordings, hand-built, one per viewer rule, staged on Al
+Basrah AAS v1 and playable in the browser with no server, no live match and
+no `.sqrx`. They exist so the
 commander rules of `docs/command-assets-spec.md` §9 can be reviewed and
 argued about without waiting for a match to happen, and so that once a rule
 is agreed the scenario that showed it stands as the regression test.
@@ -33,6 +34,43 @@ The commander panel is behind the seat line under a team's tickets: click
 "Ruby" (or "no commander") in the team bar. Assets, drones and markers are
 clickable for their info panel. `Esc` closes any panel.
 
+## Where they are staged
+
+Every scenario plays on **Al Basrah AAS v1**, and carries the layer block a
+real recording of that layer carries: the same texture name and the same
+world bounds, a 4 km square running from -200000 to 200000 on both axes.
+
+They are on a real map because scale is the claim these fixtures make. A
+footprint is drawn on the ground at true size, and the point of
+`footprint-mortar-radius` is that a mortar's 75 m circle is *small* while the
+point of `footprint-creep-path` is that a creeping barrage's 450 m path is
+not. Against the bare grid these scenarios used to draw on, those are two
+shapes of arbitrary size and a reviewer has nothing to hold them against;
+against Al Basrah they are a circle that covers a compound and a barrage that
+walks the length of the airfield.
+
+The action sits on the north-west side of that airfield, with the cast around
+(-110000, -120000) — the same corner of the map as the session the spec was
+written from, whose players read about x -128000, y -143000. One offset,
+`MAP_ORIGIN` in `generate.mjs`, carries every scenario there in one piece, so
+every figure the spec recorded is untouched — a distance is a distance
+wherever it is drawn — and only the absolute placement moves. Every shape of
+every scenario lands on playable ground: the creeping barrage's 450 m path,
+the widest thing staged here, clears the western out-of-bounds band by more
+than 140 m at its closest, and the outermost point of any scenario — the
+static barrage's 225 m outer band — is still 475 m inside the layer bounds.
+
+One position is deliberately *not* carried: the drone call actor's
+`(0, 0, z)`, which is a memory read rather than a placement. On this layer
+that is the centre of Al Basrah, 1.5 km from the drone it spawned — so
+`drone-commander-call` now fails loudly if the viewer ever draws it.
+
+The map image is served by the reader from `--sqmaps-dir`, and the dev server
+proxies `/sqmaps` to it (`T_AlBasrah_Minimap` resolves to `albasrah.webp`).
+Run `npm run dev` with no reader behind it and the texture 404s, so the
+viewer draws its grid exactly as it does for any recording whose texture is
+missing — the geometry, the bounds and the scale are the same either way.
+
 ## What each one shows
 
 | Scenario | Shows | The rule it demonstrates |
@@ -52,7 +90,7 @@ clickable for their info panel. `Esc` closes any panel.
 | `commander-step-down` | The commander stands down. The seat reads an explicit empty, every entry keeps what it had left, the last vote's cooldown still refuses a claim, and the panel shows what a fresh claim would leave on each entry — labelled as the projection it is. | §9 *Commander seat and votes* (a step-down); §9 *Ready-in arithmetic* (a re-claim) |
 | `uav-shot-down` | The UAV is hit at +67 s of a 330 s window: `actionDestroyed` reads true while the actor lingers, the map strikes it through, the entry's `destroyedDuringActive` agrees — and the stamps do not move, so the ready-in is the unchanged arithmetic. Who shot it down is not shown. | §9 *Shoot-downs* (decision D18); §9 *Ready-in arithmetic* (destroyed mid-flight) |
 | `drone-recon-life` | A recon drone deployed, flown, landed and exited (no pilot, owner unchanged), then shot down. Its info panel shows LAST HIT BY and KILLED BY side by side, and they differ: a second shooter moves the pointer 1.1 s after the kill, so the killer is the hitter of the first 4 Hz sample reading dead. | §9 *Drones* (stop at dead, team from owner, remaining flight time, the killer at 4 Hz — decision D19) |
-| `drone-commander-call` | The commander's drone in the air beside the call actor that spawned it. Nothing is drawn at the map origin for the call actor, whose position reads (0, 0, z) and means nothing, and the pawn's budget is the calling action's 420 s active window because its class declares no battery. | §9 *Drones* (the call actor draws nothing; the commander drone's budget); §6 the call actor's (0, 0, z) |
+| `drone-commander-call` | The commander's drone in the air beside the call actor that spawned it. Nothing is drawn for the call actor, whose position reads (0, 0, z) and means nothing — on this layer that is the centre of Al Basrah, 1.5 km from the pawn, so drawing it would be unmissable. The pawn's budget is the calling action's 420 s active window, because its class declares no battery. | §9 *Drones* (the call actor draws nothing; the commander drone's budget); §6 the call actor's (0, 0, z) |
 
 Every item of the phase's minimum set is covered. Two scenarios carry two
 items each, because the data is the same actor and marker either way:
@@ -112,8 +150,9 @@ on, and none of it contradicts a recorded one. The ones worth naming:
   USMC"). It is never a label written for the fixture.
 - **The category names.** `CommanderCategory.Name` is an FText the spec
   quotes no value for, so "Air", "Artillery" and "Support" are labels.
-- **The map.** A 1.2 km square with no texture, so the shapes are read
-  against a grid rather than a map tile.
+- **Where on the map they sit.** The layer block is a recorded one, bounds
+  and texture name included, but *where* in it each shape was placed is a
+  fixture choice — see "Where they are staged" above.
 - **The cast.** Six players with invented names and EOS ids.
 
 ## What a scenario cannot show

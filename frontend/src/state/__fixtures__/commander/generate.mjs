@@ -28,6 +28,14 @@
 // Everything else is a fixture value chosen to exercise a rule, and
 // docs/viewer-scenarios.md says which is which. No fixture number
 // contradicts a recorded one.
+//
+// WHERE THEY ARE. Every scenario plays on Al Basrah AAS v1, on the layer
+// block a real recording of that layer carries — texture and world bounds
+// included. Without a map the viewer draws a bare grid, and a reviewer cannot
+// tell a 75 m mortar circle from a 450 m creeping barrage: the whole claim
+// these fixtures make is that the shapes are drawn at true map scale, and
+// that claim is unreadable against nothing. See MAP_ORIGIN below for how the
+// scenarios were carried onto it.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -42,6 +50,44 @@ const BASE_MS = Date.parse("2026-09-07T12:00:00.000Z");
 const BASE_T = 1000;
 const iso = (t) => new Date(BASE_MS + Math.round((t - BASE_T) * 1000)).toISOString();
 const r1 = (v) => Math.round(v * 10) / 10;
+
+// ---- the ground ------------------------------------------------------------
+// The layer block a recording of Al Basrah AAS v1 carries, verbatim: the
+// texture the viewer draws and the world bounds it draws it between. The map
+// is a 4 km square from -200000 to 200000 on both axes.
+const LAYER = {
+  name: "Al Basrah AAS v1",
+  mapId: "AlBasrah",
+  mapName: "Al Basrah",
+  gameMode: "AAS",
+  texture: "T_AlBasrah_Minimap",
+  topLeft: { x: -200000.0, y: -200000.0 },
+  bottomRight: { x: 200000.0, y: 200000.0 },
+};
+/** The display name of the layer, which is what `gameState.mapName` carries —
+ *  `layer.mapName` is the map's own name, and the two really do differ. */
+const MAP_NAME = LAYER.name;
+
+// Every scenario below was laid out around a local origin, with the cast at
+// (0, 0) and each shape placed a few hundred metres off it. MAP_ORIGIN
+// carries that whole arrangement onto the map in one piece, so every figure
+// the spec recorded stays exactly what it recorded — a distance is a
+// distance wherever it is drawn — and only the absolute placement moves.
+//
+// It puts the cast on the north-west side of the airfield, near where the
+// session the spec was written from was fought (its players read about
+// x -128000, y -143000). Every shape of every scenario lands on playable
+// ground: the creeping barrage's 450 m path, the widest thing here, clears
+// the western out-of-bounds band by more than 140 m at its closest, and the
+// outermost point of any scenario — the static barrage's 225 m outer band —
+// is still 475 m inside the layer bounds.
+const MAP_ORIGIN = { x: -110000, y: -120000 };
+const wx = (x) => MAP_ORIGIN.x + x;
+const wy = (y) => MAP_ORIGIN.y + y;
+/** A local (x, y, z) as the world position it becomes on the map. Every
+ *  position in this file goes through here — the one exception is the drone
+ *  call actor's literal (0, 0, z), which is a memory read, not a placement. */
+const at = (x, y, z) => ({ x: wx(x), y: wy(y), z });
 
 // ---- the cast --------------------------------------------------------------
 const EOS = {
@@ -73,7 +119,7 @@ function player(eosId, teamId, squadId, x, y, over = {}) {
     soldier: {
       addr: `0xsol-${eosId}`, classShort: "BP_Soldier_C", health: 100,
       breathHoldStamina: 100, stance: "standing",
-      position: { x, y, z: 100 }, yaw: 0, attached: false,
+      position: at(x, y, 100), yaw: 0, attached: false,
     },
     ...over,
   };
@@ -196,10 +242,6 @@ function seated(id, eosId, claim, over = {}) {
 }
 
 // ---- frames ----------------------------------------------------------------
-const LAYER = {
-  name: "Scenario_Commander_v1", mapName: "Scenario", gameMode: "AAS",
-  topLeft: [-40000, -40000], bottomRight: [80000, 80000],
-};
 function full(t, over = {}) {
   const { teams, ...rest } = over;
   return {
@@ -213,7 +255,7 @@ function full(t, over = {}) {
       elapsedSec: Math.round(t - 900), isTicketBased: true,
       gameModeId: "AAS", numTeams: 2, maxFireTeamCount: 3, maxFireTeamSize: 4,
       timeOfCompletion: null, serverStartTimestamp: null,
-      worldTimeSec: r1(t), mapName: "Scenario", gameModeName: "AAS",
+      worldTimeSec: r1(t), mapName: MAP_NAME, gameModeName: "AAS",
       instanceClass: null, layer: LAYER,
       commanderRules: RULES,
     },
@@ -236,7 +278,7 @@ function marker(id, type, x, y, over = {}) {
   return {
     id, type, team: 1, squad: 2, fireTeamId: -1,
     ownerPlayerStateAddr: "0xps-wren",
-    position: { x, y, z: 60 }, ...over,
+    position: at(x, y, 60), ...over,
   };
 }
 const PENDING = "BP_MapMarker_Command_SLRequest_C";
@@ -250,13 +292,13 @@ const request = (id, type, x, y, over = {}) =>
 function actor(id, cls, x, y, over = {}) {
   return {
     id, class: cls, team: 1, action: null, callerEosId: EOS.ruby,
-    position: { x, y, z: 400 }, yaw: 0, actionDestroyed: false,
+    position: at(x, y, 400), yaw: 0, actionDestroyed: false,
     distance: 0, ...over,
   };
 }
 function drone(id, cls, x, y, z, over = {}) {
   return {
-    id, class: cls, position: { x, y, z }, yaw: 45, dead: false,
+    id, class: cls, position: at(x, y, z), yaw: 45, dead: false,
     health: 15, maxHealth: 15,                                  // spec §7
     pilotEosId: EOS.pike, ownerEosId: EOS.pike,
     commandAction: null, batteryLifetimeMax: 100,               // spec §7
@@ -368,8 +410,8 @@ scenario(
                                Math.round(20000 + Math.sin(a) * 8000), {
           action: ACTIONS.uav.action,
           yaw: Math.round(((a * 180) / Math.PI + 90) % 360),
-          position: { x: Math.round(20000 + Math.cos(a) * 8000),
-                      y: Math.round(20000 + Math.sin(a) * 8000), z: 9000 } })],
+          position: at(Math.round(20000 + Math.cos(a) * 8000),
+                       Math.round(20000 + Math.sin(a) * 8000), 9000) })],
       }));
     }
     return L;
@@ -405,8 +447,8 @@ scenario(
         commandActions: [actor("0xa-bar", "BP_CommandActor_Artillery_Radius_C",
                                30000, -10000, {
           action: ACTIONS.barrage.action, distance: 15000,
-          originLocation: { x: 30000, y: -10000, z: 60 },
-          targetLocation: { x: 30000, y: -10000, z: 60 },
+          originLocation: at(30000, -10000, 60),
+          targetLocation: at(30000, -10000, 60),
           maxDropRadius: 15000, preWarningShells: 2, preWarningDelaySec: 12,
           shellsPerBarrage: 10, barrageCount: 8,
           currentPrewarningShells: i === 0 ? 0 : 2,
@@ -454,8 +496,8 @@ scenario(
                              -20000, 0, {
         action: ACTIONS.creep.action, distance: 45000,    // spec §6
         yaw: 90,
-        originLocation: { x: -20000, y: 0, z: 60 },
-        targetLocation: { x: -20000, y: 45000, z: 60 },
+        originLocation: at(-20000, 0, 60),
+        targetLocation: at(-20000, 45000, 60),
         maxDropRadius: 7500, preWarningShells: 2, preWarningDelaySec: 12,
         shellsPerBarrage: 10, barrageCount: 8,
         currentPrewarningShells: warn, currentBarrage: barrage,
@@ -493,10 +535,10 @@ scenario(
         commandActions: [actor("0xa-fa18", "BP_CommandActor_FA18_Strafe_C",
                                Math.round(-12000 + along * 24000), 40000, {
           action: ACTIONS.strike.action, distance: 6000, yaw: 0,
-          position: { x: Math.round(-12000 + along * 24000), y: 40000, z: 6000 },
+          position: at(Math.round(-12000 + along * 24000), 40000, 6000),
           shotsMade: Math.min(120, Math.round(along * 130)), maxShots: 120,
           splineDistance: Math.round(along * 30000),
-          originLocation: { x: -12000, y: 40000, z: 6000 } })],
+          originLocation: at(-12000, 40000, 6000) })],
       }));
     }
     return L;
@@ -537,8 +579,8 @@ scenario(
         commandActions: [actor("0xa-mortar", "BP_CommandActor_Mortar_Radius_C",
                                40000, 40000, {
           action: ACTIONS.mortar.action, distance: 7500,
-          originLocation: { x: 40000, y: 40000, z: 60 },
-          targetLocation: { x: 40000, y: 40000, z: 60 },
+          originLocation: at(40000, 40000, 60),
+          targetLocation: at(40000, 40000, 60),
           maxDropRadius: 1.0, preWarningShells: 0, preWarningDelaySec: 0,
           shellsPerBarrage: 10, barrageCount: 8,          // spec §6
           currentPrewarningShells: t < 1030 ? 0 : 1,
@@ -782,10 +824,11 @@ scenario(
                          20000, 20000, {
           distance: 19958, addDistance: 0, yaw: 0,        // spec §5
           action: ACTIONS.uav.action })],
-        commandActions: [actor("0xa-uav", "BP_CommandActor_UAV_MQ9_C", 0, 0, {
+        commandActions: [actor("0xa-uav", "BP_CommandActor_UAV_MQ9_C",
+                               20000, 20000, {
           action: ACTIONS.uav.action,
-          position: { x: Math.round(20000 + Math.cos(a) * 9000),
-                      y: Math.round(20000 + Math.sin(a) * 9000), z: 9000 },
+          position: at(Math.round(20000 + Math.cos(a) * 9000),
+                       Math.round(20000 + Math.sin(a) * 9000), 9000),
           yaw: Math.round((((a * 180) / Math.PI) + 90 + 360) % 360),
           actionDestroyed: destroyed })],
       });
@@ -832,7 +875,8 @@ scenario(
         const st = t + s * 0.25;
         const pp = path(f * 4 + s);
         L.push(pos(st, t, { drones: [
-          { id: "0xdrone-1", x: pp.x, y: pp.y, z: pp.z, yaw: 45 + f * 15 + s },
+          { id: "0xdrone-1", x: wx(pp.x), y: wy(pp.y), z: pp.z,
+            yaw: 45 + f * 15 + s },
         ] }));
       }
     }
@@ -845,15 +889,16 @@ scenario(
                      dp.x, dp.y, dp.z, { pilotEosId: null })],
     }));
     L.push(pos(deathFull + 0.25, deathFull, { drones: [
-      { id: "0xdrone-1", x: dp.x + 200, y: dp.y, z: 3400, yaw: 140 }] }));
+      { id: "0xdrone-1", x: wx(dp.x + 200), y: wy(dp.y), z: 3400,
+        yaw: 140 }] }));
     L.push(pos(deathFull + 0.5, deathFull, { drones: [
-      { id: "0xdrone-1", x: dp.x + 400, y: dp.y, z: 2600, yaw: 150,
+      { id: "0xdrone-1", x: wx(dp.x + 400), y: wy(dp.y), z: 2600, yaw: 150,
         dead: true, lastHitBy: EOS.vale }] }));
     L.push(pos(deathFull + 0.75, deathFull, { drones: [
-      { id: "0xdrone-1", x: dp.x + 500, y: dp.y, z: 1500, yaw: 160,
+      { id: "0xdrone-1", x: wx(dp.x + 500), y: wy(dp.y), z: 1500, yaw: 160,
         dead: true, lastHitBy: EOS.vale }] }));
     L.push(pos(deathFull + 1.5, deathFull, { drones: [
-      { id: "0xdrone-1", x: dp.x + 600, y: dp.y, z: 400, yaw: 170,
+      { id: "0xdrone-1", x: wx(dp.x + 600), y: wy(dp.y), z: 400, yaw: 170,
         dead: true, lastHitBy: EOS.thorn }] }));
     // The full frame a second later carries the two-way reading.
     L.push(full(deathFull + 2, {
@@ -907,6 +952,10 @@ scenario(
         commandActions: [actor("0xa-dronecall", "BP_CommandActor_Drone_C",
                                0, 0, {
           action: ACTIONS.drone.action,
+          // Deliberately NOT `at(...)`: this is the literal (0, 0, z) the
+          // memory read returns, which on this layer is the map's own centre,
+          // 1.5 km from the pawn. Drawing it would put a drone in the middle
+          // of Al Basrah — which is exactly the mistake the rule forbids.
           position: { x: 0, y: 0, z: 220 },
           ownerEosId: EOS.ruby })],
       }));
