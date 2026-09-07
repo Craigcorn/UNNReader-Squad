@@ -552,10 +552,11 @@ Tracker T8: a six-player run with the command-assets probe as oracle,
 after W18 lands, comparing recorded values against the probe at the same
 instants, the doctor clean with the rows of §8, the parity harness
 green, and the viewer drawing the shapes, actors and drones of §9. The
-observations this document waits for — the marker `Action` pointer (T12),
+observations this document rests on — the marker `Action` pointer (T12),
 the action configs' strings (T13), the commander drone and its call actor
-(T14), the mortar's fire-plan shape (T9) — run before its text is final;
-T8 verifies and discovers nothing.
+(T14), the request markers' lifecycle (T15), the commander branches and
+the mortar's fire plan (T9) — ran on 2026-09-07, before this text was
+final; T8 verifies and discovers nothing.
 
 ## 12. How this document was checked, and how to check it again
 
