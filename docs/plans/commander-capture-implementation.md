@@ -77,7 +77,9 @@ and the evidence matters to a code decision.
 
 ## Decisions this plan makes (registered in the tracker for review)
 
-- **D21 — both new lists travel whole.** The viewer's stream decoder
+- **D21 — both new lists travel whole** (made 2026-09-07: the encoder and
+  decoder are reworked once, after the replay-file rework, to cut the
+  browser's memory, not per addition). The viewer's stream decoder
   (`frontend/src/state/replayUnpack.ts`, format 2) index-tracks only
   `players` and `vehicles` (`KEYED`, line 27); every other top-level key
   is diffed generically and needs neither a decoder change nor a version
