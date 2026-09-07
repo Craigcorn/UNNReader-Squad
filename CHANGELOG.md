@@ -77,6 +77,30 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- The viewer draws the commander's war. Everything the recorder had
+  learned to write about the seat, the requests, the called assets and
+  the drones reached the file and stopped there: a UAV's coverage
+  circle was a number, a creeping barrage was a generic icon at the
+  point the marker sat, and a drone was nothing at all. Now the four
+  asset shapes are drawn on the ground at true map scale - a circle
+  with its outer band, a strike run, a creeping path inside its drop
+  scatter, a precision aim line - beside the game's own 50 m circle
+  round an approved request, dashed round one still waiting. The assets
+  themselves are icons that face the way the actor faces, labelled with
+  the config's own display text and struck through when the call was
+  cut short; the drones are quadcopters that stop being drawn when they
+  die. A marker the game keeps twice, once for the placing squad and
+  once for every other squad leader, is drawn once. The commander gets
+  a line under his team's tickets and a panel behind it: the seat, the
+  vote and its tallies, every asset's ready-in with the category gate
+  named where that is the later one, and the team's requests with what
+  became of each. Every "ready in", every shoot-down and every killer
+  is derived in one place from per-frame state, so a rule read wrongly
+  is read wrongly for one release rather than for every recording ever
+  made - and where the recording cannot say, the viewer says that
+  instead of a number. Sixteen hand-built scenarios ship with it, one
+  per rule, openable in the browser with `?scenario` and no server
+  behind them (`docs/viewer-scenarios.md`).
 - The 4 Hz position line now follows drones too, so one flies smoothly
   instead of jumping 10 m a second, and a shoot-down is placed to the
   quarter second rather than somewhere inside a one-second gap. Each

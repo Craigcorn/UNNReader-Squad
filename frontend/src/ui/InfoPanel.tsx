@@ -4,6 +4,7 @@
 // terminology (marker/vehicle/faction names) stays English.
 
 import type React from "react";
+import { useMemo } from "react";
 import { teamColor } from "../canvas/draw";
 import { vehicleDisplayName } from "../data/vehicleDisplayNames";
 import { useViewerStore } from "../state/viewerStore";
@@ -14,7 +15,9 @@ import type {
 import {
   artilleryPhase, artilleryTimeline, isArtillery, isShotDown,
 } from "../state/commander/assets";
-import { droneBudgetSec, droneTeam } from "../state/commander/drones";
+import {
+  buildDroneTracks, droneBudgetSec, droneRemainingSec, droneTeam,
+} from "../state/commander/drones";
 import { actionDisplayName, findActionEntry } from "../state/commander/readyIn";
 import {
   fmtDuration, fmtInt, ftLabel, findPlacer, markerLabel, playerLabel,
@@ -293,10 +296,22 @@ function CommandActionBody({ e, snap }: { e: CommandAction; snap: Snapshot | nul
  *  one to hit the falling wreck. Both are read at the frame's own resolution
  *  here; the whole-recording answer is on the drone track. */
 function DroneBody({ e, snap }: { e: Drone; snap: Snapshot | null }) {
+  const frames = useViewerStore((s) => s.replay.frames);
   const pilot = playerLabel(e.pilotEosId, snap?.players);
   const owner = playerLabel(e.ownerEosId, snap?.players);
   const hitter = playerLabel(e.lastHitByEosId, snap?.players);
   const budget = droneBudgetSec(e, snap?.teams);
+  // The killer and the flight budget are whole-recording answers: a drone's
+  // spawn is the frame its id first appears in, and its killer is the hitter
+  // of the FIRST 4 Hz sample reading dead — not the second shooter who hits
+  // the falling pawn a second later, which is what this frame's
+  // `lastHitByEosId` will already have become. Live mode has no frame list
+  // and so has neither answer.
+  const track = useMemo(
+    () => (frames.length ? buildDroneTracks(frames).get(e.id) ?? null : null),
+    [frames, e.id]);
+  const killer = playerLabel(track?.killerEosId, snap?.players);
+  const left = droneRemainingSec(track, snap?.gameState?.worldTimeSec);
   return (
     <>
       <Row label="TEAM">{droneTeam(e, snap) ?? "—"}
@@ -324,12 +339,28 @@ function DroneBody({ e, snap }: { e: Drone; snap: Snapshot | null }) {
               : <span className="info-mute">off the roster</span>}
         </Row>
       )}
+      {/* Distinct from the row above on purpose: a later hit moves the
+          pointer on the falling pawn, so the killer is the reading at the
+          moment of the death and nothing after it. */}
+      {track?.deadFromFrameIdx != null && (
+        <Row label="KILLED BY">
+          {killer ? <b>{killer}</b>
+            : track.killerEosId === null
+              ? <span className="info-mute">nothing had hit it — the battery ran out</span>
+              : <span className="info-mute">off the roster</span>}
+        </Row>
+      )}
       {budget != null && (
         <Row label="BUDGET"><span className="info-mono">
           {fmtDuration(budget)}</span>
           <span className="info-mute">
             {e.batteryLifetimeMax != null ? " · battery" : " · the call's window"}
           </span>
+        </Row>
+      )}
+      {left != null && !e.dead && (
+        <Row label="FLIGHT LEFT">
+          <span className="info-mono">{fmtDuration(left)}</span>
         </Row>
       )}
       {e.commandAction !== undefined && e.commandAction !== null && (

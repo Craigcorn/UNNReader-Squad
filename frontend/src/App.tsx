@@ -18,6 +18,11 @@ import { Home } from "./ui/Home";
 // loading on boot.
 const VehiclePanel = lazy(() =>
   import("./ui/VehiclePanel").then((m) => ({ default: m.VehiclePanel })));
+// The scenario entry and its fixtures are a REVIEW surface: they exist only
+// when `?scenario` is in the url, and being lazy is what keeps a megabyte of
+// hand-built frames out of everybody else's bundle.
+const Scenarios = lazy(() =>
+  import("./ui/Scenarios").then((m) => ({ default: m.Scenarios })));
 import { KillFeed } from "./ui/KillFeed";
 import { Scoreboard } from "./ui/Scoreboard";
 import { TicketTimeline } from "./ui/TicketTimeline";
@@ -40,7 +45,20 @@ export default function App() {
   // when mode=replay but no id is provided. This build has no live map, so
   // `?mode=live` is not honoured — the store default (canLive=false) keeps the
   // whole live surface hidden and there is no live stream to open.
+  // `?scenario` (bare for the list, `?scenario=<name>` for one) opens the
+  // review entry: hand-built recordings that demonstrate one viewer rule
+  // each, loaded from committed fixtures with no server behind them. Read
+  // once on mount, the same way the replay boot params are.
+  const [wantScenarios] = useState(
+    () => new URL(window.location.href).searchParams.has("scenario"));
+
   useEffect(() => {
+    if (wantScenarios) {
+      // The Scenarios component pushes the frames; this only puts the app in
+      // the mode that renders a map.
+      setMode("replay");
+      return;
+    }
     const url = new URL(window.location.href);
     const m = url.searchParams.get("mode");
     const id = url.searchParams.get("id");
@@ -187,6 +205,8 @@ export default function App() {
           <CommanderPanel />
           <KillFeed />
           <TimelineBar />
+          {wantScenarios &&
+            <Suspense fallback={null}><Scenarios /></Suspense>}
         </div>
       )}
       {/* Dialogs/overlays stay mounted OUTSIDE the mode branch so Home can

@@ -1,0 +1,114 @@
+[
+ {
+  "name": "request-pending",
+  "title": "A pending request",
+  "shows": "One squad leader's request, still waiting: the 50 m circle in outline and the panel row reading pending, with the age it has run.",
+  "rule": "§9 Request circle; §9 Pending versus approved, and deletes",
+  "lineCount": 6
+ },
+ {
+  "name": "request-approved-with-twin",
+  "title": "An approval, twin and all",
+  "shows": "The commander approves: the approved marker appears at once and the pending twin stays until the sweep. Both are on the map for eight frames and the viewer draws ONE request, with the inner tick that says the twin is still there.",
+  "rule": "§9 Pending versus approved, and deletes (T15, 2026-09-07)",
+  "lineCount": 8
+ },
+ {
+  "name": "request-deleted",
+  "title": "A request taken back",
+  "shows": "A pending request that vanishes 55 s after it was placed — inside the 61 s fuse, with no approved twin — so its squad leader deleted it. The panel says so once the playhead passes the removal.",
+  "rule": "§9 Pending versus approved, and deletes (decision D20)",
+  "lineCount": 8
+ },
+ {
+  "name": "footprint-uav-coverage",
+  "title": "UAV coverage",
+  "shows": "A CommandRadius_Friendly marker with the 16608 radius the commander chose, drawn at true map scale, with the MQ-9 on station inside it and its display name off the commander block.",
+  "rule": "§9 Asset shapes (CommandRadius_Friendly); §5 distance",
+  "lineCount": 6
+ },
+ {
+  "name": "footprint-static-barrage",
+  "title": "Static barrage",
+  "shows": "A CommandRadius marker at 15000 with a 7500 outer band — the circle filled, the band dashed outside it — and the guns sitting at their origin through the fire plan.",
+  "rule": "§9 Asset shapes (CommandRadius with addDistance); §5 distance/addDistance",
+  "lineCount": 6
+ },
+ {
+  "name": "footprint-creep-path",
+  "title": "Creeping barrage",
+  "shows": "A CommandPath marker 45000 long with 7500 of drop scatter, drawn as a band along its bearing, and the creep actor stepping through its plan: the first warning shell at +59.7 s of a 60 s enroute, the second at +67.1 s, the first barrage at +79.2 s — twelve seconds after it, the delay the config carries.",
+  "rule": "§9 Asset shapes (CommandPath); §9 Artillery timeline; §6 the creep's plan",
+  "lineCount": 10
+ },
+ {
+  "name": "footprint-strike-line",
+  "title": "Strike run",
+  "shows": "A CommandLine marker 6000 long along its bearing, with the aircraft moving down the run frame by frame and its shot counter climbing.",
+  "rule": "§9 Asset shapes (CommandLine); §5 distance; §6 the strike family's fields",
+  "lineCount": 7
+ },
+ {
+  "name": "footprint-mortar-radius",
+  "title": "Mortar barrage",
+  "shows": "The mortar's fixed 7500 circle with its 4500 outer band, and its plan running with no warning phase: the counter and the first barrage both reach 1 at the enroute, then eight barrages of ten follow every 8-9 s.",
+  "rule": "§9 Asset shapes (CommandRadius); §9 Artillery timeline (the mortar's warning-free one); §6 the mortar's values",
+  "lineCount": 10
+ },
+ {
+  "name": "footprint-aim-line",
+  "title": "Precision aim line",
+  "shows": "A CommandLineRadius marker: two aim points, at 0 and 4475 along the marker's bearing, with the line between them.",
+  "rule": "§9 Asset shapes (CommandLineRadius); §5 distance",
+  "lineCount": 3
+ },
+ {
+  "name": "vote-in-progress",
+  "title": "A commander vote",
+  "shows": "A vote open on team 1 with three nominees and their live tallies, the timer counting the 60 s window down, and the entries persisting into the frames after it resolves — the game's own state, recorded as read.",
+  "rule": "§9 Commander seat and votes; §3 the vote block",
+  "lineCount": 8
+ },
+ {
+  "name": "seat-cooling-and-ready",
+  "title": "Cooling and ready",
+  "shows": "The seat held and the cooldown panel doing its arithmetic: the UAV already ready, the strike held by the AIR category gate rather than by its own window, and the artillery still on its own.",
+  "rule": "§9 Ready-in arithmetic (the later of entry and category, the category gate)",
+  "lineCount": 5
+ },
+ {
+  "name": "commander-change-restamp",
+  "title": "A commander change",
+  "shows": "The seat changes hands at 1200. An entry still cooling has its `createdGameTime` pushed forward by the server's 300 s extension and `remainingAtChange` written with the time it had left; an entry whose own cooldown had run is re-stamped to come back 300 s after the change. The category stamps do not move, and the viewer reads the moved stamps.",
+  "rule": "§9 Ready-in arithmetic (at a commander change)",
+  "lineCount": 6
+ },
+ {
+  "name": "commander-step-down",
+  "title": "A step-down",
+  "shows": "The commander stands down at 1200. The seat reads an explicit empty — read successfully, nobody in it — every entry's `remainingAtChange` is written with the time it had left and nothing else moves, and the last vote's cooldown still refuses a claim. The panel shows what a fresh claim would leave on each entry, labelled as the projection it is.",
+  "rule": "§9 Commander seat and votes (a step-down); §9 Ready-in arithmetic (a re-claim)",
+  "lineCount": 7
+ },
+ {
+  "name": "uav-shot-down",
+  "title": "A UAV shot down",
+  "shows": "The UAV is hit at +67 s of a 330 s window. `actionDestroyed` reads true while the actor lingers, so the map strikes it through and the entry's `destroyedDuringActive` says the same — and `createdGameTime` does not move, so the ready-in is the unchanged arithmetic. Who shot it down is not shown, because nothing in the recording says.",
+  "rule": "§9 Shoot-downs (decision D18); §9 Ready-in arithmetic (destroyed mid-flight)",
+  "lineCount": 8
+ },
+ {
+  "name": "drone-recon-life",
+  "title": "A recon drone's life",
+  "shows": "A recon drone deployed, flown, landed and exited (no pilot, owner unchanged), then shot down. The 4 Hz line carries the movement and the death, and the killer is the hitter of the FIRST sample reading dead — a second shooter moves the pointer 1.1 s later, inside the full frame's own gap.",
+  "rule": "§9 Drones (stop drawing at dead, team from owner, remaining flight time, the killer at 4 Hz, decision D19)",
+  "lineCount": 32
+ },
+ {
+  "name": "drone-commander-call",
+  "title": "A commander drone and its call actor",
+  "shows": "The commander's drone in the air beside the CALL actor that spawned it. The call actor's root position reads (0, 0, z) and means nothing, and its life outruns the pawn's — so nothing is drawn for it at the map origin, and the drone the viewer draws is the pawn. The pawn's class declares no battery, so its budget is the calling action's 420 s active window.",
+  "rule": "§9 Drones (the call actor draws nothing, the commander drone's budget); §6 the call actor's (0, 0, z)",
+  "lineCount": 7
+ }
+]

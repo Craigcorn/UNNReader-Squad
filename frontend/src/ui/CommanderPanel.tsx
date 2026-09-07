@@ -178,7 +178,10 @@ export function CommanderPanel() {
                   ? <span className="info-mute">closed</span>
                   : <span className="info-mute">unknown</span>}
             </Row>
-            {vote?.endsGameTime != null && now != null && (
+            {/* The stamp is written when a vote OPENS, so a zero means no
+                vote has been held on this layer — counting down to it would
+                be counting down to the start of the match. */}
+            {vote?.endsGameTime != null && vote.endsGameTime > 0 && now != null && (
               <Row label="ENDS">
                 <span className="info-mono">
                   {fmtDuration(vote.endsGameTime - now) ?? "—"}
