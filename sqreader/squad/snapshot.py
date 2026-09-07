@@ -1146,6 +1146,16 @@ class SnapshotCaches:
     # bumps the generation about once a minute, which is the retry.
     command_action_configs: dict[int, tuple[int, dict[str, Any] | None]] = field(
         default_factory=dict)
+    # Marker class addr -> (gen, {name: (offset, reflected type)}) for
+    # whichever of `Distance`, `AddDistance` and `Action` that class declares
+    # — the empty dict when it declares none, which is the answer for most of
+    # the 163 marker classes and is worth caching just as much. The layout is
+    # a property of the class, so this is one reflection walk per marker class
+    # instead of one per marker per tick. Gen-aware like the subclass caches:
+    # a walk that failed mid-tick would otherwise be remembered forever as
+    # "this class has no such field", and the rolling reset is the retry.
+    marker_geometry: dict[int, tuple[int, dict[str, tuple[int, str]]]] = field(
+        default_factory=dict)
     # class_addr -> is-subclass-of-SQVehicleSpawner?
     is_vehicle_spawner: dict[int, SubclassCacheValue] = field(default_factory=dict)
     # class_addr -> is-subclass-of-SQSquadRallyPoint?
@@ -3225,9 +3235,42 @@ def read_deployable(pm: ProcessMemory, alloc: FNameEntryAllocator,
     return out
 
 
+#: The marker geometry names of spec §5. The Command family
+#: (`BP_MapMarker_CommandMaster_C` and its subclasses) declares all three,
+#: the Director family (`BP_MapMarker_DirectorMaster_C`) declares `Distance`
+#: alone, and no other actor marker declares any of them — but that is the
+#: evidence, never the test: each name is looked for on the marker's OWN
+#: class layout, so a class that gains or loses one is followed without a
+#: code change and no class name is ever matched against.
+MARKER_GEOMETRY_NAMES = ("Distance", "AddDistance", "Action")
+
+
+def _marker_geometry_props(pm: ProcessMemory, alloc: FNameEntryAllocator,
+                           caches: "SnapshotCaches | None",
+                           cls_addr: int) -> dict[str, tuple[int, str]]:
+    """{name: (offset, reflected type)} for whichever of `Distance`,
+    `AddDistance` and `Action` this marker class carries — the empty dict
+    for a class that carries none. Cached per class address, absence
+    included (`SnapshotCaches.marker_geometry`)."""
+    if not cls_addr:
+        return {}
+    gen = caches.subclass_gen if caches is not None else 0
+    if caches is not None:
+        hit = caches.marker_geometry.get(cls_addr)
+        if hit is not None and hit[0] == gen:
+            return hit[1]
+    layout = get_class_layout(pm, cls_addr, alloc)
+    props = {n: (layout[n].offset, layout[n].type_name)
+             for n in MARKER_GEOMETRY_NAMES if n in layout}
+    if caches is not None:
+        caches.marker_geometry[cls_addr] = (gen, props)
+    return props
+
+
 def read_marker(pm: ProcessMemory, alloc: FNameEntryAllocator,
                 paths: SnapshotPaths, m_addr: int,
-                class_name: str | None) -> dict[str, Any]:
+                class_name: str | None, cls_addr: int = 0,
+                caches: "SnapshotCaches | None" = None) -> dict[str, Any]:
     """Read one SQMapMarker (or BP subclass) actor."""
     out: dict[str, Any] = {
         "id": f"{m_addr:#x}",
@@ -3240,6 +3283,28 @@ def read_marker(pm: ProcessMemory, alloc: FNameEntryAllocator,
     owner = _safe(lambda: pm.read_u64(
         m_addr + MARKER_OFFSETS["OwnerPlayerState"]))
     out["ownerPlayerStateAddr"] = f"{owner:#x}" if owner else None
+    # The marker's own geometry, on the classes that declare it (spec §5):
+    # the length figure the commander chose, the secondary figure beside it,
+    # and the CommandAction_* config the footprint belongs to. Each value is
+    # read AS the type reflection reports, so a name that comes back as
+    # something else is omitted rather than read as a number.
+    geom = _marker_geometry_props(pm, alloc, caches, cls_addr)
+    for key, name in (("distance", "Distance"), ("addDistance", "AddDistance")):
+        prop = geom.get(name)
+        if prop is None:
+            continue
+        v = _read_by_reflected_type(pm, m_addr + prop[0], prop[1])
+        if v is not None:
+            out[key] = v
+    if "Action" in geom:
+        act = _safe(lambda: pm.read_u64(m_addr + geom["Action"][0]))
+        if act == 0:
+            # The game's own empty — a request marker belongs to no config.
+            out["action"] = None
+        elif act:
+            nm = _class_name_cached(pm, alloc, caches, act)
+            if nm is not None:
+                out["action"] = nm
     # World position via the same RootComponent → ComponentToWorld chain
     # we use elsewhere.
     root = _safe(lambda: pm.read_u64(m_addr + paths.actor_root_component_off))
@@ -3248,6 +3313,14 @@ def read_marker(pm: ProcessMemory, alloc: FNameEntryAllocator,
             pm, root + paths.scene_component_to_world_translation_off)
         if v is not None:
             out["position"] = {"x": v.x, "y": v.y, "z": v.z}
+        # `yaw` rides wherever `distance` does (spec §5), off the same world
+        # transform the position comes from — through the helper
+        # `read_root_pos_yaw` uses for vehicles and the 4 Hz sampler, on the
+        # root component this function has already resolved.
+        if "distance" in out:
+            yaw = _world_yaw(pm, root, paths)
+            if yaw is not None:
+                out["yaw"] = yaw
     return out
 
 
@@ -5362,7 +5435,8 @@ def build_snapshot(pm: ProcessMemory, arr: GUObjectArray,
     capture_zones.sort(key=lambda c: c.get("name") or "")
     markers = [
         read_marker(pm, alloc, paths, m_addr,
-                    class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc))
+                    class_cache.get(cls_addr) or _uobject_name(pm, cls_addr, alloc),
+                    cls_addr, caches)
         for m_addr, cls_addr in markers_raw
     ]
     # Squad v10 player-placed markers — live as 104-byte structs in the

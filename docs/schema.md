@@ -33,7 +33,7 @@ moves only with the set of index-tracked lists.
 | `players` | per-player record with `soldier` (`soldier.medical` since 2026-08-30) | upstream | **index-tracked** |
 | `vehicles` | per-vehicle record with `turrets` (`turrets[].weapons` and the driver record since 2026-09-04) | upstream | **index-tracked** |
 | `captureZones` | capture-zone state | upstream | sent whole |
-| `markers` | map markers (`distance`, `addDistance`, `yaw` planned, decision 5) | upstream | sent whole |
+| `markers` | map markers; an actor marker carries `distance`, `addDistance`, `action` and `yaw` where its own class declares them | upstream; the geometry fields 2026-09-07 | sent whole |
 | `deployables` | deployables with placer | upstream | sent whole |
 | `vehicleSpawners` | spawner state | upstream | sent whole |
 | `rallyPoints` | rally points | upstream | sent whole |
@@ -278,3 +278,57 @@ once, for the same seek-safety reason:
 `commanderRules.enabled` is the server setting; `commander.enabled` is a
 team's state. Two flags with the same word, deliberately distinct. The whole
 block is absent when no manager is live or none of the six could be read.
+
+---
+
+## Marker geometry
+
+Four optional keys on the actor-marker entries of `markers[]`. The contract is
+`docs/command-assets-spec.md` §5 — this section is the wire shape. The
+player-placed squad-data markers, which reach the same list through the marker
+manager's FastArray, are a different surface and keep their own `arrowLength`
+/ `arrowHeading`; neither set is reused for the other.
+
+```json
+{
+  "id": "0x707db0c584a0", "type": "BP_MapMarker_CommandRadius_Friendly_C",
+  "team": 1, "squad": 3, "fireTeamId": 0,
+  "ownerPlayerStateAddr": "0x707d…",
+  "distance": 16608.0, "addDistance": 7500.0,
+  "action": "CommandAction_UAV_MQ9_USMC_C",
+  "position": {"x": 12345.5, "y": -6789.25, "z": 42.0}, "yaw": 45.0
+}
+```
+
+- `distance` is the marker's own length figure in raw game units (cm) — the
+  commander's choice wherever the UI offers one: a coverage or barrage
+  circle's radius, a strike run's length, a creeping barrage's path length, an
+  aim line's separation. `addDistance` is the secondary figure beside it, the
+  drop scatter or the outer band. Both read 0 on a request marker, which has
+  no shape of its own.
+- `yaw` is degrees, world, from the same `ComponentToWorld` transform
+  `position` is read from — the marker's facing. It rides wherever `distance`
+  does and nowhere else.
+- `action` is the `CommandAction_*` config the marker belongs to, verbatim: a
+  join from a footprint to the `teams[].commander.cooldowns.actions[]` entry
+  that produced it. It is `null` on a squad leader's request marker, which
+  belongs to no config.
+
+Which keys a marker carries is decided by its own class and nothing else.
+Every name is looked for on that class's reflected layout, so today the
+Command family (`BP_MapMarker_CommandMaster_C` and its subclasses) emits all
+four, the Director family (`BP_MapMarker_DirectorMaster_C`) emits `distance`
+and `yaw`, and every other actor marker emits none — but a class that gains or
+loses one of the names is followed without a code change, because no class
+name is ever matched against.
+
+Absence keeps the two meanings the commander block gave it (spec §2):
+
+- **`null`** — the game's own value is empty and was read successfully: an
+  `Action` pointer that reads null.
+- **the key absent** — the class does not declare the name (most markers, and
+  what a Squad rename looks like), or the read failed.
+
+A consumer reads these where they exist and draws nothing where they do not.
+Recordings made before 2026-09-07 carry none of them, and no value is
+defaulted or carried from the previous frame.

@@ -686,6 +686,22 @@ def test_the_commander_block_is_covered_name_for_name():
     assert by_cls["CommandAction_Mortar_Barrage_INS_C"] == config
 
 
+def test_the_marker_geometry_is_covered_on_both_masters():
+    """`markers[].distance`, `.addDistance` and `.action` are read off each
+    marker's own class, but every class carrying them inherits from one of
+    the two masters — so these two rows watch every marker family, and they
+    are the entire alarm (spec §5, §8): a rename has nothing to fall back
+    on and would simply stop emitting."""
+    rows = {c: (opt, set(names)) for c, _k, opt, names in
+            health.required_reflection_names()}
+    optional, names = rows["BP_MapMarker_CommandMaster_C"]
+    assert names == {"Distance", "AddDistance", "Action"}
+    assert optional is True          # content: loads with a layer
+    optional, names = rows["BP_MapMarker_DirectorMaster_C"]
+    assert names == {"Distance"}
+    assert optional is True
+
+
 # ---- build detection + restart counter -----------------------------------
 
 def test_build_sha256_off_proc_is_none():

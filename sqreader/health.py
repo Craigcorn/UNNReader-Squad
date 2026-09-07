@@ -395,6 +395,17 @@ def required_reflection_names() -> list[tuple[str, str, bool, list[str]]]:
         ("CommandAction_Mortar_Barrage_INS_C", "BlueprintGeneratedClass", True, [
             "CategoryId", "EnrouteDuration", "ActiveDuration",
             "CooldownDuration", "DisplayName"]),
+        # The marker geometry (spec §5). The reader reads each name off the
+        # marker's OWN class, but every class that carries one inherits it
+        # from one of these two masters, so watching the masters watches the
+        # families. Optional for the observed reason both rows share: they
+        # are Blueprint content that loads with a layer — both answered on an
+        # idle server on 09-04 and 09-05, and a layer without them is not
+        # drift. A rename here is the whole alarm: nothing falls back.
+        ("BP_MapMarker_CommandMaster_C", "BlueprintGeneratedClass", True, [
+            "Distance", "AddDistance", "Action"]),
+        ("BP_MapMarker_DirectorMaster_C", "BlueprintGeneratedClass", True, [
+            "Distance"]),
     ]
 
 

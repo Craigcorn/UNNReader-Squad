@@ -77,6 +77,25 @@ follows [Semantic Versioning](https://semver.org/).
   from positional use.
 
 ### Added
+- Command markers now record the shape the commander drew. A UAV
+  coverage circle, a strike run, a creeping barrage's path and a mortar
+  radius have all reached recordings as a class name and a point, which
+  is why the viewer could draw where a call happened but never how big
+  it was or which way it faced. Each actor marker now carries the
+  figures its own class declares - `distance`, the length the commander
+  chose; `addDistance`, the secondary figure beside it; `yaw` off the
+  same world transform the position comes from; and `action`, the
+  `CommandAction_*` config the footprint belongs to, which joins a
+  footprint to the cooldown entry that produced it. The Command family
+  carries all four and the Director family the distance and heading,
+  but no class name is ever matched against: every name is looked for
+  on the marker's own reflected layout, so a class that gains or loses
+  one is followed without a code change, and a marker that declares
+  none of them - most of the map's - emits none of them. `action` is
+  `null` on a squad leader's request, which belongs to no config; that
+  is the game's own empty, and a key that could not be read is absent
+  instead. The two masters both families inherit from gain doctor rows,
+  so a rename is a drift report rather than fields quietly going dark.
 - Recordings now carry the commander: every full frame gets the seat's
   own state on each team record - whether the system is active, whether
   the team may issue commands, the vote with its timer, its end stamp,
