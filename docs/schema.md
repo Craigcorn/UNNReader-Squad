@@ -222,14 +222,14 @@ Present on every full frame whose team record reaches a commander state:
   },
   "cooldowns": {
     "categories": [
-      {"id": 0, "name": "Air Support", "intervalSec": 300.0,
+      {"id": 0, "name": "…", "intervalSec": 600.0,
        "lastUseGameTime": null}
     ],
     "actions": [
       {"action": "CommandAction_UAV_MQ9_USMC_C", "displayName": "MQ-9 UAV Recon",
        "createdGameTime": 843.6, "remainingAtChange": 0.0,
-       "destroyedDuringActive": false, "categoryId": 1,
-       "enrouteSec": 60.0, "activeSec": 330.0, "cooldownSec": 600.0}
+       "destroyedDuringActive": false, "categoryId": 0,
+       "enrouteSec": 30.0, "activeSec": 300.0, "cooldownSec": 600.0}
     ]
   }
 }

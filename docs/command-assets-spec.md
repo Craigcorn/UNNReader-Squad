@@ -64,7 +64,7 @@ W15; the implementation plan is W17, the implementation W18).
 |---|---|
 | Ids | An actor's or pawn's address as a lowercase hex string (`"0x707db0c584a0"`), the same form vehicles use. New on every spawn; never reused within a recording's life except by the game itself. |
 | Player identity | `eosId`: the `OnlineUserId` string of the player state reached from the pointer named; `name`: its `PlayerNamePrivate` — the reader's existing identity read. A pointer that reads null gives `null` for both; one that does not reach a player state gives an omitted field. |
-| Absent reads | Two cases, kept distinct because they mean different things to a viewer. **`null`** = the game's own value is empty and was read successfully: a pointer that reads null (no commander in the seat, no pilot in the drone, no calling action on a recon drone), an array with no element at the index (a category never called). **Omitted** = the recorder could not read: the class lacks the field, the pointer reaches an object that is not what the field names, or the read fails. So a viewer that sees `null` knows "none", and a viewer that sees nothing knows "unknown". This is the journal's contract for the identity fields ("explicit `null` when the seat is empty") applied to every field. One exception, named in §1: the 4 Hz position line (§7) omits `dead` while it reads false and `lastHitBy` while it reads null, to keep the sample small; absence there means "not set", never "unknown", and the full frame carries the two-way reading. |
+| Absent reads | Two cases, kept distinct because they mean different things to a viewer. **`null`** = the game's own value is empty and was read successfully: a pointer that reads null (no commander in the seat, no pilot in the drone, no calling action on a recon drone), an array with no element at the index (a category never called). **Omitted** = the recorder could not read: the class lacks the field, the pointer reaches an object that is not what the field names, or the read fails. So a viewer that sees `null` knows "none", and a viewer that sees nothing knows "unknown". This is the journal's contract for the identity fields ("explicit `null` when the seat is empty") applied to every field. One exception, named in §1: the 4 Hz position line (§7) omits `dead` while it reads false and `lastHitBy` while it reads null, to keep the sample small; absence there means "not set", never "unknown", and the full frame carries the two-way reading. A list whose header reads an impossible count (above 256 elements, on arrays that hold a dozen) is a failed read: the list is omitted whole, never truncated, so a consumer cannot mistake a torn read for a complete list. |
 | Class names | The object's class name verbatim, e.g. `BP_CommandActor_SU25_Bomb_Strafe_C`, `CommandAction_Drone_C`. A class pointer that reads null gives `null`. |
 | Positions | `{x, y, z}` in world centimetres from the root transform, as vehicles record them. The existing sanity exclusion applies unchanged: a `commandActions` or `drones` entry whose root position reads exactly (0, 0, 0) is dropped from the list (the junk-vehicle test; a dead drone's final tick reads (0, 0, 0) before the pawn is freed, 09-05), and the position line applies the sampler's existing finite-and-in-bounds gate plus the same (0, 0, 0) drop to its `drones` entries. |
 | `yaw` | Degrees, world, from the root transform, as vehicles record it. |
@@ -281,7 +281,9 @@ Every read above is reflection-resolved, so each class gains a
 `hardcoded_offset_tables()` gains nothing. The player-state identity
 fields of §2 ride the reader's existing identity read and its existing
 doctor rows. The register takes exact
-class names. Rows marked optional carry the observed reason the register
+class names and their meta-class — `Class` for native classes,
+`BlueprintGeneratedClass` for Blueprint (`_C`) classes, `ScriptStruct` for
+structs — because the doctor's finder filters on it. Rows marked optional carry the observed reason the register
 demands: Blueprint content classes load with a layer, a claim or a call,
 and their absence on an idle server is not drift.
 
@@ -295,19 +297,19 @@ and their absence on an idle server is not drift.
 | `SQCommanderActionDataArray` (the type of `CommandIntervals`) and `CommanderNomineeArray` (of `NomineeStatus`), both reflected live 2026-09-07 | ScriptStruct | no | `Items` (the element array; the inner struct's reflected size is the stride) |
 | `CommanderVoteNominee` | ScriptStruct | no | `NomineeState`, `VoteCount` |
 | `CommanderCategory` | ScriptStruct | no | `Name`, `CooldownDuration` |
-| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves; none was loaded on the 09-05 layer nor on the idle 2026-09-07 one); until it is named, the rows are the concrete configs `CommandAction_Drone_C` and `CommandAction_Mortar_Barrage_INS_C`, optional content classes that load at a claim | Class | no | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`, `DisplayName` |
+| the `CommandAction_*` classes' common base — its name taken from reflection at implementation (the CDOs load only when a claim resolves; none was loaded on the 09-05 layer nor on the idle 2026-09-07 one); until it is named, the rows are the concrete configs `CommandAction_Drone_C` and `CommandAction_Mortar_Barrage_INS_C`, optional content classes that load at a claim | BlueprintGeneratedClass | yes — content that loads at a claim (the base itself, once named, follows its own kind) | `CategoryId`, `EnrouteDuration`, `ActiveDuration`, `CooldownDuration`, `DisplayName` |
 | `SQFlyingDrone` | Class | no | `PlayerState`, `LastHitBy` (inherited from `Pawn`; resolved on an idle server by the 09-04 self-test, Misc `command-probe-2026-09-05/drone_track.pre-0905-selftest.jsonl`) |
 | `Controller` | Class | no | `PlayerState` — the hop from a drone's `LastHitBy` to the shooter's player state (§7). The reader's existing controller read is a reflection-first, doctor-checked offset on `SQPlayerController` (reader code, `sqreader/health.py`), the same field by inheritance; this row names the base class the pawn's pointer is typed as |
-| `BP_FlyingDrone_C` | Class | yes — content, loads with a layer that has it | `SQ PC`, `HealthComponent`, `Dead`, `Command Action` |
-| `BP_FlyingDrone_Recoverable_C` | Class | yes — content | `BatteryLifetimeMax` |
-| `HealthComponent_C` | Class | yes — content | `Health`, `Max Health` |
-| `BP_MapMarker_CommandMaster_C` | Class | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance`, `Action` |
-| `BP_MapMarker_DirectorMaster_C` | Class | yes — content | `Distance` |
+| `BP_FlyingDrone_C` | BlueprintGeneratedClass | yes — content, loads with a layer that has it | `SQ PC`, `HealthComponent`, `Dead`, `Command Action` |
+| `BP_FlyingDrone_Recoverable_C` | BlueprintGeneratedClass | yes — content | `BatteryLifetimeMax` |
+| `HealthComponent_C` | BlueprintGeneratedClass | yes — content | `Health`, `Max Health` |
+| `BP_MapMarker_CommandMaster_C` | BlueprintGeneratedClass | yes — content, loaded on an idle server on 09-04 and 09-05 | `Distance`, `AddDistance`, `Action` |
+| `BP_MapMarker_DirectorMaster_C` | BlueprintGeneratedClass | yes — content | `Distance` |
 | `SQCommandActor` | Class | no | `Distance`, `Team`, `DamageInstigatorController`, `Action` — the common fields, declared on the native base (reflected live 2026-09-07); membership is a subclass test on this class |
-| `BP_CommandActor_C` | Class | yes — content, loaded on an idle server (Sanxian Seed v1, 2026-09-07) | `Action Destroyed`, `Destroy Delay after Action Destroyed` |
-| `BP_CommandActor_ArtilleryBase_C` | Class | yes — content, loaded on an idle server (2026-09-07) | the ten artillery fields of §6: `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` |
-| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_SU25_Bomb_Strafe_C` (09-02), `BP_CommandActor_FA18_Strafe_C`, `BP_CommandActor_A10_Strafe_2_C`, `BP_CommandActor_SU25_Rockets_Strafe_C`, `BP_CommandActor_FA18_Rockets_Strafe_C` (2026-09-07) | Class | yes — content, exist only during a call | the strike family's `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location`; a strike parent, if reflection shows one at a call, replaces these rows |
-| `BP_CommandActor_Drone_C` (archived 09-02) | Class | yes — content, exists only during a call | `Health`, `SQ PC` |
+| `BP_CommandActor_C` | BlueprintGeneratedClass | yes — content, loaded on an idle server (Sanxian Seed v1, 2026-09-07) | `Action Destroyed`, `Destroy Delay after Action Destroyed` |
+| `BP_CommandActor_ArtilleryBase_C` | BlueprintGeneratedClass | yes — content, loaded on an idle server (2026-09-07) | the ten artillery fields of §6: `Origin Location`, `target location`, `Max Drop Radius`, `Pre Warning Shells`, `Pre Warning Delay`, `Shells Per Barrage`, `Barrage Count`, `Current Prewarning Shells`, `Current Barrage`, `Projectile` |
+| `BP_CommandActor_FA18_Rockets_Strafe_USMC_C` (archived 08-30), `BP_CommandActor_SU25_Bomb_Strafe_C` (09-02), `BP_CommandActor_FA18_Strafe_C`, `BP_CommandActor_A10_Strafe_2_C`, `BP_CommandActor_SU25_Rockets_Strafe_C`, `BP_CommandActor_FA18_Rockets_Strafe_C` (2026-09-07) | BlueprintGeneratedClass | yes — content, exist only during a call | the strike family's `CurrentShotsMade`, `MaxShots`, `Spline Distance`, `Origin Location`; a strike parent, if reflection shows one at a call, replaces these rows |
+| `BP_CommandActor_Drone_C` (archived 09-02) | BlueprintGeneratedClass | yes — content, exists only during a call | `Health`, `SQ PC` |
 
 ## 9. Viewer rules (interpretation; nothing here is recorded)
 
